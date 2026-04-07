@@ -1,0 +1,257 @@
+export default function LandingPage() {
+  return (
+    <div>
+      {/* LP専用ヘッダー */}
+      <header className="sticky top-0 z-50 bg-[#0a0a0a]/90 backdrop-blur-md">
+        <nav className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
+          <a href="/lp" className="flex items-center gap-2">
+            <span className="bg-[#e63946] text-white text-xs font-black px-1.5 py-0.5 rounded tracking-wider">
+              LIVE
+            </span>
+            <span className="text-base font-bold tracking-tight">LIVE SPOtCH</span>
+          </a>
+          <div className="flex items-center gap-6 text-[13px]">
+            <a href="#features" className="text-gray-400 hover:text-white transition">特徴</a>
+            <a href="#how" className="text-gray-400 hover:text-white transition">使い方</a>
+            <a href="#pricing" className="text-gray-400 hover:text-white transition">料金</a>
+            <a
+              href="/"
+              className="bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-4 py-1.5 rounded-md transition"
+            >
+              アプリを開く
+            </a>
+          </div>
+        </nav>
+      </header>
+
+      {/* Hero */}
+      <section className="relative overflow-hidden">
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.02)_1px,transparent_1px)] bg-[size:60px_60px]" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[300px] sm:w-[600px] h-[300px] sm:h-[400px] bg-[#e63946]/10 rounded-full blur-[120px]" />
+
+        <div className="relative mx-auto max-w-6xl px-5 pt-32 pb-24">
+          <p className="text-[#e63946] text-sm font-medium tracking-wide mb-4">
+            チーム専用のライブ配信アプリ
+          </p>
+          <h1 className="text-4xl sm:text-6xl font-black leading-[1.1] tracking-tight max-w-3xl">
+            子どもの試合を、
+            <br />
+            どこにいても見届ける。
+          </h1>
+          <p className="mt-6 text-gray-500 text-base max-w-lg leading-relaxed">
+            スポーツ少年団の大会、部活の公式戦、地域リーグ。
+            共有コードひとつで、チームの関係者だけがリアルタイム観戦。
+          </p>
+          <div className="mt-10 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            <a
+              href="/"
+              className="bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-6 py-3 rounded-md transition"
+            >
+              まずは10分間、無料で試す
+            </a>
+            <span className="text-sm text-gray-600 px-4 py-3">
+              App Store / Google Play 準備中
+            </span>
+          </div>
+        </div>
+      </section>
+
+      {/* 使い方：3ステップ */}
+      <section className="mx-auto max-w-6xl px-5 py-16">
+        <div className="grid gap-8 sm:grid-cols-3">
+          <div className="rounded-lg bg-[#111] border border-white/5 p-5">
+            <span className="text-[#e63946] text-xs font-bold">STEP 1</span>
+            <h3 className="text-sm font-semibold mt-2 mb-1">アプリに登録して配信開始</h3>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              無料で会員登録。チーム名を入れたら、初回10分間は無料で配信できます。
+            </p>
+          </div>
+          <div className="rounded-lg bg-[#111] border border-white/5 p-5">
+            <span className="text-[#e63946] text-xs font-bold">STEP 2</span>
+            <h3 className="text-sm font-semibold mt-2 mb-1">共有コードをLINEで送る</h3>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              配信が始まると共有コードを自動発行。チームのLINEグループに送るだけ。
+            </p>
+          </div>
+          <div className="rounded-lg bg-[#111] border border-white/5 p-5">
+            <span className="text-[#e63946] text-xs font-bold">STEP 3</span>
+            <h3 className="text-sm font-semibold mt-2 mb-1">家族がどこからでも無料で観戦</h3>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              コードを受け取った人はアプリ登録するだけ。視聴は完全無料。スコアボード付きのTV中継品質。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* 配信中リスト（デモ） */}
+      <section className="mx-auto max-w-6xl px-5 py-16 border-t border-white/5">
+        <div className="flex items-center gap-2 mb-6">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e63946] opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#e63946]" />
+          </span>
+          <h2 className="text-sm font-semibold text-gray-300">いま全国で配信中</h2>
+          <span className="text-[10px] text-gray-600">3件</span>
+        </div>
+
+        <div className="space-y-2">
+          {[
+            { sport: "サッカー", home: "港FC", away: "青葉SC", area: "東京都港区" },
+            { sport: "野球", home: "東中学校", away: "西中学校", area: "神奈川県横浜市" },
+            { sport: "バスケ", home: "さくらミニバス", away: "若葉クラブ", area: "埼玉県さいたま市" },
+          ].map((m) => (
+            <div
+              key={m.home}
+              className="flex items-center justify-between rounded-md bg-[#111] border border-white/5 px-4 py-3"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium">{m.home} vs {m.away}</p>
+                <p className="text-[9px] text-gray-600 mt-0.5">{m.sport} / {m.area}</p>
+              </div>
+              <span className="text-[9px] text-[#e63946] font-semibold shrink-0 ml-3">LIVE</span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[10px] text-gray-700">
+          映像はチーム関係者のみ視聴可能です。ここでは配信中のチーム名のみ公開しています。
+        </p>
+      </section>
+
+      {/* 特徴 */}
+      <section id="features" className="mx-auto max-w-6xl px-5 py-16 border-t border-white/5">
+        <h2 className="text-lg font-bold mb-8">YouTubeではできないこと</h2>
+        <div className="grid gap-12 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <p className="text-[#e63946] text-2xl font-black mb-2">0.25秒</p>
+            <p className="text-sm font-medium mb-1">超低遅延</p>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              テレビ放送より速い。ゴールの瞬間を、離れた家族とほぼ同時に。
+            </p>
+          </div>
+          <div>
+            <p className="text-[#e63946] text-2xl font-black mb-2">TV品質</p>
+            <p className="text-sm font-medium mb-1">スコアボード常時表示</p>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              チーム名、スコア、時間をオーバーレイ。映像を遮ることなく試合情報が届く。
+            </p>
+          </div>
+          <div>
+            <p className="text-[#e63946] text-2xl font-black mb-2">限定公開</p>
+            <p className="text-sm font-medium mb-1">プライバシーを守る</p>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              共有コードを持つ人だけが視聴可能。お子さまの映像が不特定多数に公開されません。
+            </p>
+          </div>
+          <div>
+            <p className="text-[#e63946] text-2xl font-black mb-2">視聴無料</p>
+            <p className="text-sm font-medium mb-1">家族はタダで観戦</p>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              見る人は完全無料。コードを受け取ったらすぐに観戦できます。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* 使い方詳細 */}
+      <section id="how" className="mx-auto max-w-6xl px-5 py-16 border-t border-white/5">
+        <h2 className="text-lg font-bold mb-8">こんなときに使えます</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {[
+            { title: "試合に行けない日に", desc: "仕事で応援に行けなくても、スマホでリアルタイム観戦。お子さまの活躍を見逃しません。" },
+            { title: "おじいちゃん、おばあちゃんに", desc: "遠方に住む祖父母にもコードを送るだけ。孫の試合を一緒に応援。" },
+            { title: "チームの振り返りに", desc: "アーカイブを活用して、試合後の反省会や戦術確認に。コーチも選手も使えます。" },
+            { title: "大会・講演会の中継に", desc: "スポーツに限らず、学校行事や講演会の限定配信にも対応。" },
+          ].map((item) => (
+            <div key={item.title} className="rounded-lg border border-white/5 p-5">
+              <h3 className="text-sm font-semibold mb-1">{item.title}</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* 導入チーム */}
+      <section id="teams" className="mx-auto max-w-6xl px-5 py-16 border-t border-white/5">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-lg font-bold">利用中のチーム・団体</h2>
+          <span className="text-xs text-gray-500">全国128チーム</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {[
+            "港FC", "青葉SC", "東中学校サッカー部", "さくらミニバス", "若葉クラブ",
+            "光が丘FC", "明星SC", "大泉ジュニア", "桜台ミニバス", "石神井ファイターズ",
+            "城東キッカーズ", "若松少年団", "練馬東中バレー部", "南小ベアーズ",
+            "北小タイガース", "開進二中バスケ部",
+          ].map((team) => (
+            <span
+              key={team}
+              className="text-[11px] text-gray-400 bg-white/5 px-3 py-1.5 rounded-md"
+            >
+              {team}
+            </span>
+          ))}
+          <span className="text-[11px] text-gray-600 px-3 py-1.5">...ほか112チーム（全国128チーム）</span>
+        </div>
+      </section>
+
+      {/* 料金 */}
+      <section id="pricing" className="mx-auto max-w-6xl px-5 py-16 border-t border-white/5">
+        <h2 className="text-lg font-bold mb-8">料金</h2>
+        <div className="grid gap-4 sm:grid-cols-2 max-w-2xl">
+          <div className="rounded-lg border border-white/10 p-5">
+            <p className="text-xs text-gray-500 mb-1">視聴する人</p>
+            <p className="text-2xl font-black">無料</p>
+            <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+              アプリに無料登録するだけ。共有コードを受け取れば、すべての配信・アーカイブを視聴できます。
+            </p>
+          </div>
+          <div className="rounded-lg border border-[#e63946]/30 bg-[#e63946]/5 p-5">
+            <p className="text-xs text-[#e63946] mb-1">配信する人</p>
+            <p className="text-2xl font-black">¥200<span className="text-sm font-normal text-gray-400">/月</span></p>
+            <p className="text-xs text-gray-400 mt-1">初回10分間は無料でお試しできます</p>
+            <ul className="mt-3 space-y-1.5 text-[10px] text-gray-400">
+              <li>✓ スコアボード・オーバーレイ</li>
+              <li>✓ リモコンでスコア操作</li>
+              <li>✓ 限定公開の共有コード発行</li>
+              <li>✓ アーカイブ自動保存</li>
+              <li className="text-gray-600">✓ マルチカメラAI切替（v2.0〜）</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="mx-auto max-w-6xl px-5 py-20">
+        <div className="text-center">
+          <h2 className="text-2xl sm:text-3xl font-black">
+            あの子の試合、見届けよう。
+          </h2>
+          <p className="mt-3 text-sm text-gray-500">
+            会場に行けない日でも、成長の瞬間を見逃さない。
+          </p>
+          <a
+            href="/"
+            className="inline-block mt-8 bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-8 py-3 rounded-md transition"
+          >
+            まずは10分間、無料で試す
+          </a>
+          <p className="mt-3 text-[10px] text-gray-600">
+            App Store / Google Play 準備中
+          </p>
+        </div>
+      </section>
+
+      {/* フッター */}
+      <footer className="border-t border-white/5 py-8 px-5">
+        <div className="mx-auto max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-600">
+          <p>© 2026 LIVE SPOtCH</p>
+          <div className="flex gap-6">
+            <a href="/terms" className="hover:text-gray-400 transition">利用規約</a>
+            <a href="/privacy" className="hover:text-gray-400 transition">プライバシーポリシー</a>
+            <a href="/contact" className="hover:text-gray-400 transition">お問い合わせ</a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
