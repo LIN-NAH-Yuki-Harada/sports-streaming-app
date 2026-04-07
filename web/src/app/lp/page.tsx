@@ -197,24 +197,40 @@ export default function LandingPage() {
       {/* 料金 */}
       <section id="pricing" className="mx-auto max-w-6xl px-5 py-16 border-t border-white/5">
         <h2 className="text-lg font-bold mb-8">料金</h2>
-        <div className="grid gap-4 sm:grid-cols-2 max-w-2xl">
+        <div className="grid gap-4 sm:grid-cols-3 max-w-3xl">
           <div className="rounded-lg border border-white/10 p-5">
             <p className="text-xs text-gray-500 mb-1">視聴する人</p>
             <p className="text-2xl font-black">無料</p>
-            <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-              アプリに無料登録するだけ。共有コードを受け取れば、すべての配信・アーカイブを視聴できます。
+            <p className="text-xs text-gray-500 mt-3 leading-relaxed">
+              共有コードで配信・アーカイブを視聴。
             </p>
+            <ul className="mt-3 space-y-1.5 text-[10px] text-gray-500">
+              <li>✓ ライブ視聴</li>
+              <li>✓ 1ヶ月以内のアーカイブ視聴</li>
+            </ul>
           </div>
           <div className="rounded-lg border border-[#e63946]/30 bg-[#e63946]/5 p-5">
-            <p className="text-xs text-[#e63946] mb-1">配信する人</p>
-            <p className="text-2xl font-black">¥200<span className="text-sm font-normal text-gray-400">/月</span></p>
-            <p className="text-xs text-gray-400 mt-1">初回10分間は無料でお試しできます</p>
+            <p className="text-xs text-[#e63946] mb-1">配信者プラン</p>
+            <p className="text-2xl font-black">¥300<span className="text-sm font-normal text-gray-400">/月</span></p>
+            <p className="text-xs text-gray-400 mt-1">初回10分間は無料でお試し</p>
             <ul className="mt-3 space-y-1.5 text-[10px] text-gray-400">
+              <li>✓ ライブ配信</li>
               <li>✓ スコアボード・オーバーレイ</li>
               <li>✓ リモコンでスコア操作</li>
               <li>✓ 限定公開の共有コード発行</li>
               <li>✓ アーカイブ自動保存</li>
-              <li className="text-gray-600">✓ マルチカメラAI切替（v2.0〜）</li>
+            </ul>
+          </div>
+          <div className="rounded-lg border border-white/20 bg-white/5 p-5">
+            <p className="text-xs text-white mb-1">チームプラン</p>
+            <p className="text-2xl font-black">¥500<span className="text-sm font-normal text-gray-400">/月</span></p>
+            <p className="text-xs text-gray-400 mt-1">配信者プランの全機能 +</p>
+            <ul className="mt-3 space-y-1.5 text-[10px] text-gray-400">
+              <li>✓ 大容量アーカイブストレージ</li>
+              <li>✓ チームスケジュール管理</li>
+              <li>✓ メンバー管理・自動共有</li>
+              <li className="text-gray-600">✓ AIハイライト自動生成（近日）</li>
+              <li className="text-gray-600">✓ SNS自動投稿（近日）</li>
             </ul>
           </div>
         </div>

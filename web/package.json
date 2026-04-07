@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.20",
+    "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.102.1",
     "livekit-client": "^2.18.1",
     "next": "16.2.2",

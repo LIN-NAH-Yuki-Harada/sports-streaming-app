@@ -1,27 +1,38 @@
+"use client";
+
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+function getDateLabel(offset: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  const weekday = WEEKDAYS[d.getDay()];
+  const suffix = offset === 0 ? " 今日" : offset === 1 ? " 明日" : "";
+  return `${month}/${day} (${weekday})${suffix}`;
+}
+
+// サンプルデータ（Supabase接続後に動的取得）
+const SAMPLE_MATCHES = [
+  [
+    { time: "14:00", sport: "サッカー", home: "明星SC", away: "光が丘FC", tournament: "練馬区4年生大会" },
+    { time: "15:30", sport: "バスケ", home: "桜台ミニバス", away: "石神井クラブ", tournament: "練習試合" },
+    { time: "16:00", sport: "野球", home: "大泉ジュニア", away: "関町イーグルス", tournament: "区少年野球秋季" },
+  ],
+  [
+    { time: "10:00", sport: "バレー", home: "開進二中", away: "練馬東中", tournament: "区中学春季大会" },
+    { time: "13:00", sport: "サッカー", home: "大泉学園SC", away: "田柄FC", tournament: "5年生リーグ" },
+  ],
+  [
+    { time: "15:00", sport: "野球", home: "光が丘リトル", away: "石神井ファイターズ", tournament: "練習試合" },
+  ],
+];
+
 export default function SchedulePage() {
-  const days = [
-    {
-      date: "4/7 (月) 今日",
-      matches: [
-        { time: "14:00", sport: "サッカー", home: "明星SC", away: "光が丘FC", tournament: "練馬区4年生大会" },
-        { time: "15:30", sport: "バスケ", home: "桜台ミニバス", away: "石神井クラブ", tournament: "練習試合" },
-        { time: "16:00", sport: "野球", home: "大泉ジュニア", away: "関町イーグルス", tournament: "区少年野球秋季" },
-      ],
-    },
-    {
-      date: "4/8 (火)",
-      matches: [
-        { time: "10:00", sport: "バレー", home: "開進二中", away: "練馬東中", tournament: "区中学春季大会" },
-        { time: "13:00", sport: "サッカー", home: "大泉学園SC", away: "田柄FC", tournament: "5年生リーグ" },
-      ],
-    },
-    {
-      date: "4/9 (水)",
-      matches: [
-        { time: "15:00", sport: "野球", home: "光が丘リトル", away: "石神井ファイターズ", tournament: "練習試合" },
-      ],
-    },
-  ];
+  const days = SAMPLE_MATCHES.map((matches, i) => ({
+    date: getDateLabel(i),
+    matches,
+  }));
 
   return (
     <div>
