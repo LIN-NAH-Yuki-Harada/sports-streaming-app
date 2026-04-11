@@ -1,195 +1,217 @@
 "use client";
 
-import { useState, use } from "react";
-
-// サンプル: カメラ一覧（LiveKit接続後に動的取得）
-const CAMERAS = [
-  { id: "cam1", label: "CAM 1", position: "メイン（センター）" },
-  { id: "cam2", label: "CAM 2", position: "ゴール裏（ホーム側）" },
-  { id: "cam3", label: "CAM 3", position: "サイドライン" },
-];
+import { useState, useEffect, useRef, use } from "react";
+import { getBroadcastByCode, type Broadcast } from "@/lib/database";
+import { createClient } from "@/lib/supabase";
 
 export default function WatchPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
+  const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
+  const [loadingBroadcast, setLoadingBroadcast] = useState(true);
+  const [notFound, setNotFound] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const [activeCamera, setActiveCamera] = useState("cam1");
-  const [cameraMode, setCameraMode] = useState<"auto" | "manual">("manual");
-  const multiCam = CAMERAS.length > 1;
 
-  // AI自動モードの模擬（実際はAIがリアルタイム判断）
-  const aiSelectedCamera = "cam1";
-  const currentCamera = cameraMode === "auto" ? aiSelectedCamera : activeCamera;
-  const currentCameraInfo = CAMERAS.find((c) => c.id === currentCamera);
+  // 初回: DBから配信データを取得
+  useEffect(() => {
+    async function fetchBroadcast() {
+      const data = await getBroadcastByCode(code);
+      if (data) {
+        setBroadcast(data);
+      } else {
+        setNotFound(true);
+      }
+      setLoadingBroadcast(false);
+    }
+    fetchBroadcast();
+  }, [code]);
+
+  // リアルタイム更新: Supabase Realtime でスコア変更を受信
+  useEffect(() => {
+    if (!broadcast) return;
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`broadcast-${broadcast.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "broadcasts",
+          filter: `id=eq.${broadcast.id}`,
+        },
+        (payload) => {
+          setBroadcast((prev) => (prev ? { ...prev, ...payload.new } : prev));
+        }
+      )
+      .subscribe((status, err) => {
+        if (status === "SUBSCRIBED") {
+          console.log("[realtime] 購読成功");
+        } else {
+          console.error("[realtime] 購読状態:", status, err);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [broadcast?.id]);
+
+  // Realtimeが動かない場合のフォールバック: 5秒ごとにDBをポーリング
+  const shareCodeRef = useRef(broadcast?.share_code);
+  shareCodeRef.current = broadcast?.share_code;
+  const isLiveRef = useRef(broadcast?.status === "live");
+  isLiveRef.current = broadcast?.status === "live";
+
+  useEffect(() => {
+    if (!broadcast || broadcast.status !== "live") return;
+
+    const interval = setInterval(async () => {
+      if (!isLiveRef.current || !shareCodeRef.current) {
+        clearInterval(interval);
+        return;
+      }
+      const updated = await getBroadcastByCode(shareCodeRef.current);
+      if (updated) {
+        setBroadcast(updated);
+        if (updated.status === "ended") {
+          clearInterval(interval);
+        }
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [broadcast?.id]);
+
+  // ===== 読み込み中 =====
+  if (loadingBroadcast) {
+    return (
+      <div className="flex items-center justify-center py-32">
+        <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // ===== 配信が見つからない =====
+  if (notFound || !broadcast) {
+    return (
+      <div className="mx-auto max-w-sm px-5 py-20 text-center">
+        <div className="w-16 h-16 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-6">
+          <svg className="w-7 h-7 text-gray-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+          </svg>
+        </div>
+        <h1 className="text-base font-bold">配信が見つかりません</h1>
+        <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+          共有コード「{code.toUpperCase()}」に該当する配信はありません。<br />
+          コードが正しいか確認してください。
+        </p>
+        <a
+          href="/"
+          className="inline-block mt-6 text-xs text-[#e63946] hover:underline"
+        >
+          トップに戻る
+        </a>
+      </div>
+    );
+  }
+
+  const isLive = broadcast.status === "live";
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-6">
       {/* 共有コード表示 */}
       <div className="flex items-center gap-2 mb-4">
         <span className="text-[10px] text-gray-600">共有コード:</span>
-        <span className="text-xs font-bold tracking-widest">{code.toUpperCase()}</span>
-        {multiCam && (
-          <span className="text-[9px] text-[#e63946] bg-[#e63946]/10 px-1.5 py-0.5 rounded ml-auto">
-            マルチカメラ {CAMERAS.length}台
+        <span className="text-xs font-bold tracking-widest">{broadcast.share_code}</span>
+        {!isLive && (
+          <span className="text-[9px] text-gray-500 bg-white/5 px-1.5 py-0.5 rounded ml-1">
+            配信終了
           </span>
         )}
       </div>
 
       {/* メイン映像エリア */}
-      <div className="aspect-[16/9] bg-[#111] rounded-t-lg border border-white/5 flex items-center justify-center relative overflow-hidden">
-        {/* 再生ボタン */}
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex flex-col items-center gap-3 group"
-        >
-          <div className="w-16 h-16 rounded-full bg-[#e63946] flex items-center justify-center group-hover:bg-[#d62836] transition shadow-lg shadow-[#e63946]/20">
-            <svg className="w-6 h-6 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z" />
-            </svg>
+      <div className="aspect-[16/9] bg-[#111] rounded-lg border border-white/5 flex items-center justify-center relative overflow-hidden">
+        {isLive ? (
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex flex-col items-center gap-3 group"
+          >
+            <div className="w-16 h-16 rounded-full bg-[#e63946] flex items-center justify-center group-hover:bg-[#d62836] transition shadow-lg shadow-[#e63946]/20">
+              <svg className="w-6 h-6 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
+            <span className="text-xs text-gray-400">タップして視聴</span>
+          </button>
+        ) : (
+          <div className="text-center">
+            <p className="text-sm text-gray-500">この配信は終了しました</p>
+            <p className="text-[10px] text-gray-600 mt-1">アーカイブ機能は準備中です</p>
           </div>
-          <span className="text-xs text-gray-400">タップして視聴</span>
-        </button>
-
-        {/* ===== TV中継風オーバーレイ ===== */}
+        )}
 
         {/* 左上: スコアボード */}
         <div className="absolute top-3 left-3 flex items-center">
           <div className="flex items-center bg-black/80 backdrop-blur-sm rounded overflow-hidden text-[10px] sm:text-xs">
-            {/* ホームチーム */}
             <div className="flex items-center gap-1.5 bg-white/10 px-2 sm:px-3 py-1.5">
-              <span className="font-bold">港FC</span>
+              <span className="font-bold">{broadcast.home_team}</span>
             </div>
-            {/* スコア */}
             <div className="flex items-center gap-1 px-2 sm:px-3 py-1.5 bg-[#e63946]">
-              <span className="font-black tabular-nums">2</span>
+              <span className="font-black tabular-nums">{broadcast.home_score}</span>
               <span className="text-[8px] text-white/60">-</span>
-              <span className="font-black tabular-nums">1</span>
+              <span className="font-black tabular-nums">{broadcast.away_score}</span>
             </div>
-            {/* アウェイチーム */}
             <div className="flex items-center gap-1.5 bg-white/10 px-2 sm:px-3 py-1.5">
-              <span className="font-bold">青葉SC</span>
+              <span className="font-bold">{broadcast.away_team}</span>
             </div>
-            {/* 時間 */}
             <div className="px-2 sm:px-3 py-1.5 bg-black/60">
-              <span className="tabular-nums font-medium">前半 23:15</span>
+              <span className="tabular-nums font-medium">{broadcast.period}</span>
             </div>
           </div>
         </div>
 
         {/* 右上: 大会名 + LIVE */}
         <div className="absolute top-3 right-3 flex items-center gap-2">
-          <div className="bg-black/80 backdrop-blur-sm rounded px-2 sm:px-3 py-1.5 text-[9px] sm:text-[10px] text-gray-300">
-            港区少年サッカー大会
-          </div>
-          <div className="flex items-center gap-1 bg-[#e63946] px-2 py-1.5 rounded text-[9px] sm:text-[10px] font-bold">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white" />
-            </span>
-            LIVE
-          </div>
-        </div>
-
-        {/* 左下: カメラ情報（マルチカメラ時） */}
-        {multiCam && (
-          <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-[9px] text-gray-400">
-            {currentCameraInfo?.label} — {currentCameraInfo?.position}
-          </div>
-        )}
-      </div>
-
-      {/* マルチカメラ切替UI */}
-      {multiCam && (
-        <div className="bg-[#111] border-x border-b border-white/5 rounded-b-lg px-3 py-3">
-          {/* モード切替 */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex bg-black rounded-md p-0.5">
-              <button
-                onClick={() => setCameraMode("manual")}
-                className={`text-[10px] px-3 py-1 rounded transition ${
-                  cameraMode === "manual"
-                    ? "bg-white/10 text-white"
-                    : "text-gray-500 hover:text-gray-300"
-                }`}
-              >
-                手動切替
-              </button>
-              <button
-                onClick={() => setCameraMode("auto")}
-                className={`text-[10px] px-3 py-1 rounded transition ${
-                  cameraMode === "auto"
-                    ? "bg-[#e63946]/20 text-[#e63946]"
-                    : "text-gray-500 hover:text-gray-300"
-                }`}
-              >
-                AI自動
-              </button>
+          {(broadcast.tournament || broadcast.sport) && (
+            <div className="bg-black/80 backdrop-blur-sm rounded px-2 sm:px-3 py-1.5 text-[9px] sm:text-[10px] text-gray-300">
+              {broadcast.tournament || broadcast.sport}
             </div>
-            <span className="text-[9px] text-gray-600">
-              {cameraMode === "auto" ? "AIがベストアングルを自動選択" : "カメラをタップして切替"}
-            </span>
-          </div>
-
-          {/* カメラサムネイル一覧 */}
-          <div className="flex gap-2">
-            {CAMERAS.map((cam) => {
-              const isActive = currentCamera === cam.id;
-              const isAiPick = cameraMode === "auto" && cam.id === aiSelectedCamera;
-              return (
-                <button
-                  key={cam.id}
-                  onClick={() => {
-                    if (cameraMode === "manual") setActiveCamera(cam.id);
-                  }}
-                  className={`flex-1 relative rounded-md overflow-hidden transition ${
-                    cameraMode === "manual" ? "cursor-pointer" : "cursor-default"
-                  }`}
-                >
-                  {/* サムネイル（LiveKit接続後に実映像） */}
-                  <div
-                    className={`aspect-[16/9] bg-[#1a1a1a] flex items-center justify-center border-2 rounded-md transition ${
-                      isActive
-                        ? isAiPick
-                          ? "border-[#e63946]"
-                          : "border-white"
-                        : "border-transparent hover:border-white/20"
-                    }`}
-                  >
-                    <svg className="w-4 h-4 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
-                    </svg>
-                  </div>
-
-                  {/* ラベル */}
-                  <div className="mt-1 text-center">
-                    <p className={`text-[10px] font-medium ${isActive ? "text-white" : "text-gray-500"}`}>
-                      {cam.label}
-                    </p>
-                    <p className="text-[8px] text-gray-600 truncate">{cam.position}</p>
-                  </div>
-
-                  {/* AI選択インジケーター */}
-                  {isAiPick && cameraMode === "auto" && (
-                    <div className="absolute top-1 right-1 bg-[#e63946] text-[7px] text-white px-1 py-0.5 rounded font-bold">
-                      AI
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          )}
+          {isLive ? (
+            <div className="flex items-center gap-1 bg-[#e63946] px-2 py-1.5 rounded text-[9px] sm:text-[10px] font-bold">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white" />
+              </span>
+              LIVE
+            </div>
+          ) : (
+            <div className="bg-gray-600 px-2 py-1.5 rounded text-[9px] sm:text-[10px] font-bold">
+              終了
+            </div>
+          )}
         </div>
-      )}
-
-      {/* 1台のみの場合は通常の角丸 */}
-      {!multiCam && <div className="h-0" />}
+      </div>
 
       {/* 試合情報 */}
       <div className="mt-4 rounded-md bg-[#111] border border-white/5 px-4 py-3">
         <p className="text-[9px] text-gray-600">試合情報</p>
-        <p className="text-sm font-medium mt-1">チーム A vs チーム B</p>
-        <p className="text-[10px] text-gray-500 mt-0.5">
-          Supabase接続後に実際の試合情報が表示されます
+        <p className="text-sm font-medium mt-1">
+          {broadcast.home_team} vs {broadcast.away_team}
         </p>
+        <div className="flex items-center gap-3 mt-1">
+          {broadcast.sport && (
+            <span className="text-[10px] text-gray-500">{broadcast.sport}</span>
+          )}
+          {broadcast.tournament && (
+            <span className="text-[10px] text-gray-500">{broadcast.tournament}</span>
+          )}
+          {broadcast.venue && (
+            <span className="text-[10px] text-gray-500">{broadcast.venue}</span>
+          )}
+        </div>
       </div>
 
       <p className="mt-8 text-center text-[10px] text-gray-700 pb-16">
