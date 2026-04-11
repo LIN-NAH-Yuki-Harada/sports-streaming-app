@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
+import { createClient } from "@/lib/supabase";
 import { updateProfile } from "@/lib/database";
 
 const PLAN_LABELS: Record<string, string> = {
@@ -16,6 +17,8 @@ export default function MyPage() {
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const menuItems = [
     { label: "お気に入りチーム", ready: false },
@@ -25,6 +28,34 @@ export default function MyPage() {
     { label: "通知設定", ready: false },
     { label: "ヘルプ", ready: false },
   ];
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    setDeleting(true);
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        alert("セッションが無効です。再ログインしてください。");
+        setDeleting(false);
+        return;
+      }
+      const res = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) {
+        await signOut();
+        window.location.href = "/";
+      } else {
+        alert("退会処理に失敗しました。もう一度お試しください。");
+      }
+    } catch {
+      alert("退会処理でエラーが発生しました。");
+    }
+    setDeleting(false);
+    setShowDeleteConfirm(false);
+  };
 
   const handleSaveName = async () => {
     if (!user || !nameInput.trim()) return;
@@ -151,6 +182,44 @@ export default function MyPage() {
             >
               ログアウト
             </button>
+
+            {/* 退会ボタン */}
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="mt-3 w-full text-[11px] text-gray-600 hover:text-red-400 py-2 transition"
+            >
+              アカウントを削除（退会）
+            </button>
+
+            {/* 退会確認ダイアログ */}
+            {showDeleteConfirm && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-5">
+                <div className="w-full max-w-sm rounded-xl bg-[#111] border border-white/10 p-6">
+                  <h3 className="text-base font-bold text-center text-red-400">
+                    本当に退会しますか？
+                  </h3>
+                  <p className="mt-3 text-xs text-gray-400 text-center leading-relaxed">
+                    アカウントを削除すると、プロフィール・配信履歴などのすべてのデータが削除されます。この操作は取り消せません。
+                  </p>
+                  <div className="mt-6 space-y-2">
+                    <button
+                      onClick={handleDeleteAccount}
+                      disabled={deleting}
+                      className="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-2.5 rounded-md transition disabled:opacity-50"
+                    >
+                      {deleting ? "退会処理中..." : "退会する"}
+                    </button>
+                    <button
+                      onClick={() => setShowDeleteConfirm(false)}
+                      disabled={deleting}
+                      className="w-full border border-white/10 text-gray-400 text-sm py-2.5 rounded-md hover:bg-white/5 transition"
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
 

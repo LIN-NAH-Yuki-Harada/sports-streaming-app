@@ -90,7 +90,7 @@ export default function TermsPage() {
         <section>
           <h2 className="text-base font-semibold text-white mb-3">第9条（退会）</h2>
           <p className="text-gray-400">
-            ユーザーは、お問い合わせフォームまたはメールにて退会を申請することができます。退会後、アカウント情報および配信データは一定期間後に削除されます。
+            ユーザーは、マイページからいつでも退会手続きを行うことができます。退会後、アカウント情報および配信データは直ちに削除されます。
           </p>
         </section>
 
