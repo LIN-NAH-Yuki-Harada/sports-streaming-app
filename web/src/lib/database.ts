@@ -21,6 +21,8 @@ export type Broadcast = {
   away_team: string;
   home_score: number;
   away_score: number;
+  home_sets: number;
+  away_sets: number;
   tournament: string | null;
   venue: string | null;
   period: string;
@@ -127,16 +129,22 @@ export async function updateBroadcastScore(
   broadcastId: string,
   homeScore: number,
   awayScore: number,
-  period: string
+  period: string,
+  homeSets?: number,
+  awaySets?: number
 ): Promise<boolean> {
   const supabase = createClient();
+  const updates: Record<string, unknown> = {
+    home_score: homeScore,
+    away_score: awayScore,
+    period: period,
+  };
+  if (homeSets !== undefined) updates.home_sets = homeSets;
+  if (awaySets !== undefined) updates.away_sets = awaySets;
+
   const { error } = await supabase
     .from("broadcasts")
-    .update({
-      home_score: homeScore,
-      away_score: awayScore,
-      period: period,
-    })
+    .update(updates)
     .eq("id", broadcastId);
 
   if (error) {

@@ -15,6 +15,14 @@ import {
 
 const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
 
+// セット制スポーツの設定
+const SETS_TO_WIN: Record<string, number> = {
+  バレー: 3,
+};
+const SET_POINT_SCORE: Record<string, number> = {
+  バレー: 25,
+};
+
 const PERIODS: Record<string, string[]> = {
   サッカー: ["前半", "後半", "延長"],
   野球: [
@@ -48,6 +56,8 @@ export default function BroadcastPage() {
   const [starting, setStarting] = useState(false);
   const [livekitToken, setLivekitToken] = useState<string | null>(null);
   const [livekitError, setLivekitError] = useState<string | null>(null);
+  const [homeSets, setHomeSets] = useState(0);
+  const [awaySets, setAwaySets] = useState(0);
 
   // DB上の配信データ
   const broadcastRef = useRef<Broadcast | null>(null);
@@ -60,6 +70,32 @@ export default function BroadcastPage() {
   const canStart = home.trim() && away.trim();
   const needsSubscription = !subscribed && trialUsed;
 
+  // セットポイント・マッチポイント判定
+  function getPointLabel(): string | null {
+    const setsToWin = SETS_TO_WIN[sport] || 0;
+    if (setsToWin === 0) return null;
+
+    // 最終セット（バレー5セット目）は15点制
+    const isFinalSet = sport === "バレー" && (homeSets + awaySets) >= (setsToWin * 2 - 2);
+    const targetScore = isFinalSet ? 15 : (SET_POINT_SCORE[sport] || 25);
+
+    // セットポイント条件: 規定点-1以上 かつ 相手より1点以上リード
+    // 例: 24-23, 25-24(デュース後), 26-25 等
+    const homeAtSetPoint = homeScore >= targetScore - 1 && homeScore > awayScore;
+    const awayAtSetPoint = awayScore >= targetScore - 1 && awayScore > homeScore;
+
+    if (!homeAtSetPoint && !awayAtSetPoint) return null;
+
+    // マッチポイント: このセットを取れば試合勝利
+    if ((homeAtSetPoint && homeSets >= setsToWin - 1) ||
+        (awayAtSetPoint && awaySets >= setsToWin - 1)) {
+      return "マッチポイント";
+    }
+    return "セットポイント";
+  }
+
+  const pointLabel = getPointLabel();
+
   function getScreen(): Screen {
     if (!user) return "login";
     if (shareCode) return "live";
@@ -68,7 +104,7 @@ export default function BroadcastPage() {
 
   // スコアをDBに保存（デバウンス付き: 500ms 待ってからまとめて送信）
   const saveScoreToDb = useCallback(
-    (newHomeScore: number, newAwayScore: number, newPeriod: string) => {
+    (newHomeScore: number, newAwayScore: number, newPeriod: string, newHomeSets?: number, newAwaySets?: number) => {
       if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
       updateTimerRef.current = setTimeout(async () => {
         if (broadcastRef.current) {
@@ -76,7 +112,9 @@ export default function BroadcastPage() {
             broadcastRef.current.id,
             newHomeScore,
             newAwayScore,
-            newPeriod
+            newPeriod,
+            newHomeSets,
+            newAwaySets
           );
         }
       }, 500);
@@ -175,6 +213,8 @@ export default function BroadcastPage() {
     setShareCode("");
     setHomeScore(0);
     setAwayScore(0);
+    setHomeSets(0);
+    setAwaySets(0);
     setPeriodIndex(0);
   }
 
@@ -333,23 +373,35 @@ export default function BroadcastPage() {
           )}
 
           {/* 左上: スコアボード・オーバーレイ */}
-          <div className="absolute top-3 left-3 sm:top-4 sm:left-4 flex items-center">
+          <div className="absolute top-3 left-3 sm:top-4 sm:left-4 flex flex-col items-start gap-1">
             <div className="flex items-center bg-black/70 backdrop-blur-sm rounded overflow-hidden text-[10px] sm:text-xs">
-              <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-white/10">
+              <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-white/10 flex items-center gap-1.5">
                 <span className="font-bold">{home}</span>
+                {(homeSets > 0 || awaySets > 0) && (
+                  <span className="text-[8px] text-yellow-400 font-bold">{homeSets}</span>
+                )}
               </div>
               <div className="flex items-center gap-0.5 px-2 sm:px-3 py-1 sm:py-1.5 bg-[#e63946]">
                 <span className="font-black tabular-nums">{homeScore}</span>
                 <span className="text-[8px] text-white/60">-</span>
                 <span className="font-black tabular-nums">{awayScore}</span>
               </div>
-              <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-white/10">
+              <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-white/10 flex items-center gap-1.5">
+                {(homeSets > 0 || awaySets > 0) && (
+                  <span className="text-[8px] text-yellow-400 font-bold">{awaySets}</span>
+                )}
                 <span className="font-bold">{away}</span>
               </div>
               <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-black/60">
                 <span className="tabular-nums font-medium">{currentPeriod}</span>
               </div>
             </div>
+            {/* セットポイント・マッチポイント表示 */}
+            {pointLabel && (
+              <div className="bg-yellow-500 text-black px-2 py-0.5 rounded text-[9px] font-bold animate-pulse">
+                {pointLabel}
+              </div>
+            )}
           </div>
 
           {/* スコア操作パネル — 縦画面では2段構成 */}
@@ -411,10 +463,20 @@ export default function BroadcastPage() {
               <button
                 onClick={() => {
                   const nextIndex = Math.min(periodIndex + 1, periods.length - 1);
+                  // セット獲得数を更新（スコアが高い方が勝ち）
+                  let newHomeSets = homeSets;
+                  let newAwaySets = awaySets;
+                  if (homeScore > awayScore) {
+                    newHomeSets = homeSets + 1;
+                    setHomeSets(newHomeSets);
+                  } else if (awayScore > homeScore) {
+                    newAwaySets = awaySets + 1;
+                    setAwaySets(newAwaySets);
+                  }
                   setPeriodIndex(nextIndex);
                   setHomeScore(0);
                   setAwayScore(0);
-                  saveScoreToDb(0, 0, periods[nextIndex] || periods[0]);
+                  saveScoreToDb(0, 0, periods[nextIndex] || periods[0], newHomeSets, newAwaySets);
                 }}
                 className="px-2 h-6 rounded bg-yellow-500/20 hover:bg-yellow-500/30 flex items-center justify-center text-[9px] text-yellow-400 font-medium transition active:scale-95"
               >

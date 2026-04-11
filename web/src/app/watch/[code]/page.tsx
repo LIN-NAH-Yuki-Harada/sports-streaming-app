@@ -220,10 +220,13 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         )}
 
         {/* 左上: スコアボード */}
-        <div className="absolute top-3 left-3 flex items-center">
+        <div className="absolute top-3 left-3 flex flex-col items-start gap-1">
           <div className="flex items-center bg-black/80 backdrop-blur-sm rounded overflow-hidden text-[10px] sm:text-xs">
             <div className="flex items-center gap-1.5 bg-white/10 px-2 sm:px-3 py-1.5">
               <span className="font-bold">{broadcast.home_team}</span>
+              {(broadcast.home_sets > 0 || broadcast.away_sets > 0) && (
+                <span className="text-[8px] text-yellow-400 font-bold">{broadcast.home_sets}</span>
+              )}
             </div>
             <div className="flex items-center gap-1 px-2 sm:px-3 py-1.5 bg-[#e63946]">
               <span className="font-black tabular-nums">{broadcast.home_score}</span>
@@ -231,6 +234,9 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               <span className="font-black tabular-nums">{broadcast.away_score}</span>
             </div>
             <div className="flex items-center gap-1.5 bg-white/10 px-2 sm:px-3 py-1.5">
+              {(broadcast.home_sets > 0 || broadcast.away_sets > 0) && (
+                <span className="text-[8px] text-yellow-400 font-bold">{broadcast.away_sets}</span>
+              )}
               <span className="font-bold">{broadcast.away_team}</span>
             </div>
             <div className="px-2 sm:px-3 py-1.5 bg-black/60">

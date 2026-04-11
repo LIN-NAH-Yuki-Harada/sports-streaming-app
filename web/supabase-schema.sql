@@ -57,6 +57,8 @@ create table public.broadcasts (
   venue text,
   home_score int default 0,
   away_score int default 0,
+  home_sets int default 0,
+  away_sets int default 0,
   period text default '前半',
   status text default 'live' check (status in ('live', 'ended')),
   started_at timestamptz default now(),
