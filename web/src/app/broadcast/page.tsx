@@ -681,20 +681,20 @@ export default function BroadcastPage() {
         {/* チーム */}
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="text-[11px] text-gray-400 font-medium">ホーム</label>
+            <label className="text-[11px] text-gray-400 font-medium">チーム名</label>
             <input
               type="text"
-              placeholder="チーム名"
+              placeholder="あなたのチーム名"
               value={home}
               onChange={(e) => setHome(e.target.value)}
               className="mt-1 w-full bg-[#111] border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-[#e63946]/50 focus:outline-none transition"
             />
           </div>
           <div>
-            <label className="text-[11px] text-gray-400 font-medium">アウェイ</label>
+            <label className="text-[11px] text-gray-400 font-medium">対戦相手</label>
             <input
               type="text"
-              placeholder="チーム名"
+              placeholder="対戦相手のチーム名"
               value={away}
               onChange={(e) => setAway(e.target.value)}
               className="mt-1 w-full bg-[#111] border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-[#e63946]/50 focus:outline-none transition"
@@ -778,7 +778,7 @@ export default function BroadcastPage() {
         </button>
         {!canStart && (
           <p className="text-center text-[10px] text-[#e63946]/60">
-            ホーム・アウェイのチーム名を入力してください
+            チーム名と対戦相手を入力してください
           </p>
         )}
       </div>

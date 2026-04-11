@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { getTeamNames } from "@/lib/database";
 
 const LIVE_NOW = [
   { sport: "サッカー", home: "港FC", away: "青葉SC", area: "東京都港区", tournament: "港区少年サッカー大会" },
@@ -12,11 +13,14 @@ const LIVE_NOW = [
 export default function Home() {
   const [code, setCode] = useState("");
   const [isStandalone, setIsStandalone] = useState(false);
+  const [teams, setTeams] = useState<string[]>([]);
 
   useEffect(() => {
     const standalone = window.matchMedia("(display-mode: standalone)").matches
       || (navigator as unknown as { standalone?: boolean }).standalone === true;
     setIsStandalone(standalone);
+
+    getTeamNames().then(setTeams);
   }, []);
 
   return (
@@ -30,7 +34,9 @@ export default function Home() {
             </span>
             <span className="text-base font-bold tracking-tight">LIVE SPOtCH</span>
           </div>
-          <span className="text-xs text-gray-600">全国128チーム利用中</span>
+          {teams.length > 0 && (
+            <span className="text-xs text-gray-600">{teams.length}チーム利用中</span>
+          )}
         </div>
       </div>
 
@@ -159,29 +165,24 @@ export default function Home() {
         </p>
       </section>
 
-      {/* 導入チーム */}
-      <section className="px-5 pt-8 pb-20">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">
-          利用中のチーム・団体
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          {[
-            "港FC", "青葉SC", "東中学校", "さくらミニバス", "若葉クラブ",
-            "光が丘FC", "明星SC", "大泉ジュニア", "桜台ミニバス", "石神井ファイターズ",
-            "城東キッカーズ", "若松少年団",
-          ].map((team) => (
-            <span
-              key={team}
-              className="text-xs text-gray-500 bg-white/5 px-3 py-1.5 rounded-md"
-            >
-              {team}
-            </span>
-          ))}
-          <span className="text-xs text-gray-600 px-3 py-1.5">
-            ...ほか116チーム
-          </span>
-        </div>
-      </section>
+      {/* 利用中のチーム（配信実績から自動取得） */}
+      {teams.length > 0 && (
+        <section className="px-5 pt-8 pb-20">
+          <h2 className="text-sm font-semibold text-gray-300 mb-3">
+            配信中のチーム・団体
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {teams.map((team) => (
+              <span
+                key={team}
+                className="text-xs text-gray-500 bg-white/5 px-3 py-1.5 rounded-md"
+              >
+                {team}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

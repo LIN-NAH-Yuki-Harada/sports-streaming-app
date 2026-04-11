@@ -188,6 +188,25 @@ export async function cleanupStaleBroadcasts(userId: string): Promise<void> {
   }
 }
 
+// 配信されたチーム名一覧を取得（重複除去、自チーム=home_teamのみ）
+export async function getTeamNames(): Promise<string[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("home_team")
+    .order("started_at", { ascending: false })
+    .limit(100);
+
+  if (error) {
+    console.error("チーム名取得エラー:", error.message);
+    return [];
+  }
+
+  // 重複を除去
+  const unique = [...new Set(data.map((d) => d.home_team).filter(Boolean))];
+  return unique;
+}
+
 export async function getBroadcastByCode(
   shareCode: string
 ): Promise<Broadcast | null> {
