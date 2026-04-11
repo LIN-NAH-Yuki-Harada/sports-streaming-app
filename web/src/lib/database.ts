@@ -189,11 +189,11 @@ export async function cleanupStaleBroadcasts(userId: string): Promise<void> {
 }
 
 // 配信されたチーム名一覧を取得（重複除去、自チーム=home_teamのみ）
-export async function getTeamNames(): Promise<string[]> {
+export async function getTeamNames(): Promise<{ name: string; sport: string }[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("broadcasts")
-    .select("home_team")
+    .select("home_team, sport")
     .order("started_at", { ascending: false })
     .limit(100);
 
@@ -202,9 +202,16 @@ export async function getTeamNames(): Promise<string[]> {
     return [];
   }
 
-  // 重複を除去
-  const unique = [...new Set(data.map((d) => d.home_team).filter(Boolean))];
-  return unique;
+  // チーム名で重複除去（最新の配信のスポーツを採用）
+  const seen = new Set<string>();
+  const result: { name: string; sport: string }[] = [];
+  for (const d of data) {
+    if (d.home_team && !seen.has(d.home_team)) {
+      seen.add(d.home_team);
+      result.push({ name: d.home_team, sport: d.sport });
+    }
+  }
+  return result;
 }
 
 export async function getBroadcastByCode(

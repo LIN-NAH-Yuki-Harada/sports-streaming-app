@@ -3,6 +3,15 @@
 import { useState, useEffect } from "react";
 import { getTeamNames } from "@/lib/database";
 
+const SPORT_EMOJI: Record<string, string> = {
+  サッカー: "⚽",
+  野球: "⚾",
+  バスケ: "🏀",
+  バレー: "🏐",
+  陸上: "🏃",
+  その他: "🏆",
+};
+
 const LIVE_NOW = [
   { sport: "サッカー", home: "港FC", away: "青葉SC", area: "東京都港区", tournament: "港区少年サッカー大会" },
   { sport: "野球", home: "東中学校", away: "西中学校", area: "神奈川県横浜市", tournament: "市中学校春季大会" },
@@ -13,7 +22,7 @@ const LIVE_NOW = [
 export default function Home() {
   const [code, setCode] = useState("");
   const [isStandalone, setIsStandalone] = useState(false);
-  const [teams, setTeams] = useState<string[]>([]);
+  const [teams, setTeams] = useState<{ name: string; sport: string }[]>([]);
 
   useEffect(() => {
     const standalone = window.matchMedia("(display-mode: standalone)").matches
@@ -174,10 +183,10 @@ export default function Home() {
           <div className="flex flex-wrap gap-2">
             {teams.map((team) => (
               <span
-                key={team}
+                key={team.name}
                 className="text-xs text-gray-500 bg-white/5 px-3 py-1.5 rounded-md"
               >
-                {team}
+                {SPORT_EMOJI[team.sport] || "🏆"} {team.name}
               </span>
             ))}
           </div>
