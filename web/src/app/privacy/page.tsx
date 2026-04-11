@@ -16,7 +16,7 @@ export default function PrivacyPage() {
           <p>当事務局は、本サービスの提供にあたり、以下の情報を収集します。</p>
           <ul className="list-disc list-inside mt-2 space-y-1 text-gray-400">
             <li><strong className="text-gray-300">アカウント情報</strong>: メールアドレス、パスワード（暗号化して保存）、表示名</li>
-            <li><strong className="text-gray-300">ソーシャルログイン情報</strong>: Googleアカウントの公開プロフィール情報（名前、メールアドレス、プロフィール画像）</li>
+            <li><strong className="text-gray-300">ソーシャルログイン情報</strong>: Google、LINE、Facebookアカウントの公開プロフィール情報（名前、メールアドレス、プロフィール画像）</li>
             <li><strong className="text-gray-300">配信データ</strong>: チーム名、スコア、大会名、会場名、配信映像</li>
             <li><strong className="text-gray-300">利用情報</strong>: アクセスログ、デバイス情報、IPアドレス</li>
             <li><strong className="text-gray-300">決済情報</strong>: クレジットカード情報（決済代行サービスが管理し、当事務局は直接保持しません）</li>
