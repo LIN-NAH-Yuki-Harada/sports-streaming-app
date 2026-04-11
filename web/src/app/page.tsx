@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const LIVE_NOW = [
   { sport: "サッカー", home: "港FC", away: "青葉SC", area: "東京都港区", tournament: "港区少年サッカー大会" },
@@ -11,6 +11,14 @@ const LIVE_NOW = [
 
 export default function Home() {
   const [code, setCode] = useState("");
+  const [isStandalone, setIsStandalone] = useState(false);
+
+  useEffect(() => {
+    // ホーム画面から起動した場合（PWAモード）を判定
+    const standalone = window.matchMedia("(display-mode: standalone)").matches
+      || (navigator as unknown as { standalone?: boolean }).standalone === true;
+    setIsStandalone(standalone);
+  }, []);
 
   return (
     <div>
@@ -96,8 +104,8 @@ export default function Home() {
         </p>
       </section>
 
-      {/* ホーム画面追加の誘導 */}
-      <section className="px-5 pt-8">
+      {/* ホーム画面追加の誘導（PWAモードでは非表示） */}
+      {!isStandalone && <section className="px-5 pt-8">
         <div className="rounded-xl bg-gradient-to-br from-[#e63946]/10 via-[#111] to-[#111] border border-[#e63946]/20 p-5 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-[#e63946]/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2" />
           <div className="relative">
@@ -150,7 +158,7 @@ export default function Home() {
             </div>
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* 導入チーム */}
       <section className="px-5 pt-8 pb-20">
