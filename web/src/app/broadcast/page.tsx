@@ -77,6 +77,7 @@ export default function BroadcastPage() {
   const [livekitError, setLivekitError] = useState<string | null>(null);
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
+  const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
 
   // DB上の配信データ
   const broadcastRef = useRef<Broadcast | null>(null);
@@ -129,7 +130,7 @@ export default function BroadcastPage() {
 
   // スコアをDBに保存（デバウンス付き: 500ms 待ってからまとめて送信）
   const saveScoreToDb = useCallback(
-    (newHomeScore: number, newAwayScore: number, newPeriod: string, newHomeSets?: number, newAwaySets?: number) => {
+    (newHomeScore: number, newAwayScore: number, newPeriod: string, newHomeSets?: number, newAwaySets?: number, newSetResults?: { home: number; away: number }[]) => {
       if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
       updateTimerRef.current = setTimeout(async () => {
         if (broadcastRef.current) {
@@ -139,7 +140,8 @@ export default function BroadcastPage() {
             newAwayScore,
             newPeriod,
             newHomeSets,
-            newAwaySets
+            newAwaySets,
+            newSetResults
           );
         }
       }, 500);
@@ -240,6 +242,7 @@ export default function BroadcastPage() {
     setAwayScore(0);
     setHomeSets(0);
     setAwaySets(0);
+    setSetResults([]);
     setPeriodIndex(0);
   }
 
@@ -488,6 +491,9 @@ export default function BroadcastPage() {
               <button
                 onClick={() => {
                   const nextIndex = Math.min(periodIndex + 1, periods.length - 1);
+                  // セットスコアを記録
+                  const newSetResults = [...setResults, { home: homeScore, away: awayScore }];
+                  setSetResults(newSetResults);
                   // セット獲得数を更新（スコアが高い方が勝ち）
                   let newHomeSets = homeSets;
                   let newAwaySets = awaySets;
@@ -501,7 +507,7 @@ export default function BroadcastPage() {
                   setPeriodIndex(nextIndex);
                   setHomeScore(0);
                   setAwayScore(0);
-                  saveScoreToDb(0, 0, periods[nextIndex] || periods[0], newHomeSets, newAwaySets);
+                  saveScoreToDb(0, 0, periods[nextIndex] || periods[0], newHomeSets, newAwaySets, newSetResults);
                 }}
                 className="px-2 h-6 rounded bg-yellow-500/20 hover:bg-yellow-500/30 flex items-center justify-center text-[9px] text-yellow-400 font-medium transition active:scale-95"
               >

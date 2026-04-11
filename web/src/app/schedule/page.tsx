@@ -100,15 +100,29 @@ export default function HistoryPage() {
                     </div>
                     {/* スコア */}
                     <div className="shrink-0 ml-3 text-right">
-                      <div className="flex items-center gap-1.5 bg-black/30 rounded px-2.5 py-1.5">
-                        <span className="text-base font-black tabular-nums">{bc.home_score}</span>
-                        <span className="text-xs text-gray-600">-</span>
-                        <span className="text-base font-black tabular-nums">{bc.away_score}</span>
-                      </div>
-                      {(bc.home_sets > 0 || bc.away_sets > 0) && (
-                        <p className="text-[10px] text-yellow-400 mt-1">
-                          セット {bc.home_sets} - {bc.away_sets}
-                        </p>
+                      {(bc.home_sets > 0 || bc.away_sets > 0) ? (
+                        <>
+                          <div className="flex items-center gap-1.5 bg-black/30 rounded px-2.5 py-1.5">
+                            <span className="text-base font-black tabular-nums text-yellow-400">{bc.home_sets}</span>
+                            <span className="text-xs text-gray-600">-</span>
+                            <span className="text-base font-black tabular-nums text-yellow-400">{bc.away_sets}</span>
+                          </div>
+                          {bc.set_results && bc.set_results.length > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              {bc.set_results.map((set: { home: number; away: number }, i: number) => (
+                                <p key={i} className="text-[10px] text-gray-500 tabular-nums">
+                                  S{i + 1}: {set.home}-{set.away}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-1.5 bg-black/30 rounded px-2.5 py-1.5">
+                          <span className="text-base font-black tabular-nums">{bc.home_score}</span>
+                          <span className="text-xs text-gray-600">-</span>
+                          <span className="text-base font-black tabular-nums">{bc.away_score}</span>
+                        </div>
                       )}
                     </div>
                   </div>
