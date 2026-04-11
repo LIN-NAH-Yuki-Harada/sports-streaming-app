@@ -28,13 +28,26 @@ const VOLLEYBALL_RULES: Record<string, {
 };
 const VOLLEYBALL_RULE_NAMES = Object.keys(VOLLEYBALL_RULES);
 
+// 野球のルール設定
+function generateBaseballPeriods(innings: number): string[] {
+  const periods: string[] = [];
+  for (let i = 1; i <= innings; i++) {
+    periods.push(`${i}回表`, `${i}回裏`);
+  }
+  periods.push("延長");
+  return periods;
+}
+
+const BASEBALL_RULES: Record<string, { innings: number; periods: string[] }> = {
+  "学童（5回）": { innings: 5, periods: generateBaseballPeriods(5) },
+  "学童（6回）": { innings: 6, periods: generateBaseballPeriods(6) },
+  "中学（7回）": { innings: 7, periods: generateBaseballPeriods(7) },
+  "高校以上（9回）": { innings: 9, periods: generateBaseballPeriods(9) },
+};
+const BASEBALL_RULE_NAMES = Object.keys(BASEBALL_RULES);
+
 const PERIODS: Record<string, string[]> = {
   サッカー: ["前半", "後半", "延長"],
-  野球: [
-    "1回表", "1回裏", "2回表", "2回裏", "3回表", "3回裏",
-    "4回表", "4回裏", "5回表", "5回裏", "6回表", "6回裏",
-    "7回表", "7回裏", "8回表", "8回裏", "9回表", "9回裏", "延長",
-  ],
   バスケ: ["1Q", "2Q", "3Q", "4Q", "OT"],
   陸上: ["競技中"],
   その他: ["前半", "後半", "延長"],
@@ -49,6 +62,7 @@ export default function BroadcastPage() {
 
   const [sport, setSport] = useState("サッカー");
   const [volleyballRule, setVolleyballRule] = useState("6人制");
+  const [baseballRule, setBaseballRule] = useState("高校以上（9回）");
   const [home, setHome] = useState("");
   const [away, setAway] = useState("");
   const [tournament, setTournament] = useState("");
@@ -70,7 +84,12 @@ export default function BroadcastPage() {
   const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const vbRule = sport === "バレー" ? VOLLEYBALL_RULES[volleyballRule] : null;
-  const periods = sport === "バレー" ? (vbRule?.periods || ["1SET", "2SET", "3SET"]) : (PERIODS[sport] || PERIODS["その他"]);
+  const bbRule = sport === "野球" ? BASEBALL_RULES[baseballRule] : null;
+  const periods = sport === "バレー"
+    ? (vbRule?.periods || ["1SET", "2SET", "3SET"])
+    : sport === "野球"
+      ? (bbRule?.periods || generateBaseballPeriods(9))
+      : (PERIODS[sport] || PERIODS["その他"]);
   const currentPeriod = periods[periodIndex] || periods[0];
 
   const canStart = home.trim() && away.trim();
@@ -634,6 +653,29 @@ export default function BroadcastPage() {
             <p className="mt-1.5 text-[9px] text-gray-600">
               {vbRule && `${vbRule.setsToWin * 2 - 1}セットマッチ / ${vbRule.setPoint}点制 / 最終セット${vbRule.finalSetPoint}点`}
             </p>
+          </fieldset>
+        )}
+
+        {/* 野球ルール選択 */}
+        {sport === "野球" && (
+          <fieldset>
+            <legend className="text-[11px] text-gray-400 font-medium mb-2">ルール</legend>
+            <div className="flex flex-wrap gap-2">
+              {BASEBALL_RULE_NAMES.map((rule) => (
+                <button
+                  key={rule}
+                  type="button"
+                  onClick={() => { setBaseballRule(rule); setPeriodIndex(0); }}
+                  className={`text-xs px-3 py-1.5 rounded-md border transition ${
+                    baseballRule === rule
+                      ? "border-[#e63946] text-[#e63946] bg-[#e63946]/10"
+                      : "border-white/10 text-gray-400 hover:border-white/20"
+                  }`}
+                >
+                  {rule}
+                </button>
+              ))}
+            </div>
           </fieldset>
         )}
 
