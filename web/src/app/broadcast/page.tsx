@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
+import { LiveKitBroadcaster } from "@/components/livekit-video";
 import { createClient } from "@/lib/supabase";
 import {
   createBroadcast,
@@ -45,6 +46,8 @@ export default function BroadcastPage() {
   const [awayScore, setAwayScore] = useState(0);
   const [periodIndex, setPeriodIndex] = useState(0);
   const [starting, setStarting] = useState(false);
+  const [livekitToken, setLivekitToken] = useState<string | null>(null);
+  const [livekitError, setLivekitError] = useState<string | null>(null);
 
   // DB上の配信データ
   const broadcastRef = useRef<Broadcast | null>(null);
@@ -122,6 +125,25 @@ export default function BroadcastPage() {
         broadcastRef.current = broadcast;
         setShareCode(broadcast.share_code);
         if (!subscribed) setTrialUsed(true);
+
+        // LiveKitトークン��取得
+        try {
+          const res = await fetch("/api/livekit/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              roomName: broadcast.share_code,
+              participantIdentity: user.id,
+              participantName: profile?.display_name || "配信者",
+              role: "broadcaster",
+            }),
+          });
+          const { token } = await res.json();
+          setLivekitToken(token);
+        } catch (e) {
+          console.error("LiveKitトークン取得エラー:", e);
+          setLivekitError("映像配信の準備に失敗しました");
+        }
       } else {
         alert("配信の開始に失敗しました。もう一度お試しください。");
       }
@@ -135,6 +157,10 @@ export default function BroadcastPage() {
 
   // 配信終了
   async function handleEnd() {
+    // LiveKit切断（トークンをnull化 → LiveKitRoom自動アンマウント）
+    setLivekitToken(null);
+    setLivekitError(null);
+
     if (broadcastRef.current) {
       const success = await endBroadcast(broadcastRef.current.id);
       if (!success) {
@@ -257,13 +283,52 @@ export default function BroadcastPage() {
     );
   }
 
-  // ===== 配信中（横画面フルスクリーン） =====
+  // ブラウザUIを隠す（配信中）
+  useEffect(() => {
+    if (getScreen() !== "live") return;
+    // スクロールでアドレスバーを隠す
+    window.scrollTo(0, 1);
+    // bodyのスクロールを無効化
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.width = "100%";
+    document.body.style.height = "100%";
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.width = "";
+      document.body.style.height = "";
+    };
+  });
+
+  // ===== 配信中（フルスクリーン） =====
   if (screen === "live") {
     const shareUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/watch/${shareCode}`;
     return (
-      <div className="fixed inset-0 z-[60] bg-black flex flex-col landscape:flex-row">
-        <div className="relative flex-1 bg-[#0a0a0a] flex items-center justify-center overflow-hidden">
-          <p className="text-xs text-gray-600">カメラ映像（LiveKit接続後に有効）</p>
+      <div className="fixed inset-0 z-[60] bg-black" style={{ height: "100dvh" }}>
+        <div className="relative w-full h-full bg-[#0a0a0a] overflow-hidden">
+          {/* LiveKit映像レイヤー */}
+          {livekitToken ? (
+            <LiveKitBroadcaster
+              token={livekitToken}
+              serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
+              onError={(e) => {
+                console.error("LiveKitエラー:", e);
+                setLivekitError("カメラへの接続に失敗しました。設定からカメラの使用を許可してください。");
+              }}
+            />
+          ) : livekitError ? (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <p className="text-xs text-red-400">{livekitError}</p>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex flex-col items-center gap-2">
+                <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+                <p className="text-xs text-gray-600">カメラを準備中...</p>
+              </div>
+            </div>
+          )}
 
           {/* 左上: スコアボード・オーバーレイ */}
           <div className="absolute top-3 left-3 sm:top-4 sm:left-4 flex items-center">
@@ -285,59 +350,75 @@ export default function BroadcastPage() {
             </div>
           </div>
 
-          {/* スコア操作パネル */}
-          <div className="absolute bottom-[calc(56px+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[9px] text-gray-400 w-12 truncate text-right">{home}</span>
+          {/* スコア操作パネル — 縦画面では2段構成 */}
+          <div className="absolute bottom-[calc(12px+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-sm rounded-lg px-2 sm:px-3 py-2 max-w-[95vw]">
+            {/* スコア行 */}
+            <div className="flex items-center justify-center gap-2 sm:gap-3">
+              <div className="flex items-center gap-1">
+                <span className="text-[9px] text-gray-400 max-w-[50px] truncate text-right">{home}</span>
+                <button
+                  onClick={() => changeHomeScore(-1)}
+                  className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm font-bold transition active:scale-90"
+                >
+                  −
+                </button>
+                <span className="text-lg font-black tabular-nums w-6 text-center">{homeScore}</span>
+                <button
+                  onClick={() => changeHomeScore(1)}
+                  className="w-7 h-7 rounded bg-[#e63946] hover:bg-[#d62836] flex items-center justify-center text-sm font-bold transition active:scale-90"
+                >
+                  +
+                </button>
+              </div>
+
+              <span className="text-gray-600 text-xs">-</span>
+
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => changeAwayScore(-1)}
+                  className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm font-bold transition active:scale-90"
+                >
+                  −
+                </button>
+                <span className="text-lg font-black tabular-nums w-6 text-center">{awayScore}</span>
+                <button
+                  onClick={() => changeAwayScore(1)}
+                  className="w-7 h-7 rounded bg-[#e63946] hover:bg-[#d62836] flex items-center justify-center text-sm font-bold transition active:scale-90"
+                >
+                  +
+                </button>
+                <span className="text-[9px] text-gray-400 max-w-[50px] truncate">{away}</span>
+              </div>
+            </div>
+            {/* ピリオド行 */}
+            <div className="flex items-center justify-center gap-2 mt-1.5">
               <button
-                onClick={() => changeHomeScore(-1)}
-                className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm font-bold transition active:scale-90"
+                onClick={() => changePeriod(periodIndex - 1)}
+                className="w-6 h-6 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs transition active:scale-90"
               >
-                −
+                ‹
               </button>
-              <span className="text-lg font-black tabular-nums w-6 text-center">{homeScore}</span>
+              <span className="text-[10px] font-medium min-w-[40px] text-center">{currentPeriod}</span>
               <button
-                onClick={() => changeHomeScore(1)}
-                className="w-7 h-7 rounded bg-[#e63946] hover:bg-[#d62836] flex items-center justify-center text-sm font-bold transition active:scale-90"
+                onClick={() => changePeriod(periodIndex + 1)}
+                className="w-6 h-6 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs transition active:scale-90"
               >
-                +
+                ›
+              </button>
+              <span className="text-gray-600 text-xs mx-1">|</span>
+              <button
+                onClick={() => {
+                  const nextIndex = Math.min(periodIndex + 1, periods.length - 1);
+                  setPeriodIndex(nextIndex);
+                  setHomeScore(0);
+                  setAwayScore(0);
+                  saveScoreToDb(0, 0, periods[nextIndex] || periods[0]);
+                }}
+                className="px-2 h-6 rounded bg-yellow-500/20 hover:bg-yellow-500/30 flex items-center justify-center text-[9px] text-yellow-400 font-medium transition active:scale-95"
+              >
+                次へ 0-0
               </button>
             </div>
-
-            <span className="text-gray-600 text-xs">|</span>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => changeAwayScore(-1)}
-                className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm font-bold transition active:scale-90"
-              >
-                −
-              </button>
-              <span className="text-lg font-black tabular-nums w-6 text-center">{awayScore}</span>
-              <button
-                onClick={() => changeAwayScore(1)}
-                className="w-7 h-7 rounded bg-[#e63946] hover:bg-[#d62836] flex items-center justify-center text-sm font-bold transition active:scale-90"
-              >
-                +
-              </button>
-              <span className="text-[9px] text-gray-400 w-12 truncate">{away}</span>
-            </div>
-
-            <span className="text-gray-600 text-xs">|</span>
-
-            <button
-              onClick={() => changePeriod(periodIndex - 1)}
-              className="w-6 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs transition active:scale-90"
-            >
-              ‹
-            </button>
-            <span className="text-[10px] font-medium w-10 text-center">{currentPeriod}</span>
-            <button
-              onClick={() => changePeriod(periodIndex + 1)}
-              className="w-6 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs transition active:scale-90"
-            >
-              ›
-            </button>
           </div>
 
           {/* 右上: 大会名 + LIVE + お試し表示 */}
@@ -362,7 +443,7 @@ export default function BroadcastPage() {
           </div>
 
           {/* 左下: 共有コード */}
-          <div className="absolute bottom-[calc(12px+env(safe-area-inset-bottom))] left-3 sm:bottom-4 sm:left-4">
+          <div className="absolute bottom-[calc(8px+env(safe-area-inset-bottom))] left-3 sm:bottom-4 sm:left-4">
             <button
               onClick={() => copyToClipboard(shareCode, "code")}
               className="flex items-center gap-2 bg-black/70 backdrop-blur-sm rounded px-2 sm:px-3 py-1.5 transition hover:bg-black/90"
@@ -382,7 +463,7 @@ export default function BroadcastPage() {
           </div>
 
           {/* 右下: コントロールボタン群 */}
-          <div className="absolute bottom-[calc(12px+env(safe-area-inset-bottom))] right-3 sm:bottom-4 sm:right-4 flex items-center gap-2">
+          <div className="absolute bottom-[calc(8px+env(safe-area-inset-bottom))] right-3 sm:bottom-4 sm:right-4 flex items-center gap-2">
             <button
               onClick={() => copyToClipboard(
                 `【試合配信中】\n${home} vs ${away}\n${tournament ? tournament + "\n" : ""}視聴はこちら → ${shareUrl}`,

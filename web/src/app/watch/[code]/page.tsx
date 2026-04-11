@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, use } from "react";
 import { getBroadcastByCode, type Broadcast } from "@/lib/database";
 import { createClient } from "@/lib/supabase";
+import { LiveKitViewer } from "@/components/livekit-video";
 
 export default function WatchPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
@@ -10,6 +11,8 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [loadingBroadcast, setLoadingBroadcast] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [viewerToken, setViewerToken] = useState<string | null>(null);
+  const [isWatching, setIsWatching] = useState(false);
 
   // 初回: DBから配信データを取得
   useEffect(() => {
@@ -83,6 +86,29 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     return () => clearInterval(interval);
   }, [broadcast?.id]);
 
+  // 視聴開始（LiveKitトークン取得）
+  async function handleStartWatching() {
+    if (!broadcast) return;
+    const viewerIdentity = `viewer-${Math.random().toString(36).slice(2, 9)}`;
+    try {
+      const res = await fetch("/api/livekit/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomName: broadcast.share_code,
+          participantIdentity: viewerIdentity,
+          participantName: "視聴者",
+          role: "viewer",
+        }),
+      });
+      const { token } = await res.json();
+      setViewerToken(token);
+      setIsWatching(true);
+    } catch (e) {
+      console.error("視聴トークン取得エラー:", e);
+    }
+  }
+
   // ===== 読み込み中 =====
   if (loadingBroadcast) {
     return (
@@ -119,23 +145,17 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const isLive = broadcast.status === "live";
 
   return (
-    <div className="mx-auto max-w-3xl px-5 py-6">
-      {/* 共有コード表示 */}
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-[10px] text-gray-600">共有コード:</span>
-        <span className="text-xs font-bold tracking-widest">{broadcast.share_code}</span>
-        {!isLive && (
-          <span className="text-[9px] text-gray-500 bg-white/5 px-1.5 py-0.5 rounded ml-1">
-            配信終了
-          </span>
-        )}
-      </div>
-
-      {/* メイン映像エリア */}
-      <div className="aspect-[16/9] bg-[#111] rounded-lg border border-white/5 flex items-center justify-center relative overflow-hidden">
-        {isLive ? (
+    <div className="min-h-screen bg-black flex flex-col">
+      {/* メイン映像エリア — 画面全体を使用 */}
+      <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden" style={{ minHeight: "60vh" }}>
+        {isWatching && viewerToken ? (
+          <LiveKitViewer
+            token={viewerToken}
+            serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
+          />
+        ) : isLive ? (
           <button
-            onClick={() => setShowModal(true)}
+            onClick={handleStartWatching}
             className="flex flex-col items-center gap-3 group"
           >
             <div className="w-16 h-16 rounded-full bg-[#e63946] flex items-center justify-center group-hover:bg-[#d62836] transition shadow-lg shadow-[#e63946]/20">
@@ -195,28 +215,31 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         </div>
       </div>
 
-      {/* 試合情報 */}
-      <div className="mt-4 rounded-md bg-[#111] border border-white/5 px-4 py-3">
-        <p className="text-[9px] text-gray-600">試合情報</p>
-        <p className="text-sm font-medium mt-1">
-          {broadcast.home_team} vs {broadcast.away_team}
-        </p>
-        <div className="flex items-center gap-3 mt-1">
-          {broadcast.sport && (
-            <span className="text-[10px] text-gray-500">{broadcast.sport}</span>
-          )}
-          {broadcast.tournament && (
-            <span className="text-[10px] text-gray-500">{broadcast.tournament}</span>
-          )}
-          {broadcast.venue && (
-            <span className="text-[10px] text-gray-500">{broadcast.venue}</span>
-          )}
+      {/* 試合情報（映像下部） */}
+      <div className="bg-[#0a0a0a] border-t border-white/5 px-5 py-3">
+        <div className="max-w-3xl mx-auto flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">
+              {broadcast.home_team} vs {broadcast.away_team}
+            </p>
+            <div className="flex items-center gap-3 mt-0.5">
+              {broadcast.sport && (
+                <span className="text-[10px] text-gray-500">{broadcast.sport}</span>
+              )}
+              {broadcast.tournament && (
+                <span className="text-[10px] text-gray-500">{broadcast.tournament}</span>
+              )}
+              {broadcast.venue && (
+                <span className="text-[10px] text-gray-500">{broadcast.venue}</span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-600">共有コード:</span>
+            <span className="text-xs font-bold tracking-widest">{broadcast.share_code}</span>
+          </div>
         </div>
       </div>
-
-      <p className="mt-8 text-center text-[10px] text-gray-700 pb-16">
-        この配信は共有コードを持っている方のみ視聴できます
-      </p>
 
       {/* アプリ登録モーダル */}
       {showModal && (

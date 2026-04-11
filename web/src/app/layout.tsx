@@ -24,6 +24,11 @@ export const metadata: Metadata = {
   title: "LIVE SPOtCH",
   description:
     "ローカルスポーツのライブ配信アプリ。地域の大会・部活の試合をスマホで配信・視聴。",
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+    "mobile-web-app-capable": "yes",
+    "apple-mobile-web-app-status-bar-style": "black-translucent",
+  },
 };
 
 export default function RootLayout({

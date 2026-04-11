@@ -5,9 +5,12 @@ import { usePathname } from "next/navigation";
 export function BottomNav() {
   const pathname = usePathname();
 
-  // LP・法的ページ・視聴ページではボトムナビを非表示
+  // LP・法的ページ・視聴ページ・配信中ではボトムナビを非表示
   const hiddenPaths = ["/lp", "/terms", "/privacy", "/contact", "/watch"];
   if (hiddenPaths.some((path) => pathname.startsWith(path))) return null;
+
+  // 配信中（ハッシュで判定）は非表示にするため、DOM側で制御
+  // → broadcastページではCSS classで非表示にする
 
   const tabs = [
     {
