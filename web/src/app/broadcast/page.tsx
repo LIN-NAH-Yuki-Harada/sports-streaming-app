@@ -241,6 +241,23 @@ export default function BroadcastPage() {
 
   const screen = getScreen();
 
+  // ブラウザUIを隠す（配信中） — フックは条件付きreturnの前に配置
+  const isLiveScreen = screen === "live";
+  useEffect(() => {
+    if (!isLiveScreen) return;
+    window.scrollTo(0, 1);
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.width = "100%";
+    document.body.style.height = "100%";
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.width = "";
+      document.body.style.height = "";
+    };
+  }, [isLiveScreen]);
+
   // ===== 読み込み中 =====
   if (loading) {
     return (
@@ -282,23 +299,6 @@ export default function BroadcastPage() {
       </div>
     );
   }
-
-  // ブラウザUIを隠す（配信中）
-  const isLiveScreen = !!shareCode && !!user;
-  useEffect(() => {
-    if (!isLiveScreen) return;
-    window.scrollTo(0, 1);
-    document.body.style.overflow = "hidden";
-    document.body.style.position = "fixed";
-    document.body.style.width = "100%";
-    document.body.style.height = "100%";
-    return () => {
-      document.body.style.overflow = "";
-      document.body.style.position = "";
-      document.body.style.width = "";
-      document.body.style.height = "";
-    };
-  }, [isLiveScreen]);
 
   // ===== 配信中（フルスクリーン） =====
   if (screen === "live") {
