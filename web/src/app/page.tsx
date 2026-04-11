@@ -96,36 +96,49 @@ export default function Home() {
         </p>
       </section>
 
-      {/* ホーム画面に追加ガイド */}
+      {/* ホーム画面追加の誘導 */}
       <section className="px-5 pt-8">
-        <h2 className="text-xs font-semibold text-gray-300 mb-3">
-          アプリのように使う
-        </h2>
-        <div className="rounded-lg bg-[#111] border border-white/5 p-4">
-          <p className="text-xs text-gray-400 leading-relaxed mb-3">
-            LIVE SPOtCH をホーム画面に追加すると、アプリのようにワンタップで起動できます。
-          </p>
-          <div className="space-y-3">
-            <div>
-              <p className="text-[10px] text-[#e63946] font-semibold mb-1">iPhone（Safari）の場合</p>
-              <ol className="text-[10px] text-gray-500 space-y-0.5 list-decimal list-inside">
-                <li>画面下の共有ボタン（□↑）をタップ</li>
-                <li>「ホーム画面に追加」を選択</li>
-                <li>「追加」をタップ</li>
-              </ol>
+        <div className="rounded-xl bg-gradient-to-br from-[#e63946]/10 via-[#111] to-[#111] border border-[#e63946]/20 p-5 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-[#e63946]/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2" />
+          <div className="relative">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-[#e63946] flex items-center justify-center shadow-lg shadow-[#e63946]/20">
+                <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="8" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-bold">ホーム画面に追加しよう</p>
+                <p className="text-[10px] text-gray-500">ワンタップで試合をチェック</p>
+              </div>
             </div>
-            <div>
-              <p className="text-[10px] text-[#e63946] font-semibold mb-1">Android（Chrome）の場合</p>
-              <ol className="text-[10px] text-gray-500 space-y-0.5 list-decimal list-inside">
-                <li>右上の「︙」メニューをタップ</li>
-                <li>「ホーム画面に追加」を選択</li>
-                <li>「追加」をタップ</li>
-              </ol>
+
+            <div className="flex gap-3 mt-4">
+              <div className="flex-1 rounded-lg bg-black/30 px-3 py-2.5">
+                <p className="text-[9px] text-[#e63946] font-bold mb-1.5">iPhone</p>
+                <div className="flex items-center gap-1.5 text-[9px] text-gray-400">
+                  <span className="w-4 h-4 rounded bg-white/10 flex items-center justify-center text-[8px]">□↑</span>
+                  <span>→</span>
+                  <span>ホーム画面に追加</span>
+                </div>
+              </div>
+              <div className="flex-1 rounded-lg bg-black/30 px-3 py-2.5">
+                <p className="text-[9px] text-[#e63946] font-bold mb-1.5">Android</p>
+                <div className="flex items-center gap-1.5 text-[9px] text-gray-400">
+                  <span className="w-4 h-4 rounded bg-white/10 flex items-center justify-center text-[8px]">︙</span>
+                  <span>→</span>
+                  <span>ホーム画面に追加</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/5">
+              <svg className="w-3.5 h-3.5 text-[#e63946] shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              <span className="text-[10px] text-gray-500">通知を見逃さない・全画面配信・アプリ感覚で操作</span>
             </div>
           </div>
-          <p className="mt-3 text-[9px] text-gray-600">
-            全画面で表示され、配信中もブラウザのバーが表示されません。
-          </p>
         </div>
       </section>
 
