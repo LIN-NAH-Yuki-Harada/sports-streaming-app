@@ -178,7 +178,7 @@ export default function Home() {
       {teams.length > 0 && (
         <section className="px-5 pt-8 pb-20">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">
-            配信中のチーム・団体
+            参加チーム
           </h2>
           <div className="flex flex-wrap gap-2">
             {teams.map((team) => (
