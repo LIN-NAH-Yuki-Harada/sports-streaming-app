@@ -8,11 +8,6 @@ const LIVE_NOW = [
   { sport: "バスケ", home: "さくらミニバス", away: "若葉クラブ", area: "埼玉県さいたま市", tournament: "県ミニバスケ交流戦" },
 ];
 
-const UPCOMING = [
-  { time: "14:00", sport: "サッカー", home: "明星SC", away: "光が丘FC", tournament: "練馬区4年生大会" },
-  { time: "15:30", sport: "バスケ", home: "桜台ミニバス", away: "石神井クラブ", tournament: "練習試合" },
-  { time: "16:00", sport: "野球", home: "大泉ジュニア", away: "関町イーグルス", tournament: "区少年野球秋季" },
-];
 
 export default function Home() {
   const [code, setCode] = useState("");
@@ -99,36 +94,6 @@ export default function Home() {
         <p className="mt-2 text-[10px] text-gray-700">
           視聴するには配信者から共有コードを受け取ってください
         </p>
-      </section>
-
-      {/* 今日の配信予定 */}
-      <section className="px-5 pt-8">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xs font-semibold text-gray-300">今日の配信予定</h2>
-          <a href="/schedule" className="text-[10px] text-gray-600">
-            すべて見る
-          </a>
-        </div>
-        <div className="space-y-1.5">
-          {UPCOMING.map((m) => (
-            <div
-              key={m.home + m.time}
-              className="flex items-center gap-3 rounded-md bg-[#111] border border-white/5 px-3 py-2.5"
-            >
-              <span className="text-[11px] text-gray-500 tabular-nums w-10 shrink-0">
-                {m.time}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium truncate">
-                  {m.home} vs {m.away}
-                </p>
-                <p className="text-[9px] text-gray-600 truncate">
-                  {m.sport} / {m.tournament}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
       </section>
 
       {/* 導入チーム */}
