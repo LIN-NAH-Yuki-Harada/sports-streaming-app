@@ -65,47 +65,8 @@ export default function Home() {
         </p>
       </section>
 
-      {/* 現在配信中（チーム名のみ公開、映像は非公開） */}
-      <section className="px-5 pt-8">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e63946] opacity-75" />
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#e63946]" />
-          </span>
-          <h2 className="text-xs font-semibold text-gray-300">いま配信中</h2>
-          <span className="text-[10px] text-gray-600">{LIVE_NOW.length}件</span>
-        </div>
-
-        <div className="space-y-1.5">
-          {LIVE_NOW.map((m) => (
-            <div
-              key={m.home + m.away}
-              className="rounded-md bg-[#111] border border-white/5 px-4 py-3"
-            >
-              <div className="flex items-center justify-between">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium truncate">
-                    {m.home} vs {m.away}
-                  </p>
-                  <p className="text-[9px] text-gray-600 truncate mt-0.5">
-                    {m.sport} / {m.tournament}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0 ml-3">
-                  <span className="text-[9px] text-gray-700">{m.area}</span>
-                  <span className="text-[9px] text-[#e63946] font-semibold">LIVE</span>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <p className="mt-2 text-[10px] text-gray-700">
-          視聴するには配信者から共有コードを受け取ってください
-        </p>
-      </section>
-
       {/* ホーム画面追加の誘導（PWAモードでは非表示） */}
-      {!isStandalone && <section className="px-5 pt-8">
+      {!isStandalone && <section className="px-5 pt-6">
         <div className="rounded-xl bg-gradient-to-br from-[#e63946]/10 via-[#111] to-[#111] border border-[#e63946]/20 p-5 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-[#e63946]/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2" />
           <div className="relative">
@@ -159,6 +120,45 @@ export default function Home() {
           </div>
         </div>
       </section>}
+
+      {/* 現在配信中（チーム名のみ公開、映像は非公開） */}
+      <section className="px-5 pt-8">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e63946] opacity-75" />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#e63946]" />
+          </span>
+          <h2 className="text-xs font-semibold text-gray-300">いま配信中</h2>
+          <span className="text-[10px] text-gray-600">{LIVE_NOW.length}件</span>
+        </div>
+
+        <div className="space-y-1.5">
+          {LIVE_NOW.map((m) => (
+            <div
+              key={m.home + m.away}
+              className="rounded-md bg-[#111] border border-white/5 px-4 py-3"
+            >
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium truncate">
+                    {m.home} vs {m.away}
+                  </p>
+                  <p className="text-[9px] text-gray-600 truncate mt-0.5">
+                    {m.sport} / {m.tournament}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 ml-3">
+                  <span className="text-[9px] text-gray-700">{m.area}</span>
+                  <span className="text-[9px] text-[#e63946] font-semibold">LIVE</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-[10px] text-gray-700">
+          視聴するには配信者から共有コードを受け取ってください
+        </p>
+      </section>
 
       {/* 導入チーム */}
       <section className="px-5 pt-8 pb-20">
