@@ -15,7 +15,7 @@ export default function Home() {
   return (
     <div>
       {/* ヘッダー */}
-      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pt-4 pb-3">
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="bg-[#e63946] text-white text-[9px] font-black px-1.5 py-0.5 rounded tracking-wider">

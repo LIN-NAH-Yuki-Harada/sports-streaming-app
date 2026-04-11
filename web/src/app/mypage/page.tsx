@@ -68,7 +68,7 @@ export default function MyPage() {
 
   return (
     <div>
-      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pt-4 pb-3">
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
         <h1 className="text-sm font-bold">マイページ</h1>
       </div>
 
