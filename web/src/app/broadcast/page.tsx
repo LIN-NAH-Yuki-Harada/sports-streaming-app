@@ -15,13 +15,18 @@ import {
 
 const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
 
-// セット制スポーツの設定
-const SETS_TO_WIN: Record<string, number> = {
-  バレー: 3,
+// バレーボールのルール設定
+const VOLLEYBALL_RULES: Record<string, {
+  setsToWin: number;
+  setPoint: number;
+  finalSetPoint: number;
+  periods: string[];
+}> = {
+  "小学生6人制": { setsToWin: 2, setPoint: 21, finalSetPoint: 15, periods: ["1SET", "2SET", "3SET"] },
+  "6人制":      { setsToWin: 3, setPoint: 25, finalSetPoint: 15, periods: ["1SET", "2SET", "3SET", "4SET", "5SET"] },
+  "9人制":      { setsToWin: 2, setPoint: 21, finalSetPoint: 21, periods: ["1SET", "2SET", "3SET"] },
 };
-const SET_POINT_SCORE: Record<string, number> = {
-  バレー: 25,
-};
+const VOLLEYBALL_RULE_NAMES = Object.keys(VOLLEYBALL_RULES);
 
 const PERIODS: Record<string, string[]> = {
   サッカー: ["前半", "後半", "延長"],
@@ -31,7 +36,6 @@ const PERIODS: Record<string, string[]> = {
     "7回表", "7回裏", "8回表", "8回裏", "9回表", "9回裏", "延長",
   ],
   バスケ: ["1Q", "2Q", "3Q", "4Q", "OT"],
-  バレー: ["1SET", "2SET", "3SET", "4SET", "5SET"],
   陸上: ["競技中"],
   その他: ["前半", "後半", "延長"],
 };
@@ -44,6 +48,7 @@ export default function BroadcastPage() {
   const [trialUsed, setTrialUsed] = useState(false);
 
   const [sport, setSport] = useState("サッカー");
+  const [volleyballRule, setVolleyballRule] = useState("6人制");
   const [home, setHome] = useState("");
   const [away, setAway] = useState("");
   const [tournament, setTournament] = useState("");
@@ -64,7 +69,8 @@ export default function BroadcastPage() {
   // スコア更新のデバウンス用
   const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const periods = PERIODS[sport] || PERIODS["その他"];
+  const vbRule = sport === "バレー" ? VOLLEYBALL_RULES[volleyballRule] : null;
+  const periods = sport === "バレー" ? (vbRule?.periods || ["1SET", "2SET", "3SET"]) : (PERIODS[sport] || PERIODS["その他"]);
   const currentPeriod = periods[periodIndex] || periods[0];
 
   const canStart = home.trim() && away.trim();
@@ -72,15 +78,15 @@ export default function BroadcastPage() {
 
   // セットポイント・マッチポイント判定
   function getPointLabel(): string | null {
-    const setsToWin = SETS_TO_WIN[sport] || 0;
-    if (setsToWin === 0) return null;
+    if (!vbRule) return null;
 
-    // 最終セット（バレー5セット目）は15点制
-    const isFinalSet = sport === "バレー" && (homeSets + awaySets) >= (setsToWin * 2 - 2);
-    const targetScore = isFinalSet ? 15 : (SET_POINT_SCORE[sport] || 25);
+    const { setsToWin, setPoint, finalSetPoint } = vbRule;
+
+    // 最終セット判定
+    const isFinalSet = (homeSets + awaySets) >= (setsToWin * 2 - 2);
+    const targetScore = isFinalSet ? finalSetPoint : setPoint;
 
     // セットポイント条件: 規定点-1以上 かつ 相手より1点以上リード
-    // 例: 24-23, 25-24(デュース後), 26-25 等
     const homeAtSetPoint = homeScore >= targetScore - 1 && homeScore > awayScore;
     const awayAtSetPoint = awayScore >= targetScore - 1 && awayScore > homeScore;
 
@@ -589,7 +595,7 @@ export default function BroadcastPage() {
               <button
                 key={s}
                 type="button"
-                onClick={() => { setSport(s); setPeriodIndex(0); }}
+                onClick={() => { setSport(s); setPeriodIndex(0); setHomeSets(0); setAwaySets(0); }}
                 className={`text-xs px-3 py-1.5 rounded-md border transition ${
                   sport === s
                     ? "border-[#e63946] text-[#e63946] bg-[#e63946]/10"
@@ -601,6 +607,35 @@ export default function BroadcastPage() {
             ))}
           </div>
         </fieldset>
+
+        {/* バレーボールルール選択 */}
+        {sport === "バレー" && (
+          <fieldset>
+            <legend className="text-[11px] text-gray-400 font-medium mb-2">ルール</legend>
+            <div className="flex flex-wrap gap-2">
+              {VOLLEYBALL_RULE_NAMES.map((rule) => {
+                const r = VOLLEYBALL_RULES[rule];
+                return (
+                  <button
+                    key={rule}
+                    type="button"
+                    onClick={() => { setVolleyballRule(rule); setPeriodIndex(0); setHomeSets(0); setAwaySets(0); }}
+                    className={`text-xs px-3 py-1.5 rounded-md border transition ${
+                      volleyballRule === rule
+                        ? "border-[#e63946] text-[#e63946] bg-[#e63946]/10"
+                        : "border-white/10 text-gray-400 hover:border-white/20"
+                    }`}
+                  >
+                    {rule}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[9px] text-gray-600">
+              {vbRule && `${vbRule.setsToWin * 2 - 1}セットマッチ / ${vbRule.setPoint}点制 / 最終セット${vbRule.finalSetPoint}点`}
+            </p>
+          </fieldset>
+        )}
 
         {/* チーム */}
         <div className="grid gap-3 sm:grid-cols-2">
