@@ -86,7 +86,7 @@ export function BottomNav() {
                 tab.icon
               )}
               <span
-                className={`text-[10px] ${
+                className={`text-[11px] ${
                   tab.special ? "text-[#e63946] -mt-0.5" : ""
                 }`}
               >

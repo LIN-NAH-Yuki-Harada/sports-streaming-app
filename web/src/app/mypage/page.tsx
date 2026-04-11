@@ -91,7 +91,7 @@ export default function MyPage() {
                 <p className="text-sm font-medium text-gray-400">
                   ログインしていません
                 </p>
-                <p className="text-[10px] text-gray-600">
+                <p className="text-xs text-gray-600">
                   ログインするとお気に入りチームや配信履歴が使えます
                 </p>
               </div>
@@ -129,7 +129,7 @@ export default function MyPage() {
                     </button>
                     <button
                       onClick={() => setEditingName(false)}
-                      className="text-[10px] text-gray-500 whitespace-nowrap"
+                      className="text-xs text-gray-500 whitespace-nowrap"
                     >
                       取消
                     </button>
@@ -144,7 +144,7 @@ export default function MyPage() {
                         setNameInput(profile?.display_name || "");
                         setEditingName(true);
                       }}
-                      className="text-[9px] text-gray-600 hover:text-gray-400"
+                      className="text-xs text-gray-600 hover:text-gray-400"
                     >
                       編集
                     </button>
@@ -152,11 +152,11 @@ export default function MyPage() {
                 )}
                 {/* メールアドレス（表示名がある場合） */}
                 {profile?.display_name && !editingName && (
-                  <p className="text-[10px] text-gray-500 truncate">
+                  <p className="text-xs text-gray-500 truncate">
                     {user.email}
                   </p>
                 )}
-                <p className="text-[10px] text-gray-500 mt-0.5">
+                <p className="text-xs text-gray-500 mt-0.5">
                   {PLAN_LABELS[profile?.plan || "free"]}
                 </p>
               </div>
@@ -170,7 +170,7 @@ export default function MyPage() {
                   className="flex items-center justify-between py-3 border-b border-white/5 text-sm"
                 >
                   <span className="text-gray-400">{item.label}</span>
-                  <span className="text-[10px] text-gray-700">準備中</span>
+                  <span className="text-xs text-gray-600">準備中</span>
                 </div>
               ))}
             </div>
