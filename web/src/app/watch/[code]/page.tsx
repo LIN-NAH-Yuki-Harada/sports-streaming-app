@@ -288,8 +288,16 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-600">共有コード:</span>
-            <span className="text-xs font-bold tracking-widest">{broadcast.share_code}</span>
+            <a
+              href={`https://line.me/R/share?text=${encodeURIComponent(`【試合配信中】\n${broadcast.home_team} vs ${broadcast.away_team}\n${broadcast.tournament ? broadcast.tournament + "\n" : ""}視聴はこちら → ${typeof window !== "undefined" ? window.location.href : ""}`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 bg-[#06C755] hover:bg-[#05b34c] rounded px-2 py-1 transition"
+            >
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 5.82 2 10.5c0 2.67 1.35 5.04 3.46 6.62-.05.46-.31 1.72-.35 1.99-.06.36.13.36.27.26.1-.07 1.62-1.07 2.28-1.51.72.2 1.49.32 2.29.35L12 18.2c.08 0 .16 0 .24-.01 5.38-.18 9.76-3.93 9.76-8.49C22 5.82 17.52 2 12 2z"/></svg>
+              <span className="text-[9px] font-semibold">共有</span>
+            </a>
+            <span className="text-[10px] text-gray-600">{broadcast.share_code}</span>
           </div>
         </div>
       </div>

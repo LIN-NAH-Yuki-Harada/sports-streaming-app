@@ -553,16 +553,15 @@ export default function BroadcastPage() {
 
           {/* 右下: コントロールボタン群 */}
           <div className="absolute bottom-[calc(8px+env(safe-area-inset-bottom))] right-3 sm:bottom-4 sm:right-4 flex items-center gap-2">
-            <button
-              onClick={() => copyToClipboard(
-                `【試合配信中】\n${home} vs ${away}\n${tournament ? tournament + "\n" : ""}視聴はこちら → ${shareUrl}`,
-                "line"
-              )}
+            <a
+              href={`https://line.me/R/share?text=${encodeURIComponent(`【試合配信中】\n${home} vs ${away}\n${tournament ? tournament + "\n" : ""}視聴はこちら → ${shareUrl}`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="flex items-center gap-1.5 bg-[#06C755] hover:bg-[#05b34c] rounded px-2 sm:px-3 py-1.5 transition"
             >
               <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 5.82 2 10.5c0 2.67 1.35 5.04 3.46 6.62-.05.46-.31 1.72-.35 1.99-.06.36.13.36.27.26.1-.07 1.62-1.07 2.28-1.51.72.2 1.49.32 2.29.35L12 18.2c.08 0 .16 0 .24-.01 5.38-.18 9.76-3.93 9.76-8.49C22 5.82 17.52 2 12 2z"/></svg>
-              <span className="text-[10px] font-semibold">{copied === "line" ? "コピー済" : "LINE共有"}</span>
-            </button>
+              <span className="text-[10px] font-semibold">LINEで共有</span>
+            </a>
 
             {!subscribed && (
               <button className="flex items-center gap-1 bg-[#e63946] hover:bg-[#d62836] rounded px-2 sm:px-3 py-1.5 transition text-[10px] font-semibold">
