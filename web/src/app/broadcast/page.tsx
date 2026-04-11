@@ -126,7 +126,7 @@ export default function BroadcastPage() {
         setShareCode(broadcast.share_code);
         if (!subscribed) setTrialUsed(true);
 
-        // LiveKitトークン��取得
+        // LiveKitトークンを取得
         try {
           const res = await fetch("/api/livekit/token", {
             method: "POST",
@@ -138,6 +138,9 @@ export default function BroadcastPage() {
               role: "broadcaster",
             }),
           });
+          if (!res.ok) {
+            throw new Error(`Token API error: ${res.status}`);
+          }
           const { token } = await res.json();
           setLivekitToken(token);
         } catch (e) {
