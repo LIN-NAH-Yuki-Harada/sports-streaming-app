@@ -96,6 +96,39 @@ export default function Home() {
         </p>
       </section>
 
+      {/* ホーム画面に追加ガイド */}
+      <section className="px-5 pt-8">
+        <h2 className="text-xs font-semibold text-gray-300 mb-3">
+          アプリのように使う
+        </h2>
+        <div className="rounded-lg bg-[#111] border border-white/5 p-4">
+          <p className="text-xs text-gray-400 leading-relaxed mb-3">
+            LIVE SPOtCH をホーム画面に追加すると、アプリのようにワンタップで起動できます。
+          </p>
+          <div className="space-y-3">
+            <div>
+              <p className="text-[10px] text-[#e63946] font-semibold mb-1">iPhone（Safari）の場合</p>
+              <ol className="text-[10px] text-gray-500 space-y-0.5 list-decimal list-inside">
+                <li>画面下の共有ボタン（□↑）をタップ</li>
+                <li>「ホーム画面に追加」を選択</li>
+                <li>「追加」をタップ</li>
+              </ol>
+            </div>
+            <div>
+              <p className="text-[10px] text-[#e63946] font-semibold mb-1">Android（Chrome）の場合</p>
+              <ol className="text-[10px] text-gray-500 space-y-0.5 list-decimal list-inside">
+                <li>右上の「︙」メニューをタップ</li>
+                <li>「ホーム画面に追加」を選択</li>
+                <li>「追加」をタップ</li>
+              </ol>
+            </div>
+          </div>
+          <p className="mt-3 text-[9px] text-gray-600">
+            全画面で表示され、配信中もブラウザのバーが表示されません。
+          </p>
+        </div>
+      </section>
+
       {/* 導入チーム */}
       <section className="px-5 pt-8 pb-20">
         <h2 className="text-xs font-semibold text-gray-300 mb-3">
