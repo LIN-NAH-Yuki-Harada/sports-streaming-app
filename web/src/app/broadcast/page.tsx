@@ -186,19 +186,14 @@ export default function BroadcastPage() {
       broadcastRef.current = null;
     };
 
-    // pagehide: ページが閉じられる・リロードされる時（モバイルで確実に発火）
+    // pagehide: ページが閉じられる・リロードされる時に配信を終了
+    // ※ visibilitychange は使わない（通知確認や電話応答で配信が終了してしまうため）
     const handlePageHide = () => endBroadcastSync();
-    // visibilitychange: アプリを切り替えた時（モバイルでホーム画面に戻る等）
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") endBroadcastSync();
-    };
 
     window.addEventListener("pagehide", handlePageHide);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       window.removeEventListener("pagehide", handlePageHide);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
