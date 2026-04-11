@@ -284,11 +284,10 @@ export default function BroadcastPage() {
   }
 
   // ブラウザUIを隠す（配信中）
+  const isLiveScreen = !!shareCode && !!user;
   useEffect(() => {
-    if (getScreen() !== "live") return;
-    // スクロールでアドレスバーを隠す
+    if (!isLiveScreen) return;
     window.scrollTo(0, 1);
-    // bodyのスクロールを無効化
     document.body.style.overflow = "hidden";
     document.body.style.position = "fixed";
     document.body.style.width = "100%";
@@ -299,7 +298,7 @@ export default function BroadcastPage() {
       document.body.style.width = "";
       document.body.style.height = "";
     };
-  });
+  }, [isLiveScreen]);
 
   // ===== 配信中（フルスクリーン） =====
   if (screen === "live") {
