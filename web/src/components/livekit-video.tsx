@@ -7,6 +7,7 @@ import {
   RoomAudioRenderer,
   useTracks,
   useConnectionState,
+  useParticipants,
 } from "@livekit/components-react";
 import { Track, ConnectionState } from "livekit-client";
 
@@ -22,6 +23,8 @@ function BroadcasterRenderer({
 }) {
   const connectionState = useConnectionState();
   const tracks = useTracks([Track.Source.Camera]);
+  const participants = useParticipants();
+  const viewerCount = Math.max(0, participants.length - 1); // 自分を除く
   const prevState = useRef(connectionState);
 
   useEffect(() => {
@@ -87,6 +90,17 @@ function BroadcasterRenderer({
           }}
         />
       )}
+
+      {/* 視聴者数 */}
+      {connectionState === ConnectionState.Connected && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[2] flex items-center gap-1 bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1">
+          <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+          <span className="text-[10px] text-gray-300 font-medium tabular-nums">{viewerCount}</span>
+        </div>
+      )}
     </>
   );
 }
@@ -97,6 +111,7 @@ function BroadcasterRenderer({
 function ViewerRenderer() {
   const connectionState = useConnectionState();
   const tracks = useTracks([Track.Source.Camera, Track.Source.Microphone]);
+  const participants = useParticipants();
 
   const cameraTrack = tracks.find(
     (t) => t.source === Track.Source.Camera && t.publication?.track
@@ -139,6 +154,17 @@ function ViewerRenderer() {
           <p className="text-xs text-gray-500">配信者の接続を待っています...</p>
         </div>
       ) : null}
+
+      {/* 視聴者数 */}
+      {connectionState === ConnectionState.Connected && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[2] flex items-center gap-1 bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1">
+          <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+          <span className="text-[10px] text-gray-300 font-medium tabular-nums">{participants.length}</span>
+        </div>
+      )}
     </>
   );
 }
