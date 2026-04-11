@@ -198,9 +198,19 @@ export default function BroadcastPage() {
   }, []);
 
   function copyToClipboard(text: string, label: string) {
-    navigator.clipboard.writeText(text);
-    setCopied(label);
-    setTimeout(() => setCopied(""), 2000);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(label);
+        setTimeout(() => setCopied(""), 2000);
+      }).catch(() => {
+        setCopied("error");
+        setTimeout(() => setCopied(""), 2000);
+      });
+    } else {
+      // HTTP環境ではclipboard APIが使えない
+      setCopied("error");
+      setTimeout(() => setCopied(""), 2000);
+    }
   }
 
   const screen = getScreen();
@@ -276,7 +286,7 @@ export default function BroadcastPage() {
           </div>
 
           {/* スコア操作パネル */}
-          <div className="absolute bottom-14 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2">
+          <div className="absolute bottom-[calc(56px+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2">
             <div className="flex items-center gap-1.5">
               <span className="text-[9px] text-gray-400 w-12 truncate text-right">{home}</span>
               <button
@@ -352,7 +362,7 @@ export default function BroadcastPage() {
           </div>
 
           {/* 左下: 共有コード */}
-          <div className="absolute bottom-3 left-3 sm:bottom-4 sm:left-4">
+          <div className="absolute bottom-[calc(12px+env(safe-area-inset-bottom))] left-3 sm:bottom-4 sm:left-4">
             <button
               onClick={() => copyToClipboard(shareCode, "code")}
               className="flex items-center gap-2 bg-black/70 backdrop-blur-sm rounded px-2 sm:px-3 py-1.5 transition hover:bg-black/90"
@@ -366,10 +376,13 @@ export default function BroadcastPage() {
             {copied === "code" && (
               <p className="text-[9px] text-green-400 mt-1 ml-1">コピーしました</p>
             )}
+            {copied === "error" && (
+              <p className="text-[9px] text-yellow-400 mt-1 ml-1">HTTPS環境でコピーが有効になります</p>
+            )}
           </div>
 
           {/* 右下: コントロールボタン群 */}
-          <div className="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 flex items-center gap-2">
+          <div className="absolute bottom-[calc(12px+env(safe-area-inset-bottom))] right-3 sm:bottom-4 sm:right-4 flex items-center gap-2">
             <button
               onClick={() => copyToClipboard(
                 `【試合配信中】\n${home} vs ${away}\n${tournament ? tournament + "\n" : ""}視聴はこちら → ${shareUrl}`,

@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 export function BottomNav() {
   const pathname = usePathname();
 
-  // LP・法的ページ・配信ページ・視聴ページではボトムナビを非表示
-  const hiddenPaths = ["/lp", "/terms", "/privacy", "/contact", "/broadcast", "/watch"];
+  // LP・法的ページ・視聴ページではボトムナビを非表示
+  const hiddenPaths = ["/lp", "/terms", "/privacy", "/contact", "/watch"];
   if (hiddenPaths.some((path) => pathname.startsWith(path))) return null;
 
   const tabs = [
