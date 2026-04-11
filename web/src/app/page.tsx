@@ -101,42 +101,52 @@ export default function Home() {
         <div className="rounded-xl bg-gradient-to-br from-[#e63946]/10 via-[#111] to-[#111] border border-[#e63946]/20 p-5 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-[#e63946]/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2" />
           <div className="relative">
-            <div className="flex items-center gap-3 mb-3">
+            <div className="flex items-center gap-3 mb-2">
               <div className="w-10 h-10 rounded-xl bg-[#e63946] flex items-center justify-center shadow-lg shadow-[#e63946]/20">
                 <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
                   <circle cx="12" cy="12" r="8" />
                 </svg>
               </div>
               <div>
-                <p className="text-sm font-bold">ホーム画面に追加しよう</p>
-                <p className="text-[10px] text-gray-500">ワンタップで試合をチェック</p>
+                <p className="text-sm font-bold">もっと快適に配信・視聴</p>
+                <p className="text-[10px] text-gray-500">ホーム画面に追加するだけ</p>
               </div>
             </div>
 
-            <div className="flex gap-3 mt-4">
-              <div className="flex-1 rounded-lg bg-black/30 px-3 py-2.5">
-                <p className="text-[9px] text-[#e63946] font-bold mb-1.5">iPhone</p>
-                <div className="flex items-center gap-1.5 text-[9px] text-gray-400">
-                  <span className="w-4 h-4 rounded bg-white/10 flex items-center justify-center text-[8px]">□↑</span>
-                  <span>→</span>
-                  <span>ホーム画面に追加</span>
-                </div>
+            <p className="text-[11px] text-gray-400 leading-relaxed mt-3">
+              ホーム画面に追加すると、URLバーが消えて<strong className="text-gray-300">全画面で配信・視聴</strong>ができます。アプリのようにワンタップで起動。
+            </p>
+
+            <div className="grid grid-cols-3 gap-2 mt-4">
+              <div className="rounded-lg bg-black/30 px-2 py-2 text-center">
+                <svg className="w-4 h-4 text-[#e63946] mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+                <p className="text-[9px] text-gray-400">全画面配信</p>
               </div>
-              <div className="flex-1 rounded-lg bg-black/30 px-3 py-2.5">
-                <p className="text-[9px] text-[#e63946] font-bold mb-1.5">Android</p>
-                <div className="flex items-center gap-1.5 text-[9px] text-gray-400">
-                  <span className="w-4 h-4 rounded bg-white/10 flex items-center justify-center text-[8px]">︙</span>
-                  <span>→</span>
-                  <span>ホーム画面に追加</span>
-                </div>
+              <div className="rounded-lg bg-black/30 px-2 py-2 text-center">
+                <svg className="w-4 h-4 text-[#e63946] mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <p className="text-[9px] text-gray-400">ワンタップ起動</p>
+              </div>
+              <div className="rounded-lg bg-black/30 px-2 py-2 text-center">
+                <svg className="w-4 h-4 text-[#e63946] mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+                <p className="text-[9px] text-gray-400">アプリ感覚</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/5">
-              <svg className="w-3.5 h-3.5 text-[#e63946] shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              <span className="text-[10px] text-gray-500">通知を見逃さない・全画面配信・アプリ感覚で操作</span>
+            <div className="flex gap-3 mt-4 pt-3 border-t border-white/5">
+              <div className="flex-1 rounded-lg bg-black/40 px-3 py-2">
+                <p className="text-[9px] text-[#e63946] font-bold mb-1">iPhone</p>
+                <p className="text-[9px] text-gray-500">共有ボタン □↑ → ホーム画面に追加</p>
+              </div>
+              <div className="flex-1 rounded-lg bg-black/40 px-3 py-2">
+                <p className="text-[9px] text-[#e63946] font-bold mb-1">Android</p>
+                <p className="text-[9px] text-gray-500">メニュー ︙ → ホーム画面に追加</p>
+              </div>
             </div>
           </div>
         </div>
