@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
+import { createClient } from "@/lib/supabase";
 import {
   createBroadcast,
   updateBroadcastScore,
@@ -154,6 +155,53 @@ export default function BroadcastPage() {
     cleanupStaleBroadcasts(user.id);
   }, [user?.id]);
 
+  // ページ離脱・画面切替時に配信を自動終了する
+  useEffect(() => {
+    // 認証トークンを取得して保持（離脱時に非同期処理ができないため）
+    const supabase = createClient();
+    let accessToken: string | null = null;
+
+    supabase.auth.getSession().then(({ data }) => {
+      accessToken = data.session?.access_token ?? null;
+    });
+
+    const endBroadcastSync = () => {
+      const bc = broadcastRef.current;
+      if (!bc || !accessToken) return;
+
+      // keepalive: true でページ離脱時にもリクエストを完了させる
+      fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/broadcasts?id=eq.${bc.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ status: "ended", ended_at: new Date().toISOString() }),
+          keepalive: true,
+        }
+      );
+      broadcastRef.current = null;
+    };
+
+    // pagehide: ページが閉じられる・リロードされる時（モバイルで確実に発火）
+    const handlePageHide = () => endBroadcastSync();
+    // visibilitychange: アプリを切り替えた時（モバイルでホーム画面に戻る等）
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") endBroadcastSync();
+    };
+
+    window.addEventListener("pagehide", handlePageHide);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
   function copyToClipboard(text: string, label: string) {
     navigator.clipboard.writeText(text);
     setCopied(label);
@@ -208,7 +256,7 @@ export default function BroadcastPage() {
   if (screen === "live") {
     const shareUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/watch/${shareCode}`;
     return (
-      <div className="fixed inset-0 z-50 bg-black flex flex-col landscape:flex-row">
+      <div className="fixed inset-0 z-[60] bg-black flex flex-col landscape:flex-row">
         <div className="relative flex-1 bg-[#0a0a0a] flex items-center justify-center overflow-hidden">
           <p className="text-xs text-gray-600">カメラ映像（LiveKit接続後に有効）</p>
 
