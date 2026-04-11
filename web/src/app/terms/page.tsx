@@ -37,7 +37,7 @@ export default function TermsPage() {
         <section>
           <h2 className="text-base font-semibold text-white mb-3">第4条（料金・支払い）</h2>
           <ol className="list-decimal list-inside space-y-2 text-gray-400">
-            <li><strong className="text-gray-300">無料プラン</strong>: 視聴のみ。1ヶ月以内のアーカイブ視聴が可能です。</li>
+            <li><strong className="text-gray-300">無料プラン</strong>: 視聴のみ。アーカイブ視聴機能は今後提供予定です。</li>
             <li><strong className="text-gray-300">配信者プラン（月額300円）</strong>: ライブ配信、スコアボード・オーバーレイ、共有コード発行、アーカイブ保存が利用可能です。初回10分間は無料でお試しいただけます。</li>
             <li><strong className="text-gray-300">チームプラン（月額500円）</strong>: 配信者プランの全機能に加え、大容量ストレージ、スケジュール管理、メンバー管理が利用可能です。</li>
             <li>料金はクレジットカード等による月額課金制です。</li>
@@ -90,7 +90,7 @@ export default function TermsPage() {
         <section>
           <h2 className="text-base font-semibold text-white mb-3">第9条（退会）</h2>
           <p className="text-gray-400">
-            ユーザーは、マイページからいつでも退会手続きを行うことができます。退会後、アカウント情報および配信データは一定期間後に削除されます。
+            ユーザーは、お問い合わせフォームまたはメールにて退会を申請することができます。退会後、アカウント情報および配信データは一定期間後に削除されます。
           </p>
         </section>
 
@@ -111,7 +111,7 @@ export default function TermsPage() {
 
       <div className="mt-12 pt-6 border-t border-white/5">
         <p className="text-[10px] text-gray-600">LIVE SPOtCH運営事務局</p>
-        <a href="/lp" className="inline-block mt-4 text-xs text-gray-400 hover:text-white transition">
+        <a href="/" className="inline-block mt-4 text-xs text-gray-400 hover:text-white transition">
           ← トップに戻る
         </a>
       </div>

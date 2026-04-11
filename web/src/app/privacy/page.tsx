@@ -114,7 +114,10 @@ export default function PrivacyPage() {
           <div className="mt-2 bg-[#111] border border-white/5 rounded-md px-4 py-3">
             <p className="text-xs text-gray-400">LIVE SPOtCH運営事務局</p>
             <p className="text-xs text-gray-500 mt-1">
-              お問い合わせ: <a href="/contact" className="text-[#e63946] hover:underline">お問い合わせフォーム</a>
+              メール: live.spotch@gmail.com
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              <a href="/contact" className="text-[#e63946] hover:underline">お問い合わせフォーム</a>
             </p>
           </div>
         </section>
@@ -122,7 +125,7 @@ export default function PrivacyPage() {
 
       <div className="mt-12 pt-6 border-t border-white/5">
         <p className="text-[10px] text-gray-600">LIVE SPOtCH運営事務局</p>
-        <a href="/lp" className="inline-block mt-4 text-xs text-gray-400 hover:text-white transition">
+        <a href="/" className="inline-block mt-4 text-xs text-gray-400 hover:text-white transition">
           ← トップに戻る
         </a>
       </div>
