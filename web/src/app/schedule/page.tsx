@@ -1,67 +1,116 @@
 "use client";
 
-const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+import { useState, useEffect } from "react";
+import { getBroadcastHistory, type Broadcast } from "@/lib/database";
 
-function getDateLabel(offset: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
+const SPORT_EMOJI: Record<string, string> = {
+  サッカー: "⚽",
+  野球: "⚾",
+  バスケ: "🏀",
+  バレー: "🏐",
+  陸上: "🏃",
+  その他: "🏆",
+};
+
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr);
   const month = d.getMonth() + 1;
   const day = d.getDate();
-  const weekday = WEEKDAYS[d.getDay()];
-  const suffix = offset === 0 ? " 今日" : offset === 1 ? " 明日" : "";
-  return `${month}/${day} (${weekday})${suffix}`;
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+  const weekday = weekdays[d.getDay()];
+  return `${month}/${day}（${weekday}）`;
 }
 
-// サンプルデータ（Supabase接続後に動的取得）
-const SAMPLE_MATCHES = [
-  [
-    { time: "14:00", sport: "サッカー", home: "明星SC", away: "光が丘FC", tournament: "練馬区4年生大会" },
-    { time: "15:30", sport: "バスケ", home: "桜台ミニバス", away: "石神井クラブ", tournament: "練習試合" },
-    { time: "16:00", sport: "野球", home: "大泉ジュニア", away: "関町イーグルス", tournament: "区少年野球秋季" },
-  ],
-  [
-    { time: "10:00", sport: "バレー", home: "開進二中", away: "練馬東中", tournament: "区中学春季大会" },
-    { time: "13:00", sport: "サッカー", home: "大泉学園SC", away: "田柄FC", tournament: "5年生リーグ" },
-  ],
-  [
-    { time: "15:00", sport: "野球", home: "光が丘リトル", away: "石神井ファイターズ", tournament: "練習試合" },
-  ],
-];
+function formatTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+}
 
-export default function SchedulePage() {
-  const days = SAMPLE_MATCHES.map((matches, i) => ({
-    date: getDateLabel(i),
-    matches,
-  }));
+export default function HistoryPage() {
+  const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getBroadcastHistory().then((data) => {
+      setBroadcasts(data);
+      setLoading(false);
+    });
+  }, []);
+
+  // 日付ごとにグループ化
+  const grouped: { date: string; items: Broadcast[] }[] = [];
+  for (const bc of broadcasts) {
+    const date = formatDate(bc.started_at);
+    const last = grouped[grouped.length - 1];
+    if (last && last.date === date) {
+      last.items.push(bc);
+    } else {
+      grouped.push({ date, items: [bc] });
+    }
+  }
 
   return (
     <div>
-      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pt-4 pb-3">
-        <h1 className="text-sm font-bold">試合予定</h1>
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+        <h1 className="text-sm font-bold">配信履歴</h1>
       </div>
 
       <div className="px-5 pb-20">
-        {days.map((day) => (
-          <div key={day.date} className="mt-6 first:mt-2">
-            <h2 className="text-[11px] text-gray-500 font-medium mb-2">
-              {day.date}
+        {loading && (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
+
+        {!loading && broadcasts.length === 0 && (
+          <div className="text-center py-16">
+            <p className="text-sm text-gray-500">まだ配信履歴がありません</p>
+            <p className="text-xs text-gray-600 mt-1">配信を行うとここに履歴が表示されます</p>
+            <a href="/broadcast" className="inline-block mt-4 text-xs text-[#e63946] hover:underline">
+              配信をはじめる
+            </a>
+          </div>
+        )}
+
+        {grouped.map((group) => (
+          <div key={group.date} className="mt-6 first:mt-2">
+            <h2 className="text-xs text-gray-500 font-medium mb-2">
+              {group.date}
             </h2>
-            <div className="space-y-1.5">
-              {day.matches.map((m) => (
+            <div className="space-y-2">
+              {group.items.map((bc) => (
                 <div
-                  key={m.home + m.time}
-                  className="flex items-center gap-3 rounded-md bg-[#111] border border-white/5 px-3 py-2.5"
+                  key={bc.id}
+                  className="rounded-lg bg-[#111] border border-white/5 px-4 py-3.5"
                 >
-                  <span className="text-[11px] text-gray-500 tabular-nums w-10 shrink-0">
-                    {m.time}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium truncate">
-                      {m.home} vs {m.away}
-                    </p>
-                    <p className="text-[9px] text-gray-600 truncate">
-                      {m.sport} / {m.tournament}
-                    </p>
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">{SPORT_EMOJI[bc.sport] || "🏆"}</span>
+                        <p className="text-sm font-medium truncate">
+                          {bc.home_team} vs {bc.away_team}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        {bc.tournament && (
+                          <span className="text-xs text-gray-500">{bc.tournament}</span>
+                        )}
+                        <span className="text-xs text-gray-600">{formatTime(bc.started_at)}</span>
+                      </div>
+                    </div>
+                    {/* スコア */}
+                    <div className="shrink-0 ml-3 text-right">
+                      <div className="flex items-center gap-1.5 bg-black/30 rounded px-2.5 py-1.5">
+                        <span className="text-base font-black tabular-nums">{bc.home_score}</span>
+                        <span className="text-xs text-gray-600">-</span>
+                        <span className="text-base font-black tabular-nums">{bc.away_score}</span>
+                      </div>
+                      {(bc.home_sets > 0 || bc.away_sets > 0) && (
+                        <p className="text-[10px] text-yellow-400 mt-1">
+                          セット {bc.home_sets} - {bc.away_sets}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}

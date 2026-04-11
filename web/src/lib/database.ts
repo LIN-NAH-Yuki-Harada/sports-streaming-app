@@ -214,6 +214,23 @@ export async function getTeamNames(): Promise<{ name: string; sport: string }[]>
   return result;
 }
 
+// 過去の配信履歴を取得（終了済みのみ、新しい順）
+export async function getBroadcastHistory(limit = 50): Promise<Broadcast[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("*")
+    .eq("status", "ended")
+    .order("started_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("配信履歴取得エラー:", error.message);
+    return [];
+  }
+  return data || [];
+}
+
 export async function getBroadcastByCode(
   shareCode: string
 ): Promise<Broadcast | null> {
