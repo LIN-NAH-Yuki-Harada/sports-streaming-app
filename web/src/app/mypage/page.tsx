@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
 import { createClient } from "@/lib/supabase";
@@ -12,22 +14,46 @@ const PLAN_LABELS: Record<string, string> = {
   team: "チームプラン（¥500/月）",
 };
 
+// useSearchParams を使うため Suspense でラップしたインナーコンポーネントに分離
 export default function MyPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" />}>
+      <MyPageInner />
+    </Suspense>
+  );
+}
+
+function MyPageInner() {
   const { user, profile, loading, signOut, refreshProfile } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const menuItems = [
-    { label: "お気に入りチーム", ready: false },
-    { label: "視聴履歴", ready: false },
-    { label: "配信履歴", ready: false },
-    { label: "サブスクリプション", ready: false },
-    { label: "通知設定", ready: false },
-    { label: "ヘルプ", ready: false },
-  ];
+  // 決済後のリダイレクト処理
+  useEffect(() => {
+    const checkout = searchParams.get("checkout");
+    if (checkout === "success") {
+      setToast("決済が完了しました！プランを反映中です…");
+      // Webhookで少し遅れて反映されるため、数秒後にプロフィールを再取得
+      const t = setTimeout(() => {
+        refreshProfile();
+        setToast("プランが有効になりました！");
+        setTimeout(() => setToast(null), 3000);
+      }, 2500);
+      router.replace("/mypage");
+      return () => clearTimeout(t);
+    }
+    if (checkout === "cancel") {
+      setToast("決済をキャンセルしました");
+      setTimeout(() => setToast(null), 3000);
+      router.replace("/mypage");
+    }
+  }, [searchParams, router, refreshProfile]);
 
   const handleDeleteAccount = async () => {
     if (!user) return;
@@ -73,6 +99,13 @@ export default function MyPage() {
       </div>
 
       <div className="px-5 pt-4 pb-20">
+        {/* トースト通知 */}
+        {toast && (
+          <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-[#111] border border-[#e63946]/30 text-white text-xs px-4 py-2.5 rounded-md shadow-lg">
+            {toast}
+          </div>
+        )}
+
         {/* 読み込み中 */}
         {loading && (
           <div className="flex items-center justify-center py-16">
@@ -164,12 +197,24 @@ export default function MyPage() {
 
             {/* メニュー */}
             <div className="space-y-1">
-              {menuItems.map((item) => (
+              {/* サブスクリプション（有効） */}
+              <Link
+                href="/pricing"
+                className="flex items-center justify-between py-3 border-b border-white/5 text-sm hover:bg-white/5 transition -mx-2 px-2 rounded"
+              >
+                <span className="text-white">サブスクリプション</span>
+                <span className="text-xs text-[#e63946] font-semibold">
+                  {profile?.plan === "free" ? "プランを選ぶ →" : "プラン管理 →"}
+                </span>
+              </Link>
+
+              {/* その他のメニュー（準備中） */}
+              {["お気に入りチーム", "視聴履歴", "配信履歴", "通知設定", "ヘルプ"].map((label) => (
                 <div
-                  key={item.label}
+                  key={label}
                   className="flex items-center justify-between py-3 border-b border-white/5 text-sm"
                 >
-                  <span className="text-gray-400">{item.label}</span>
+                  <span className="text-gray-400">{label}</span>
                   <span className="text-xs text-gray-600">準備中</span>
                 </div>
               ))}

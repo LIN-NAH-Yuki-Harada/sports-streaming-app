@@ -7,6 +7,11 @@ export type Profile = {
   display_name: string | null;
   avatar_url: string | null;
   plan: "free" | "broadcaster" | "team";
+  // Stripe 連携（2026-04-14追加）
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  subscription_status: string | null;
+  current_period_end: string | null;
   created_at: string;
   updated_at: string;
 };
