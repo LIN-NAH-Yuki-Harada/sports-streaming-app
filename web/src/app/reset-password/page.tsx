@@ -46,10 +46,10 @@ export default function ResetPasswordPage() {
         <p className="text-sm font-bold">パスワードを再設定しました</p>
         <p className="mt-2 text-xs text-gray-500">新しいパスワードでログインできます。</p>
         <a
-          href="/mypage"
+          href="/"
           className="mt-6 inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-6 py-2.5 rounded-md transition"
         >
-          マイページへ
+          ホームへ
         </a>
       </div>
     );

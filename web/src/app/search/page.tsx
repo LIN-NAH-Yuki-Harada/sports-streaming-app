@@ -94,7 +94,7 @@ export default function TeamPage() {
       const data = await res.json();
       setTeams(data.teams || []);
     } catch {
-      console.error("チーム取得エラー");
+      showToast("チームの取得に失敗しました。通信状況を確認してください。");
     } finally {
       setLoadingTeams(false);
     }
@@ -229,6 +229,7 @@ export default function TeamPage() {
   // メンバー削除
   const handleRemoveMember = async (userId: string) => {
     if (!selectedTeam) return;
+    if (!confirm("このメンバーを削除しますか？")) return;
     try {
       const token = await getToken();
       const res = await fetch(`/api/teams/${selectedTeam.id}/members`, {

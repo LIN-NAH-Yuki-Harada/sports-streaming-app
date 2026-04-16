@@ -101,6 +101,7 @@ export default function ContactPage() {
               rows={5}
               className="mt-1 w-full bg-[#111] border border-white/10 rounded-md px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:border-[#e63946]/50 focus:outline-none transition resize-none"
             />
+            <p className="mt-1 text-right text-[10px] text-gray-600">{message.length}/5,000</p>
           </div>
           {error && (
             <p className="text-xs text-[#e63946] bg-[#e63946]/10 rounded-md px-3 py-2">

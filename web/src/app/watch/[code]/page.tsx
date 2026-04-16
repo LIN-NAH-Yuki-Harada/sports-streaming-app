@@ -134,9 +134,40 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
           共有コード「{code.toUpperCase()}」に該当する配信はありません。<br />
           コードが正しいか確認してください。
         </p>
+
+        {/* リトライ: 別のコードで再検索 */}
+        <div className="mt-6 flex gap-2 max-w-xs mx-auto">
+          <input
+            type="text"
+            placeholder="コードを再入力"
+            maxLength={8}
+            onChange={(e) => {
+              const el = e.target as HTMLInputElement;
+              el.value = el.value.toUpperCase();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const val = (e.target as HTMLInputElement).value.trim();
+                if (val) window.location.href = `/watch/${val}`;
+              }
+            }}
+            className="flex-1 bg-[#111] border border-white/10 rounded-md px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:border-[#e63946]/50 focus:outline-none transition tracking-widest"
+          />
+          <button
+            onClick={(e) => {
+              const input = (e.currentTarget as HTMLElement).previousElementSibling as HTMLInputElement;
+              const val = input?.value.trim();
+              if (val) window.location.href = `/watch/${val}`;
+            }}
+            className="shrink-0 px-4 py-2.5 rounded-md bg-[#e63946] text-white text-sm font-semibold hover:bg-[#d62836] transition"
+          >
+            視聴
+          </button>
+        </div>
+
         <a
           href="/"
-          className="inline-block mt-6 text-xs text-[#e63946] hover:underline"
+          className="inline-block mt-4 text-xs text-gray-500 hover:text-white transition"
         >
           トップに戻る
         </a>

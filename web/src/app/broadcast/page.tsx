@@ -101,6 +101,9 @@ export default function BroadcastPage() {
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
 
+  // 無料お試しタイマー（秒数）
+  const [trialRemaining, setTrialRemaining] = useState<number | null>(null);
+
   // DB上の配信データ
   const broadcastRef = useRef<Broadcast | null>(null);
   // スコア更新のデバウンス用
@@ -279,6 +282,8 @@ export default function BroadcastPage() {
 
   // 配信終了
   async function handleEnd() {
+    if (!confirm("配信を終了しますか？")) return;
+
     // LiveKit切断（トークンをnull化 → LiveKitRoom自動アンマウント）
     setLivekitToken(null);
     setLivekitError(null);
@@ -299,6 +304,28 @@ export default function BroadcastPage() {
     setSetResults([]);
     setPeriodIndex(0);
   }
+
+  // 無料お試しカウントダウンタイマー
+  useEffect(() => {
+    if (subscribed || !shareCode || !broadcastRef.current) {
+      setTrialRemaining(null);
+      return;
+    }
+    const startedAt = new Date(broadcastRef.current.started_at).getTime();
+    const TRIAL_MS = 10 * 60 * 1000;
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((startedAt + TRIAL_MS - Date.now()) / 1000));
+      setTrialRemaining(remaining);
+      if (remaining <= 0) {
+        handleEnd();
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subscribed, shareCode]);
 
   // ページ読み込み時に、このユーザーの放置された配信を自動終了する
   useEffect(() => {
@@ -494,14 +521,14 @@ export default function BroadcastPage() {
                 <span className="text-[9px] text-gray-400 max-w-[50px] truncate text-right">{home}</span>
                 <button
                   onClick={() => changeHomeScore(-1)}
-                  className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm font-bold transition active:scale-90"
+                  className="w-10 h-10 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-base font-bold transition active:scale-90"
                 >
                   −
                 </button>
                 <span className="text-lg font-black tabular-nums w-6 text-center">{homeScore}</span>
                 <button
                   onClick={() => changeHomeScore(1)}
-                  className="w-7 h-7 rounded bg-[#e63946] hover:bg-[#d62836] flex items-center justify-center text-sm font-bold transition active:scale-90"
+                  className="w-10 h-10 rounded bg-[#e63946] hover:bg-[#d62836] flex items-center justify-center text-base font-bold transition active:scale-90"
                 >
                   +
                 </button>
@@ -512,14 +539,14 @@ export default function BroadcastPage() {
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => changeAwayScore(-1)}
-                  className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm font-bold transition active:scale-90"
+                  className="w-10 h-10 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-base font-bold transition active:scale-90"
                 >
                   −
                 </button>
                 <span className="text-lg font-black tabular-nums w-6 text-center">{awayScore}</span>
                 <button
                   onClick={() => changeAwayScore(1)}
-                  className="w-7 h-7 rounded bg-[#e63946] hover:bg-[#d62836] flex items-center justify-center text-sm font-bold transition active:scale-90"
+                  className="w-10 h-10 rounded bg-[#e63946] hover:bg-[#d62836] flex items-center justify-center text-base font-bold transition active:scale-90"
                 >
                   +
                 </button>
@@ -530,14 +557,14 @@ export default function BroadcastPage() {
             <div className="flex items-center justify-center gap-2 mt-1.5">
               <button
                 onClick={() => changePeriod(periodIndex - 1)}
-                className="w-6 h-6 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs transition active:scale-90"
+                className="w-8 h-8 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm transition active:scale-90"
               >
                 ‹
               </button>
               <span className="text-[10px] font-medium min-w-[40px] text-center">{currentPeriod}</span>
               <button
                 onClick={() => changePeriod(periodIndex + 1)}
-                className="w-6 h-6 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs transition active:scale-90"
+                className="w-8 h-8 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm transition active:scale-90"
               >
                 ›
               </button>
@@ -572,9 +599,9 @@ export default function BroadcastPage() {
 
           {/* 右上: 大会名 + LIVE + お試し表示 */}
           <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center gap-1.5">
-            {!subscribed && (
-              <div className="bg-yellow-500/20 backdrop-blur-sm rounded px-2 py-1 text-[9px] text-yellow-500 font-medium">
-                お試し 10分
+            {!subscribed && trialRemaining !== null && (
+              <div className={`backdrop-blur-sm rounded px-2 py-1 text-[9px] font-medium ${trialRemaining <= 60 ? "bg-red-500/30 text-red-400 animate-pulse" : "bg-yellow-500/20 text-yellow-500"}`}>
+                残り {Math.floor(trialRemaining / 60)}:{String(trialRemaining % 60).padStart(2, "0")}
               </div>
             )}
             {(tournament || sport) && (
@@ -624,9 +651,12 @@ export default function BroadcastPage() {
             </a>
 
             {!subscribed && (
-              <button className="flex items-center gap-1 bg-[#e63946] hover:bg-[#d62836] rounded px-2 sm:px-3 py-1.5 transition text-[10px] font-semibold">
+              <a
+                href="/pricing"
+                className="flex items-center gap-1 bg-[#e63946] hover:bg-[#d62836] rounded px-2 sm:px-3 py-1.5 transition text-[10px] font-semibold"
+              >
                 プランに登録
-              </button>
+              </a>
             )}
 
             <button
