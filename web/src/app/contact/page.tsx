@@ -72,6 +72,7 @@ export default function ContactPage() {
             <input
               type="text"
               required
+              maxLength={100}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="山田太郎"
@@ -93,6 +94,7 @@ export default function ContactPage() {
             <label className="text-[11px] text-gray-400 font-medium">お問い合わせ内容</label>
             <textarea
               required
+              maxLength={5000}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               placeholder="ご質問・ご要望・不具合の詳細をお書きください"
