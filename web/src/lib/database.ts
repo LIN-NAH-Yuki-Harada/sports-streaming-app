@@ -7,6 +7,7 @@ export type Profile = {
   display_name: string | null;
   avatar_url: string | null;
   plan: "free" | "broadcaster" | "team";
+  trial_used: boolean;
   // Stripe 連携（2026-04-14追加）
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
@@ -114,39 +115,52 @@ export async function createTeam(params: {
   description?: string;
 }): Promise<Team | null> {
   const supabase = createClient();
-  const inviteCode = generateInviteCode();
 
-  const { data: team, error } = await supabase
-    .from("teams")
-    .insert({
-      name: params.name,
-      sport: params.sport,
-      description: params.description || null,
-      invite_code: inviteCode,
-      owner_id: params.userId,
-    })
-    .select()
-    .single();
+  // 招待コードの衝突時は最大3回リトライ
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const inviteCode = generateInviteCode();
 
-  if (error) {
+    const { data: team, error } = await supabase
+      .from("teams")
+      .insert({
+        name: params.name,
+        sport: params.sport,
+        description: params.description || null,
+        invite_code: inviteCode,
+        owner_id: params.userId,
+      })
+      .select()
+      .single();
+
+    if (!error) {
+      // オーナーを team_members にも追加
+      const { error: memberError } = await supabase
+        .from("team_members")
+        .insert({
+          team_id: team.id,
+          user_id: params.userId,
+          role: "owner",
+        });
+
+      if (memberError) {
+        console.error("オーナーメンバー追加エラー:", memberError.message);
+      }
+
+      return team;
+    }
+
+    // UNIQUE制約違反（招待コード衝突）ならリトライ
+    if (error.code === "23505") {
+      console.warn(`招待コード ${inviteCode} が重複。リトライ ${attempt + 1}/3`);
+      continue;
+    }
+
     console.error("チーム作成エラー:", error.message);
     return null;
   }
 
-  // オーナーを team_members にも追加
-  const { error: memberError } = await supabase
-    .from("team_members")
-    .insert({
-      team_id: team.id,
-      user_id: params.userId,
-      role: "owner",
-    });
-
-  if (memberError) {
-    console.error("オーナーメンバー追加エラー:", memberError.message);
-  }
-
-  return team;
+  console.error("招待コード生成に3回失敗しました");
+  return null;
 }
 
 export async function getMyTeams(userId: string): Promise<TeamWithMembers[]> {

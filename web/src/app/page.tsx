@@ -34,7 +34,7 @@ export default function Home() {
       || (navigator as unknown as { standalone?: boolean }).standalone === true;
     setIsStandalone(standalone);
 
-    getTeamNames().then(setTeams);
+    getTeamNames().then(setTeams).catch(() => {});
 
     // ライブ配信中の試合を取得
     const supabase = createClient();
@@ -44,7 +44,9 @@ export default function Home() {
       .eq("status", "live")
       .order("started_at", { ascending: false })
       .limit(10)
-      .then(({ data }) => setLiveBroadcasts(data || []));
+      .then(({ data, error }) => {
+        if (!error) setLiveBroadcasts(data || []);
+      });
   }, []);
 
   return (

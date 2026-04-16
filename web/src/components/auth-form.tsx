@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase";
 
-type Mode = "login" | "signup";
+type Mode = "login" | "signup" | "reset";
 
 export function AuthForm() {
   const [mode, setMode] = useState<Mode>("login");
@@ -20,7 +20,17 @@ export function AuthForm() {
 
     const supabase = createClient();
 
-    if (mode === "signup") {
+    if (mode === "reset") {
+      // --- パスワードリセット ---
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) {
+        setError(error.message);
+      } else {
+        setSent(true);
+      }
+    } else if (mode === "signup") {
       // --- 新規登録 ---
       const { error } = await supabase.auth.signUp({
         email,
@@ -63,8 +73,9 @@ export function AuthForm() {
     });
   }
 
-  // 確認メール送信済み画面
+  // メール送信済み画面（新規登録 or パスワードリセット）
   if (sent) {
+    const isReset = mode === "reset";
     return (
       <div className="text-center py-8">
         <div className="w-14 h-14 mx-auto rounded-full bg-green-500/10 flex items-center justify-center mb-4">
@@ -72,11 +83,15 @@ export function AuthForm() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
         </div>
-        <p className="text-sm font-bold">確認メールを送信しました</p>
+        <p className="text-sm font-bold">
+          {isReset ? "パスワードリセットメールを送信しました" : "確認メールを送信しました"}
+        </p>
         <p className="mt-2 text-xs text-gray-500 leading-relaxed">
-          <span className="text-white font-medium">{email}</span> に確認メールを送りました。
+          <span className="text-white font-medium">{email}</span> にメールを送りました。
           <br />
-          メール内のリンクをクリックして登録を完了してください。
+          {isReset
+            ? "メール内のリンクからパスワードを再設定してください。"
+            : "メール内のリンクをクリックして登録を完了してください。"}
         </p>
         <button
           onClick={() => { setSent(false); setMode("login"); }}
@@ -110,6 +125,11 @@ export function AuthForm() {
 
       {/* メール認証フォーム */}
       <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+        {mode === "reset" && (
+          <p className="text-xs text-gray-400 leading-relaxed">
+            登録済みのメールアドレスを入力してください。パスワード再設定用のリンクをお送りします。
+          </p>
+        )}
         <div>
           <label className="text-[11px] text-gray-400 font-medium">メールアドレス</label>
           <input
@@ -121,18 +141,20 @@ export function AuthForm() {
             className="mt-1 w-full bg-[#111] border border-white/10 rounded-md px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:border-[#e63946]/50 focus:outline-none transition"
           />
         </div>
-        <div>
-          <label className="text-[11px] text-gray-400 font-medium">パスワード</label>
-          <input
-            type="password"
-            required
-            minLength={6}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="6文字以上"
-            className="mt-1 w-full bg-[#111] border border-white/10 rounded-md px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:border-[#e63946]/50 focus:outline-none transition"
-          />
-        </div>
+        {mode !== "reset" && (
+          <div>
+            <label className="text-[11px] text-gray-400 font-medium">パスワード</label>
+            <input
+              type="password"
+              required
+              minLength={6}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="6文字以上"
+              className="mt-1 w-full bg-[#111] border border-white/10 rounded-md px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:border-[#e63946]/50 focus:outline-none transition"
+            />
+          </div>
+        )}
 
         {error && (
           <p className="text-xs text-[#e63946] bg-[#e63946]/10 rounded-md px-3 py-2">
@@ -147,11 +169,25 @@ export function AuthForm() {
         >
           {loading
             ? "処理中..."
-            : mode === "signup"
-              ? "新規登録"
-              : "ログイン"}
+            : mode === "reset"
+              ? "リセットメールを送信"
+              : mode === "signup"
+                ? "新規登録"
+                : "ログイン"}
         </button>
       </form>
+
+      {/* パスワードリセットリンク（ログインモード時のみ） */}
+      {mode === "login" && (
+        <p className="mt-2 text-center">
+          <button
+            onClick={() => { setMode("reset"); setError(""); }}
+            className="text-[10px] text-gray-500 hover:text-gray-400"
+          >
+            パスワードをお忘れですか？
+          </button>
+        </p>
+      )}
 
       {/* モード切り替え */}
       <p className="mt-4 text-center text-xs text-gray-500">

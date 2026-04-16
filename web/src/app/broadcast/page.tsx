@@ -6,7 +6,6 @@ import { AuthForm } from "@/components/auth-form";
 import { LiveKitBroadcaster } from "@/components/livekit-video";
 import { createClient } from "@/lib/supabase";
 import {
-  createBroadcast,
   updateBroadcastScore,
   endBroadcast,
   cleanupStaleBroadcasts,
@@ -57,9 +56,9 @@ const PERIODS: Record<string, string[]> = {
 type Screen = "login" | "form" | "live";
 
 export default function BroadcastPage() {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, refreshProfile } = useAuth();
   const subscribed = profile?.plan === "broadcaster" || profile?.plan === "team";
-  const [trialUsed, setTrialUsed] = useState(false);
+  const trialUsed = profile?.trial_used === true;
 
   const [myTeams, setMyTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string>("");
@@ -198,22 +197,53 @@ export default function BroadcastPage() {
     setStarting(true);
 
     try {
-      // DBに保存（共有コードは自動生成・衝突時リトライ付き）
-      const broadcast = await createBroadcast({
-        userId: user.id,
-        sport,
-        homeTeam: home.trim(),
-        awayTeam: away.trim(),
-        tournament: tournament.trim() || undefined,
-        venue: venue.trim() || undefined,
-        period: periods[0],
-        teamId: selectedTeamId || undefined,
+      // サーバーサイドでプラン・トライアルを検証して配信を作成
+      const supabase = createClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        alert("セッションが切れました。再ログインしてください。");
+        setStarting(false);
+        return;
+      }
+
+      const createRes = await fetch("/api/broadcasts/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          sport,
+          homeTeam: home.trim(),
+          awayTeam: away.trim(),
+          tournament: tournament.trim() || undefined,
+          venue: venue.trim() || undefined,
+          period: periods[0],
+          teamId: selectedTeamId || undefined,
+        }),
       });
+
+      if (createRes.status === 403) {
+        // トライアル済み → プラン登録を促す
+        alert("無料お試しは終了しました。配信を続けるには配信者プラン（¥300/月）への登録が必要です。");
+        setStarting(false);
+        return;
+      }
+
+      if (!createRes.ok) {
+        alert("配信の開始に失敗しました。もう一度お試しください。");
+        setStarting(false);
+        return;
+      }
+
+      const { broadcast } = await createRes.json();
 
       if (broadcast) {
         broadcastRef.current = broadcast;
         setShareCode(broadcast.share_code);
-        if (!subscribed) setTrialUsed(true);
+        // トライアル使用後はプロフィールをリフレッシュ（trial_used反映）
+        if (!subscribed) refreshProfile();
 
         // LiveKitトークンを取得
         try {

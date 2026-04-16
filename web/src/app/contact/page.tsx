@@ -8,16 +8,30 @@ export default function ContactPage() {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // mailto リンクで送信（バックエンド不要）
-    const subject = encodeURIComponent(`【LIVE SPOtCH】お問い合わせ: ${name}`);
-    const body = encodeURIComponent(
-      `お名前: ${name}\nメールアドレス: ${email}\n\n${message}`
-    );
-    window.location.href = `mailto:lin.nah.yuki@gmail.com?subject=${subject}&body=${body}`;
-    setSent(true);
+    setError("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, message }),
+      });
+
+      if (res.ok) {
+        setSent(true);
+      } else {
+        setError("送信に失敗しました。もう一度お試しください。");
+      }
+    } catch {
+      setError("送信に失敗しました。もう一度お試しください。");
+    }
+    setLoading(false);
   };
 
   return (
@@ -33,18 +47,22 @@ export default function ContactPage() {
 
       {sent ? (
         <div className="mt-8 rounded-lg bg-[#111] border border-white/10 p-6 text-center">
-          <p className="text-sm font-bold">メールアプリが開きます</p>
+          <div className="w-14 h-14 mx-auto rounded-full bg-green-500/10 flex items-center justify-center mb-4">
+            <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <p className="text-sm font-bold">お問い合わせを受け付けました</p>
           <p className="mt-2 text-xs text-gray-400 leading-relaxed">
-            メールアプリから送信を完了してください。
+            内容を確認の上、ご返信いたします。
             <br />
-            メールアプリが開かない場合は、以下のアドレスに直接お送りください。
+            しばらくお待ちください。
           </p>
-          <p className="mt-3 text-sm text-[#e63946] font-mono">lin.nah.yuki@gmail.com</p>
           <button
-            onClick={() => setSent(false)}
+            onClick={() => { setSent(false); setName(""); setEmail(""); setMessage(""); }}
             className="mt-4 text-xs text-gray-400 hover:text-white transition"
           >
-            フォームに戻る
+            新しいお問い合わせ
           </button>
         </div>
       ) : (
@@ -82,14 +100,20 @@ export default function ContactPage() {
               className="mt-1 w-full bg-[#111] border border-white/10 rounded-md px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:border-[#e63946]/50 focus:outline-none transition resize-none"
             />
           </div>
+          {error && (
+            <p className="text-xs text-[#e63946] bg-[#e63946]/10 rounded-md px-3 py-2">
+              {error}
+            </p>
+          )}
           <button
             type="submit"
-            className="w-full bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold py-2.5 rounded-md transition"
+            disabled={loading}
+            className="w-full bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold py-2.5 rounded-md transition disabled:opacity-50"
           >
-            送信する
+            {loading ? "送信中..." : "送信する"}
           </button>
           <p className="text-[10px] text-gray-600 text-center">
-            メールアプリが起動します。直接メールでも受け付けています:
+            直接メールでも受け付けています:
             <br />
             <span className="text-gray-400">lin.nah.yuki@gmail.com</span>
           </p>

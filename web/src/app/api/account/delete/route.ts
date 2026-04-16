@@ -1,33 +1,33 @@
-import { createClient } from "@supabase/supabase-js";
+import { getUser, getAdminClient } from "@/lib/supabase-admin";
+import { stripe } from "@/lib/stripe";
 
 export async function POST(request: Request) {
   try {
-    const authHeader = request.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
+    const user = await getUser(request);
+    if (!user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const token = authHeader.slice(7);
+    const admin = getAdminClient();
 
-    // ユーザーのトークンを検証してIDを取得
-    const supabaseUser = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-    const { data: { user }, error: userError } = await supabaseUser.auth.getUser(token);
+    // Stripeサブスクリプションがあればキャンセル
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("stripe_subscription_id")
+      .eq("id", user.id)
+      .single();
 
-    if (userError || !user) {
-      return Response.json({ error: "Invalid token" }, { status: 401 });
+    if (profile?.stripe_subscription_id) {
+      try {
+        await stripe.subscriptions.cancel(profile.stripe_subscription_id);
+      } catch (e) {
+        console.error("Stripe subscription cancel error:", e);
+        // Stripeキャンセルに失敗しても退会は続行（既に解約済みの場合など）
+      }
     }
 
-    // Admin権限でユーザーを削除
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      { auth: { autoRefreshToken: false, persistSession: false } }
-    );
-
-    const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(user.id);
+    // Admin権限でユーザーを削除（CASCADE でプロフィール・チーム・配信も削除）
+    const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
 
     if (deleteError) {
       console.error("Account deletion error:", deleteError);
