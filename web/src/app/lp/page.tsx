@@ -50,7 +50,7 @@ export default function LandingPage() {
               まずは10分間、無料で試す
             </a>
             <span className="text-sm text-gray-600 px-4 py-3">
-              App Store / Google Play 準備中
+              Webブラウザで今すぐ使えます
             </span>
           </div>
         </div>
@@ -83,38 +83,28 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* 配信中リスト（デモ） */}
+      {/* 対応スポーツ */}
       <section className="mx-auto max-w-6xl px-5 py-16 border-t border-white/5">
-        <div className="flex items-center gap-2 mb-6">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e63946] opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#e63946]" />
-          </span>
-          <h2 className="text-sm font-semibold text-gray-300">いま全国で配信中</h2>
-          <span className="text-[10px] text-gray-600">3件</span>
-        </div>
-
-        <div className="space-y-2">
+        <h2 className="text-sm font-semibold text-gray-300 mb-6">あらゆるスポーツに対応</h2>
+        <div className="flex flex-wrap gap-3">
           {[
-            { sport: "サッカー", home: "港FC", away: "青葉SC", area: "東京都港区" },
-            { sport: "野球", home: "東中学校", away: "西中学校", area: "神奈川県横浜市" },
-            { sport: "バスケ", home: "さくらミニバス", away: "若葉クラブ", area: "埼玉県さいたま市" },
-          ].map((m) => (
-            <div
-              key={m.home}
-              className="flex items-center justify-between rounded-md bg-[#111] border border-white/5 px-4 py-3"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium">{m.home} vs {m.away}</p>
-                <p className="text-[9px] text-gray-600 mt-0.5">{m.sport} / {m.area}</p>
-              </div>
-              <span className="text-[9px] text-[#e63946] font-semibold shrink-0 ml-3">LIVE</span>
-            </div>
+            { emoji: "⚽", name: "サッカー" },
+            { emoji: "⚾", name: "野球" },
+            { emoji: "🏀", name: "バスケ" },
+            { emoji: "🏐", name: "バレー" },
+            { emoji: "🏃", name: "陸上" },
+            { emoji: "🎾", name: "テニス" },
+            { emoji: "🏓", name: "卓球" },
+            { emoji: "🏊", name: "水泳" },
+            { emoji: "🏉", name: "ラグビー" },
+            { emoji: "🤾", name: "ハンドボール" },
+          ].map((s) => (
+            <span key={s.name} className="text-sm text-gray-400 bg-white/5 px-4 py-2 rounded-md">
+              {s.emoji} {s.name}
+            </span>
           ))}
+          <span className="text-sm text-gray-600 px-4 py-2">...その他すべてのスポーツ</span>
         </div>
-        <p className="mt-3 text-[10px] text-gray-700">
-          映像はチーム関係者のみ視聴可能です。ここでは配信中のチーム名のみ公開しています。
-        </p>
       </section>
 
       {/* 特徴 */}
@@ -170,27 +160,28 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* 導入チーム */}
+      {/* こんなチームに使われています */}
       <section id="teams" className="mx-auto max-w-6xl px-5 py-16 border-t border-white/5">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-bold">利用中のチーム・団体</h2>
-          <span className="text-xs text-gray-500">全国128チーム</span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {[
-            "港FC", "青葉SC", "東中学校サッカー部", "さくらミニバス", "若葉クラブ",
-            "光が丘FC", "明星SC", "大泉ジュニア", "桜台ミニバス", "石神井ファイターズ",
-            "城東キッカーズ", "若松少年団", "練馬東中バレー部", "南小ベアーズ",
-            "北小タイガース", "開進二中バスケ部",
-          ].map((team) => (
-            <span
-              key={team}
-              className="text-[11px] text-gray-400 bg-white/5 px-3 py-1.5 rounded-md"
-            >
-              {team}
-            </span>
-          ))}
-          <span className="text-[11px] text-gray-600 px-3 py-1.5">...ほか112チーム（全国128チーム）</span>
+        <h2 className="text-lg font-bold mb-6">こんなチームに使われています</h2>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-lg border border-white/5 p-5">
+            <p className="text-sm font-semibold mb-1">⚽ スポーツ少年団</p>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              地域の大会・練習試合を保護者がスマホで配信。試合に来れない家族もリアルタイムで応援。
+            </p>
+          </div>
+          <div className="rounded-lg border border-white/5 p-5">
+            <p className="text-sm font-semibold mb-1">🏐 中学校・高校の部活</p>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              公式戦の模様をOB/OGや保護者に限定配信。スコアボードで試合展開も一目瞭然。
+            </p>
+          </div>
+          <div className="rounded-lg border border-white/5 p-5">
+            <p className="text-sm font-semibold mb-1">🏆 地域リーグ・ローカル大会</p>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              メディアが来ない地域の試合も、チーム関係者だけのプライベート中継で盛り上がる。
+            </p>
+          </div>
         </div>
       </section>
 
@@ -252,7 +243,7 @@ export default function LandingPage() {
             まずは10分間、無料で試す
           </a>
           <p className="mt-3 text-[10px] text-gray-600">
-            App Store / Google Play 準備中
+            Webブラウザで今すぐ使えます / ホーム画面に追加でアプリ感覚
           </p>
         </div>
       </section>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { createClient } from "@/lib/supabase";
 import { getTeamNames } from "@/lib/database";
 
 const SPORT_EMOJI: Record<string, string> = {
@@ -12,24 +13,38 @@ const SPORT_EMOJI: Record<string, string> = {
   その他: "🏆",
 };
 
-const LIVE_NOW = [
-  { sport: "サッカー", home: "港FC", away: "青葉SC", area: "東京都港区", tournament: "港区少年サッカー大会" },
-  { sport: "野球", home: "東中学校", away: "西中学校", area: "神奈川県横浜市", tournament: "市中学校春季大会" },
-  { sport: "バスケ", home: "さくらミニバス", away: "若葉クラブ", area: "埼玉県さいたま市", tournament: "県ミニバスケ交流戦" },
-];
-
+type LiveBroadcast = {
+  id: string;
+  sport: string;
+  home_team: string;
+  away_team: string;
+  tournament: string | null;
+};
 
 export default function Home() {
   const [code, setCode] = useState("");
   const [isStandalone, setIsStandalone] = useState(false);
   const [teams, setTeams] = useState<{ name: string; sport: string }[]>([]);
+  const [liveBroadcasts, setLiveBroadcasts] = useState<LiveBroadcast[]>([]);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const standalone = window.matchMedia("(display-mode: standalone)").matches
       || (navigator as unknown as { standalone?: boolean }).standalone === true;
     setIsStandalone(standalone);
 
     getTeamNames().then(setTeams);
+
+    // ライブ配信中の試合を取得
+    const supabase = createClient();
+    supabase
+      .from("broadcasts")
+      .select("id, sport, home_team, away_team, tournament")
+      .eq("status", "live")
+      .order("started_at", { ascending: false })
+      .limit(10)
+      .then(({ data }) => setLiveBroadcasts(data || []));
   }, []);
 
   return (
@@ -43,7 +58,7 @@ export default function Home() {
             </span>
             <span className="text-base font-bold tracking-tight">LIVE SPOtCH</span>
           </div>
-          {teams.length > 0 && (
+          {mounted && teams.length > 0 && (
             <span className="text-xs text-gray-600">{teams.length}チーム利用中</span>
           )}
         </div>
@@ -135,7 +150,7 @@ export default function Home() {
         </div>
       </section>}
 
-      {/* 現在配信中 */}
+      {/* 現在配信中（DBからリアルタイム取得） */}
       <section className="px-5 pt-8">
         <div className="flex items-center gap-2 mb-3">
           <span className="relative flex h-2 w-2">
@@ -143,39 +158,49 @@ export default function Home() {
             <span className="relative inline-flex rounded-full h-2 w-2 bg-[#e63946]" />
           </span>
           <h2 className="text-sm font-semibold text-gray-300">いま配信中</h2>
-          <span className="text-xs text-gray-600">{LIVE_NOW.length}件</span>
+          {mounted && <span className="text-xs text-gray-600">{liveBroadcasts.length}件</span>}
         </div>
 
-        <div className="space-y-2">
-          {LIVE_NOW.map((m) => (
-            <div
-              key={m.home + m.away}
-              className="rounded-md bg-[#111] border border-white/5 px-4 py-3.5"
-            >
-              <div className="flex items-center justify-between">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">
-                    {m.home} vs {m.away}
-                  </p>
-                  <p className="text-xs text-gray-600 truncate mt-0.5">
-                    {m.sport} / {m.tournament}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0 ml-3">
-                  <span className="text-[11px] text-gray-600">{m.area}</span>
-                  <span className="text-xs text-[#e63946] font-semibold">LIVE</span>
+        {!mounted ? (
+          <div className="rounded-md bg-[#111] border border-white/5 px-4 py-6 text-center">
+            <p className="text-xs text-gray-600">読み込み中...</p>
+          </div>
+        ) : liveBroadcasts.length > 0 ? (
+          <div className="space-y-2">
+            {liveBroadcasts.map((m) => (
+              <div
+                key={m.id}
+                className="rounded-md bg-[#111] border border-white/5 px-4 py-3.5"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">
+                      {m.home_team} vs {m.away_team}
+                    </p>
+                    <p className="text-xs text-gray-600 truncate mt-0.5">
+                      {m.sport}{m.tournament ? ` / ${m.tournament}` : ""}
+                    </p>
+                  </div>
+                  <span className="text-xs text-[#e63946] font-semibold shrink-0 ml-3">LIVE</span>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-md bg-[#111] border border-white/5 px-4 py-6 text-center">
+            <p className="text-xs text-gray-500">現在配信中の試合はありません</p>
+            <p className="text-[10px] text-gray-700 mt-1">
+              配信が始まるとここに表示されます
+            </p>
+          </div>
+        )}
         <p className="mt-2 text-xs text-gray-600">
           視聴するには配信者から共有コードを受け取ってください
         </p>
       </section>
 
       {/* 利用中のチーム（配信実績から自動取得） */}
-      {teams.length > 0 && (
+      {mounted && teams.length > 0 && (
         <section className="px-5 pt-8 pb-20">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">
             参加チーム

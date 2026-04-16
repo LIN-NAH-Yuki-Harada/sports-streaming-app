@@ -1,40 +1,309 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useAuth } from "@/components/auth-provider";
+import { AuthForm } from "@/components/auth-form";
+import { createClient } from "@/lib/supabase";
+import Link from "next/link";
 
-// サンプルデータ（Supabase接続後に動的取得）
-const MY_TEAM = {
-  name: "港FC",
-  sport: "サッカー",
-  members: 18,
-  plan: "配信者プラン" as const,
+type TeamMemberProfile = {
+  id: string;
+  display_name: string | null;
+  avatar_url: string | null;
 };
 
-const ARCHIVES = [
-  { id: "1", date: "4/8", home: "港FC", away: "青葉SC", score: "2 - 1", tournament: "港区少年サッカー大会", duration: "1:23:45", daysAgo: 0 },
-  { id: "2", date: "4/1", home: "港FC", away: "光が丘FC", score: "0 - 0", tournament: "練習試合", duration: "1:05:20", daysAgo: 7 },
-  { id: "3", date: "3/25", home: "港FC", away: "明星SC", score: "3 - 2", tournament: "春季大会 準決勝", duration: "1:32:10", daysAgo: 14 },
-  { id: "4", date: "3/10", home: "港FC", away: "城東キッカーズ", score: "1 - 1 (PK 3-2)", tournament: "春季大会 1回戦", duration: "1:45:30", daysAgo: 29 },
-  { id: "5", date: "2/15", home: "港FC", away: "若松少年団", score: "4 - 0", tournament: "練馬区冬季大会", duration: "1:18:00", daysAgo: 52 },
-  { id: "6", date: "1/20", home: "港FC", away: "石神井ファイターズ", score: "2 - 3", tournament: "新春カップ", duration: "1:28:15", daysAgo: 78 },
-];
+type TeamMember = {
+  id: string;
+  user_id: string;
+  role: "owner" | "admin" | "member";
+  joined_at: string;
+  profiles: TeamMemberProfile;
+};
 
-function isExpired(daysAgo: number) {
-  return daysAgo > 30;
+type Team = {
+  id: string;
+  name: string;
+  sport: string;
+  description: string | null;
+  invite_code: string | null;
+  owner_id: string;
+  created_at: string;
+  team_members: TeamMember[];
+};
+
+const SPORT_EMOJI: Record<string, string> = {
+  "サッカー": "⚽",
+  "野球": "⚾",
+  "バスケ": "🏀",
+  "バレー": "🏐",
+  "陸上": "🏃",
+  "テニス": "🎾",
+  "卓球": "🏓",
+  "水泳": "🏊",
+  "ラグビー": "🏉",
+  "ハンドボール": "🤾",
+};
+
+function getSportEmoji(sport: string) {
+  return SPORT_EMOJI[sport] || "🏆";
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  owner: "オーナー",
+  admin: "管理者",
+  member: "メンバー",
+};
+
 export default function TeamPage() {
-  const [loggedIn] = useState(false);
-  const [tab, setTab] = useState<"archive" | "schedule" | "members">("archive");
+  const { user, profile, loading } = useAuth();
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [loadingTeams, setLoadingTeams] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
+  const [tab, setTab] = useState<"list" | "create" | "join">("list");
+  const [detailTab, setDetailTab] = useState<"members" | "settings">("members");
+  const [toast, setToast] = useState<string | null>(null);
+
+  // フォーム状態
+  const [createForm, setCreateForm] = useState({ name: "", sport: "サッカー", description: "" });
+  const [joinCode, setJoinCode] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // 編集状態
+  const [editForm, setEditForm] = useState({ name: "", sport: "", description: "" });
+  const [editing, setEditing] = useState(false);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const getToken = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token;
+  }, []);
+
+  const fetchTeams = useCallback(async () => {
+    const token = await getToken();
+    if (!token) return;
+    setLoadingTeams(true);
+    try {
+      const res = await fetch("/api/teams", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setTeams(data.teams || []);
+    } catch {
+      console.error("チーム取得エラー");
+    } finally {
+      setLoadingTeams(false);
+    }
+  }, [getToken]);
+
+  useEffect(() => {
+    if (user) fetchTeams();
+  }, [user, fetchTeams]);
+
+  // チーム作成
+  const handleCreate = async () => {
+    if (!createForm.name.trim()) return;
+    setSubmitting(true);
+    try {
+      const token = await getToken();
+      const res = await fetch("/api/teams", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(createForm),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || "エラーが発生しました");
+        return;
+      }
+      showToast(`「${data.team.name}」を作成しました！`);
+      setCreateForm({ name: "", sport: "サッカー", description: "" });
+      setTab("list");
+      fetchTeams();
+    } catch {
+      showToast("エラーが発生しました");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 招待コードで参加
+  const handleJoin = async () => {
+    if (!joinCode.trim()) return;
+    setSubmitting(true);
+    try {
+      const token = await getToken();
+      const res = await fetch("/api/teams/join", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ inviteCode: joinCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || "エラーが発生しました");
+        return;
+      }
+      if (data.alreadyMember) {
+        showToast("既にこのチームに参加しています");
+      } else {
+        showToast(`「${data.team.name}」に参加しました！`);
+      }
+      setJoinCode("");
+      setTab("list");
+      fetchTeams();
+    } catch {
+      showToast("エラーが発生しました");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // チーム更新
+  const handleUpdate = async () => {
+    if (!selectedTeam || !editForm.name.trim()) return;
+    setSubmitting(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/teams/${selectedTeam.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(editForm),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        showToast(data.error || "エラーが発生しました");
+        return;
+      }
+      showToast("チーム情報を更新しました");
+      setEditing(false);
+      fetchTeams();
+      // 選択中のチームも更新
+      setSelectedTeam((prev) =>
+        prev ? { ...prev, name: editForm.name, sport: editForm.sport, description: editForm.description || null } : null
+      );
+    } catch {
+      showToast("エラーが発生しました");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // チーム削除
+  const handleDelete = async () => {
+    if (!selectedTeam) return;
+    setSubmitting(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/teams/${selectedTeam.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        showToast(data.error || "エラーが発生しました");
+        return;
+      }
+      showToast("チームを削除しました");
+      setSelectedTeam(null);
+      fetchTeams();
+    } catch {
+      showToast("エラーが発生しました");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // メンバー削除
+  const handleRemoveMember = async (userId: string) => {
+    if (!selectedTeam) return;
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/teams/${selectedTeam.id}/members`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ userId }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        showToast(data.error || "エラーが発生しました");
+        return;
+      }
+      showToast("メンバーを削除しました");
+      fetchTeams();
+      // 選択中チームのメンバーを更新
+      setSelectedTeam((prev) =>
+        prev
+          ? { ...prev, team_members: prev.team_members.filter((m) => m.user_id !== userId) }
+          : null
+      );
+    } catch {
+      showToast("エラーが発生しました");
+    }
+  };
+
+  // ロール変更
+  const handleRoleChange = async (userId: string, newRole: "admin" | "member") => {
+    if (!selectedTeam) return;
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/teams/${selectedTeam.id}/members`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ userId, role: newRole }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        showToast(data.error || "エラーが発生しました");
+        return;
+      }
+      showToast(`ロールを${ROLE_LABELS[newRole]}に変更しました`);
+      fetchTeams();
+      setSelectedTeam((prev) =>
+        prev
+          ? {
+              ...prev,
+              team_members: prev.team_members.map((m) =>
+                m.user_id === userId ? { ...m, role: newRole } : m
+              ),
+            }
+          : null
+      );
+    } catch {
+      showToast("エラーが発生しました");
+    }
+  };
+
+  // ローディング
+  if (loading) {
+    return <div className="min-h-screen" />;
+  }
 
   // 未ログイン
-  if (!loggedIn) {
+  if (!user) {
     return (
       <div>
         <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pt-4 pb-3">
           <h1 className="text-sm font-bold">チーム</h1>
         </div>
-
         <div className="px-5 pt-8 pb-20 text-center">
           <div className="w-16 h-16 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-4">
             <svg className="w-7 h-7 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -47,67 +316,278 @@ export default function TeamPage() {
             <br />
             アーカイブやスケジュールを確認できます。
           </p>
-
-          <div className="mt-8 rounded-lg bg-[#111] border border-white/5 p-5 text-left">
-            <p className="text-xs font-semibold text-gray-300 mb-3">チームチャンネルでできること</p>
-            <ul className="space-y-2.5 text-xs text-gray-500">
-              <li className="flex items-start gap-2">
-                <span className="text-[#e63946] mt-0.5">▶</span>
-                <span>チームの試合アーカイブを一覧で視聴</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-[#e63946] mt-0.5">▶</span>
-                <span>1ヶ月以内のアーカイブは無料で視聴可能</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-gray-600 mt-0.5">▶</span>
-                <span className="text-gray-600">チームスケジュール管理（チームプラン）</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-gray-600 mt-0.5">▶</span>
-                <span className="text-gray-600">メンバー管理・自動共有（チームプラン）</span>
-              </li>
-            </ul>
+          <div className="mt-6">
+            <AuthForm />
           </div>
-
-          <p className="mt-6 text-[10px] text-gray-700">
-            ログインするとチームに参加できます
-          </p>
         </div>
       </div>
     );
   }
 
-  // ログイン済み
+  // チーム詳細画面
+  if (selectedTeam) {
+    const isOwner = selectedTeam.owner_id === user.id;
+    const myMembership = selectedTeam.team_members.find((m) => m.user_id === user.id);
+    const isAdmin = myMembership?.role === "owner" || myMembership?.role === "admin";
+
+    return (
+      <div>
+        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pt-4 pb-3">
+          <div className="flex items-center gap-3">
+            <button onClick={() => { setSelectedTeam(null); setEditing(false); }} className="text-gray-400 hover:text-white">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+              </svg>
+            </button>
+            <h1 className="text-sm font-bold">{selectedTeam.name}</h1>
+          </div>
+        </div>
+
+        <div className="px-5 pb-20">
+          {/* チーム情報ヘッダー */}
+          <div className="flex items-center gap-3 mt-4 mb-2">
+            <div className="w-11 h-11 rounded-full bg-[#e63946]/10 flex items-center justify-center">
+              <span className="text-lg">{getSportEmoji(selectedTeam.sport)}</span>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-bold">{selectedTeam.name}</p>
+              <p className="text-[10px] text-gray-500">
+                {selectedTeam.sport} / メンバー {selectedTeam.team_members.length}人
+              </p>
+            </div>
+          </div>
+          {selectedTeam.description && (
+            <p className="text-[11px] text-gray-400 mb-4">{selectedTeam.description}</p>
+          )}
+
+          {/* 招待コード */}
+          {isAdmin && selectedTeam.invite_code && (
+            <div className="rounded-lg bg-[#111] border border-white/5 p-3 mb-4">
+              <p className="text-[10px] text-gray-500 mb-1">招待コード（メンバーに共有してください）</p>
+              <div className="flex items-center gap-2">
+                <code className="text-sm font-mono font-bold text-[#e63946] tracking-wider">
+                  {selectedTeam.invite_code}
+                </code>
+                <button
+                  onClick={() => {
+                    const msg = `「${selectedTeam.name}」のチームに参加しよう！\nLIVE SPOtCHアプリのチームタブで招待コード「${selectedTeam.invite_code}」を入力してね\nhttps://sports-streaming-app.vercel.app`;
+                    navigator.clipboard?.writeText(msg);
+                    showToast("コピーしました");
+                  }}
+                  className="text-[10px] text-gray-400 hover:text-white border border-white/10 rounded px-2 py-0.5"
+                >
+                  コピー
+                </button>
+              </div>
+              <a
+                href={`https://line.me/R/msg/text/?${encodeURIComponent(`「${selectedTeam.name}」のチームに参加しよう！\nLIVE SPOtCHアプリのチームタブで招待コード「${selectedTeam.invite_code}」を入力してね\nhttps://sports-streaming-app.vercel.app`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 w-full flex items-center justify-center gap-2 bg-[#06C755] hover:bg-[#05b64c] text-white text-xs font-semibold py-2 rounded-md transition"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 5.82 2 10.5c0 2.67 1.35 5.04 3.46 6.62-.05.46-.31 1.72-.35 1.99-.06.36.13.36.27.26.1-.07 1.62-1.07 2.28-1.51.72.2 1.49.32 2.29.35L12 18.2c.08 0 .16 0 .24-.01 5.38-.18 9.76-3.93 9.76-8.49C22 5.82 17.52 2 12 2z"/></svg>
+                LINEで招待を送る
+              </a>
+            </div>
+          )}
+
+          {/* タブ */}
+          <div className="flex gap-1 mb-4">
+            {([
+              { key: "members" as const, label: "メンバー" },
+              ...(isOwner ? [{ key: "settings" as const, label: "設定" }] : []),
+            ]).map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setDetailTab(t.key)}
+                className={`text-xs px-3 py-1.5 rounded-md transition ${
+                  detailTab === t.key
+                    ? "bg-white/10 text-white"
+                    : "text-gray-500 hover:text-gray-300 hover:bg-white/5"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* メンバー一覧 */}
+          {detailTab === "members" && (
+            <div className="space-y-2">
+              {selectedTeam.team_members
+                .sort((a, b) => {
+                  const order = { owner: 0, admin: 1, member: 2 };
+                  return order[a.role] - order[b.role];
+                })
+                .map((member) => (
+                  <div key={member.id} className="flex items-center gap-3 rounded-md bg-[#111] border border-white/5 px-4 py-3">
+                    <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-xs">
+                      {member.profiles?.avatar_url ? (
+                        <img src={member.profiles.avatar_url} alt="" className="w-8 h-8 rounded-full" />
+                      ) : (
+                        <span>{(member.profiles?.display_name || "?")[0]}</span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium truncate">
+                        {member.profiles?.display_name || "名前未設定"}
+                      </p>
+                      <p className="text-[10px] text-gray-500">{ROLE_LABELS[member.role]}</p>
+                    </div>
+                    {/* オーナーがメンバーを管理 */}
+                    {isOwner && member.role !== "owner" && (
+                      <div className="flex items-center gap-1">
+                        <select
+                          value={member.role}
+                          onChange={(e) => handleRoleChange(member.user_id, e.target.value as "admin" | "member")}
+                          className="text-[10px] bg-transparent border border-white/10 rounded px-1 py-0.5 text-gray-400"
+                        >
+                          <option value="member">メンバー</option>
+                          <option value="admin">管理者</option>
+                        </select>
+                        <button
+                          onClick={() => handleRemoveMember(member.user_id)}
+                          className="text-[10px] text-red-400 hover:text-red-300 ml-1"
+                        >
+                          削除
+                        </button>
+                      </div>
+                    )}
+                    {/* 自分自身の脱退（オーナー以外） */}
+                    {!isOwner && member.user_id === user.id && (
+                      <button
+                        onClick={() => {
+                          handleRemoveMember(user.id);
+                          setSelectedTeam(null);
+                        }}
+                        className="text-[10px] text-red-400 hover:text-red-300"
+                      >
+                        脱退
+                      </button>
+                    )}
+                  </div>
+                ))}
+            </div>
+          )}
+
+          {/* 設定タブ（オーナーのみ） */}
+          {detailTab === "settings" && isOwner && (
+            <div className="space-y-4">
+              {editing ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[10px] text-gray-500 block mb-1">チーム名</label>
+                    <input
+                      value={editForm.name}
+                      onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                      className="w-full bg-[#111] border border-white/10 rounded-md px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 block mb-1">スポーツ</label>
+                    <select
+                      value={editForm.sport}
+                      onChange={(e) => setEditForm({ ...editForm, sport: e.target.value })}
+                      className="w-full bg-[#111] border border-white/10 rounded-md px-3 py-2 text-sm"
+                    >
+                      {Object.keys(SPORT_EMOJI).map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                      <option value="その他">その他</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 block mb-1">説明（任意）</label>
+                    <textarea
+                      value={editForm.description}
+                      onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                      rows={2}
+                      className="w-full bg-[#111] border border-white/10 rounded-md px-3 py-2 text-sm resize-none"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleUpdate}
+                      disabled={submitting}
+                      className="flex-1 bg-[#e63946] text-white text-xs py-2 rounded-md hover:bg-[#e63946]/90 disabled:opacity-50"
+                    >
+                      {submitting ? "保存中..." : "保存"}
+                    </button>
+                    <button
+                      onClick={() => setEditing(false)}
+                      className="px-4 text-xs text-gray-400 border border-white/10 rounded-md hover:bg-white/5"
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      setEditForm({
+                        name: selectedTeam.name,
+                        sport: selectedTeam.sport,
+                        description: selectedTeam.description || "",
+                      });
+                      setEditing(true);
+                    }}
+                    className="w-full text-left rounded-md bg-[#111] border border-white/5 px-4 py-3 text-xs text-gray-300 hover:bg-white/5 transition"
+                  >
+                    チーム情報を編集
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm("本当にこのチームを削除しますか？\nメンバー全員がチームから外れます。")) {
+                        handleDelete();
+                      }
+                    }}
+                    className="w-full text-left rounded-md bg-[#111] border border-red-500/20 px-4 py-3 text-xs text-red-400 hover:bg-red-500/5 transition"
+                  >
+                    チームを削除
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* トースト */}
+        {toast && (
+          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-white text-black text-xs px-4 py-2 rounded-full shadow-lg z-50">
+            {toast}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // チーム一覧（メイン画面）
+  const isTeamPlan = profile?.plan === "team";
+
   return (
     <div>
       <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pt-4 pb-3">
         <div className="flex items-center justify-between">
           <h1 className="text-sm font-bold">チーム</h1>
-          <span className="text-[10px] text-gray-600">{MY_TEAM.plan}</span>
+          {isTeamPlan && (
+            <button
+              onClick={() => setTab(tab === "create" ? "list" : "create")}
+              className="text-[10px] text-[#e63946] border border-[#e63946]/30 px-2.5 py-1 rounded-md hover:bg-[#e63946]/5"
+            >
+              {tab === "create" ? "戻る" : "+ 新規作成"}
+            </button>
+          )}
         </div>
       </div>
 
       <div className="px-5 pb-20">
-        {/* チーム情報 */}
-        <div className="flex items-center gap-3 mt-4 mb-6">
-          <div className="w-11 h-11 rounded-full bg-[#e63946]/10 flex items-center justify-center">
-            <span className="text-sm font-bold text-[#e63946]">港</span>
-          </div>
-          <div>
-            <p className="text-sm font-bold">{MY_TEAM.name}</p>
-            <p className="text-[10px] text-gray-500">
-              {MY_TEAM.sport} / メンバー {MY_TEAM.members}人
-            </p>
-          </div>
-        </div>
-
-        {/* タブ */}
-        <div className="flex gap-1 mb-6">
+        {/* タブ切り替え */}
+        <div className="flex gap-1 mt-3 mb-4">
           {([
-            { key: "archive" as const, label: "アーカイブ" },
-            { key: "schedule" as const, label: "スケジュール" },
-            { key: "members" as const, label: "メンバー" },
+            { key: "list" as const, label: "マイチーム" },
+            { key: "join" as const, label: "招待コードで参加" },
+            ...(isTeamPlan ? [{ key: "create" as const, label: "新規作成" }] : []),
           ]).map((t) => (
             <button
               key={t.key}
@@ -123,86 +603,170 @@ export default function TeamPage() {
           ))}
         </div>
 
-        {/* アーカイブタブ */}
-        {tab === "archive" && (
-          <div className="space-y-2">
-            {ARCHIVES.map((a) => {
-              const expired = isExpired(a.daysAgo);
-              return (
-                <div
-                  key={a.id}
-                  className={`rounded-md bg-[#111] border px-4 py-3 ${
-                    expired ? "border-white/5 opacity-60" : "border-white/5"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] text-gray-500">{a.date}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-600">{a.duration}</span>
-                      {expired && (
-                        <span className="text-[9px] text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded">
-                          ¥100
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <p className="text-xs font-medium">
-                    {a.home} vs {a.away}
-                  </p>
-                  <div className="flex items-center justify-between mt-1">
-                    <p className="text-[10px] text-gray-600">{a.tournament}</p>
-                    <span className="text-xs font-bold tabular-nums">{a.score}</span>
-                  </div>
-                  {expired && (
-                    <button className="mt-2 w-full text-[10px] text-yellow-500 border border-yellow-500/20 rounded py-1.5 hover:bg-yellow-500/5 transition">
-                      ¥100で視聴する（1ヶ月経過）
-                    </button>
+        {/* マイチーム一覧 */}
+        {tab === "list" && (
+          <div>
+            {loadingTeams ? (
+              <div className="text-center py-12">
+                <p className="text-xs text-gray-500">読み込み中...</p>
+              </div>
+            ) : teams.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="w-12 h-12 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-3">
+                  <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                  </svg>
+                </div>
+                <p className="text-sm font-medium text-gray-400">まだチームがありません</p>
+                <p className="mt-1 text-[10px] text-gray-600 leading-relaxed">
+                  招待コードで参加するか、
+                  <br />
+                  チームプランで新規作成できます
+                </p>
+                <div className="mt-4 flex flex-col gap-2">
+                  <button
+                    onClick={() => setTab("join")}
+                    className="text-xs text-white bg-white/10 px-4 py-2 rounded-md hover:bg-white/15 transition"
+                  >
+                    招待コードで参加
+                  </button>
+                  {!isTeamPlan && (
+                    <Link
+                      href="/pricing"
+                      className="text-xs text-[#e63946] border border-[#e63946]/30 px-4 py-2 rounded-md hover:bg-[#e63946]/5 transition text-center"
+                    >
+                      チームプランでチームを作成
+                    </Link>
                   )}
                 </div>
-              );
-            })}
-            <p className="text-center text-[10px] text-gray-700 mt-4">
-              1ヶ月以内のアーカイブは無料で視聴できます
-            </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {teams.map((team) => {
+                  const myRole = team.team_members.find((m) => m.user_id === user.id)?.role;
+                  return (
+                    <button
+                      key={team.id}
+                      onClick={() => {
+                        setSelectedTeam(team);
+                        setDetailTab("members");
+                      }}
+                      className="w-full text-left rounded-md bg-[#111] border border-white/5 px-4 py-3 hover:bg-white/5 transition"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-[#e63946]/10 flex items-center justify-center">
+                          <span className="text-base">{getSportEmoji(team.sport)}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold truncate">{team.name}</p>
+                          <p className="text-[10px] text-gray-500">
+                            {team.sport} / {team.team_members.length}人 / {ROLE_LABELS[myRole || "member"]}
+                          </p>
+                        </div>
+                        <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                        </svg>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
-        {/* スケジュールタブ */}
-        {tab === "schedule" && (
-          <div className="text-center py-12">
-            <div className="w-12 h-12 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-3">
-              <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-              </svg>
-            </div>
-            <p className="text-sm font-medium text-gray-400">チームスケジュール</p>
-            <p className="mt-1 text-[10px] text-gray-600">
-              チームプラン（¥500/月）で利用できます
+        {/* 招待コードで参加 */}
+        {tab === "join" && (
+          <div className="mt-2">
+            <p className="text-xs text-gray-400 mb-3">
+              チームの管理者から共有された招待コードを入力してください
             </p>
-            <button className="mt-4 text-xs text-[#e63946] border border-[#e63946]/30 px-4 py-2 rounded-md hover:bg-[#e63946]/5 transition">
-              チームプランにアップグレード
+            <div className="flex gap-2">
+              <input
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                placeholder="例: ABCD1234"
+                maxLength={8}
+                className="flex-1 bg-[#111] border border-white/10 rounded-md px-3 py-2.5 text-sm font-mono tracking-wider placeholder:text-gray-700 uppercase"
+              />
+              <button
+                onClick={handleJoin}
+                disabled={submitting || !joinCode.trim()}
+                className="bg-[#e63946] text-white text-xs px-4 rounded-md hover:bg-[#e63946]/90 disabled:opacity-50"
+              >
+                {submitting ? "..." : "参加"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* チーム作成フォーム */}
+        {tab === "create" && isTeamPlan && (
+          <div className="mt-2 space-y-3">
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-1">チーム名 *</label>
+              <input
+                value={createForm.name}
+                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                placeholder="例: 港FC"
+                className="w-full bg-[#111] border border-white/10 rounded-md px-3 py-2.5 text-sm placeholder:text-gray-700"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-1">スポーツ *</label>
+              <select
+                value={createForm.sport}
+                onChange={(e) => setCreateForm({ ...createForm, sport: e.target.value })}
+                className="w-full bg-[#111] border border-white/10 rounded-md px-3 py-2.5 text-sm"
+              >
+                {Object.keys(SPORT_EMOJI).map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+                <option value="その他">その他</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-1">説明（任意）</label>
+              <textarea
+                value={createForm.description}
+                onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+                placeholder="例: 港区の小学生サッカーチームです"
+                rows={2}
+                className="w-full bg-[#111] border border-white/10 rounded-md px-3 py-2.5 text-sm resize-none placeholder:text-gray-700"
+              />
+            </div>
+            <button
+              onClick={handleCreate}
+              disabled={submitting || !createForm.name.trim()}
+              className="w-full bg-[#e63946] text-white text-sm py-2.5 rounded-md hover:bg-[#e63946]/90 disabled:opacity-50 transition"
+            >
+              {submitting ? "作成中..." : "チームを作成"}
             </button>
           </div>
         )}
 
-        {/* メンバータブ */}
-        {tab === "members" && (
-          <div className="text-center py-12">
-            <div className="w-12 h-12 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-3">
-              <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-              </svg>
-            </div>
-            <p className="text-sm font-medium text-gray-400">メンバー管理</p>
-            <p className="mt-1 text-[10px] text-gray-600">
-              チームプラン（¥500/月）で利用できます
+        {/* チームプラン未加入のCTA（作成タブが無い場合の補足） */}
+        {tab === "list" && teams.length > 0 && !isTeamPlan && (
+          <div className="mt-4 rounded-lg bg-[#111] border border-white/5 p-4 text-center">
+            <p className="text-[11px] text-gray-400">
+              チームプラン（¥500/月）で新しいチームを作成できます
             </p>
-            <button className="mt-4 text-xs text-[#e63946] border border-[#e63946]/30 px-4 py-2 rounded-md hover:bg-[#e63946]/5 transition">
-              チームプランにアップグレード
-            </button>
+            <Link
+              href="/pricing"
+              className="inline-block mt-2 text-xs text-[#e63946] border border-[#e63946]/30 px-4 py-1.5 rounded-md hover:bg-[#e63946]/5 transition"
+            >
+              プランを見る
+            </Link>
           </div>
         )}
       </div>
+
+      {/* トースト */}
+      {toast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-white text-black text-xs px-4 py-2 rounded-full shadow-lg z-50">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

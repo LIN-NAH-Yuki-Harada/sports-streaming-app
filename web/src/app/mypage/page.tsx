@@ -208,16 +208,32 @@ function MyPageInner() {
                 </span>
               </Link>
 
-              {/* その他のメニュー（準備中） */}
-              {["お気に入りチーム", "視聴履歴", "配信履歴", "通知設定", "ヘルプ"].map((label) => (
-                <div
-                  key={label}
-                  className="flex items-center justify-between py-3 border-b border-white/5 text-sm"
-                >
-                  <span className="text-gray-400">{label}</span>
-                  <span className="text-xs text-gray-600">準備中</span>
-                </div>
-              ))}
+              {/* 配信履歴 */}
+              <Link
+                href="/schedule"
+                className="flex items-center justify-between py-3 border-b border-white/5 text-sm hover:bg-white/5 transition -mx-2 px-2 rounded"
+              >
+                <span className="text-white">配信履歴</span>
+                <span className="text-xs text-gray-400">→</span>
+              </Link>
+
+              {/* チーム */}
+              <Link
+                href="/search"
+                className="flex items-center justify-between py-3 border-b border-white/5 text-sm hover:bg-white/5 transition -mx-2 px-2 rounded"
+              >
+                <span className="text-white">チーム管理</span>
+                <span className="text-xs text-gray-400">→</span>
+              </Link>
+
+              {/* お問い合わせ */}
+              <Link
+                href="/contact"
+                className="flex items-center justify-between py-3 border-b border-white/5 text-sm hover:bg-white/5 transition -mx-2 px-2 rounded"
+              >
+                <span className="text-white">お問い合わせ</span>
+                <span className="text-xs text-gray-400">→</span>
+              </Link>
             </div>
 
             {/* ログアウトボタン */}

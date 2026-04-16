@@ -73,6 +73,236 @@ export async function updateProfile(
   return data;
 }
 
+// ===== チーム =====
+
+export type Team = {
+  id: string;
+  name: string;
+  sport: string;
+  description: string | null;
+  invite_code: string | null;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TeamMember = {
+  id: string;
+  team_id: string;
+  user_id: string;
+  role: "owner" | "admin" | "member";
+  joined_at: string;
+  // JOIN で取得する場合
+  profiles?: Pick<Profile, "id" | "display_name" | "avatar_url">;
+};
+
+export type TeamWithMembers = Team & {
+  team_members: TeamMember[];
+};
+
+function generateInviteCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+export async function createTeam(params: {
+  userId: string;
+  name: string;
+  sport: string;
+  description?: string;
+}): Promise<Team | null> {
+  const supabase = createClient();
+  const inviteCode = generateInviteCode();
+
+  const { data: team, error } = await supabase
+    .from("teams")
+    .insert({
+      name: params.name,
+      sport: params.sport,
+      description: params.description || null,
+      invite_code: inviteCode,
+      owner_id: params.userId,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("チーム作成エラー:", error.message);
+    return null;
+  }
+
+  // オーナーを team_members にも追加
+  const { error: memberError } = await supabase
+    .from("team_members")
+    .insert({
+      team_id: team.id,
+      user_id: params.userId,
+      role: "owner",
+    });
+
+  if (memberError) {
+    console.error("オーナーメンバー追加エラー:", memberError.message);
+  }
+
+  return team;
+}
+
+export async function getMyTeams(userId: string): Promise<TeamWithMembers[]> {
+  const supabase = createClient();
+
+  // 自分が所属するチームのIDを取得
+  const { data: memberships, error: memError } = await supabase
+    .from("team_members")
+    .select("team_id")
+    .eq("user_id", userId);
+
+  if (memError || !memberships?.length) return [];
+
+  const teamIds = memberships.map((m) => m.team_id);
+
+  const { data: teams, error } = await supabase
+    .from("teams")
+    .select("*, team_members(id, team_id, user_id, role, joined_at, profiles(id, display_name, avatar_url))")
+    .in("id", teamIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("チーム一覧取得エラー:", error.message);
+    return [];
+  }
+  return (teams as TeamWithMembers[]) || [];
+}
+
+export async function getTeamById(teamId: string): Promise<TeamWithMembers | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("teams")
+    .select("*, team_members(id, team_id, user_id, role, joined_at, profiles(id, display_name, avatar_url))")
+    .eq("id", teamId)
+    .single();
+
+  if (error) {
+    console.error("チーム取得エラー:", error.message);
+    return null;
+  }
+  return data as TeamWithMembers;
+}
+
+export async function updateTeam(
+  teamId: string,
+  updates: Partial<Pick<Team, "name" | "sport" | "description">>
+): Promise<Team | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("teams")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("id", teamId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("チーム更新エラー:", error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function deleteTeam(teamId: string): Promise<boolean> {
+  const supabase = createClient();
+  const { error } = await supabase.from("teams").delete().eq("id", teamId);
+  if (error) {
+    console.error("チーム削除エラー:", error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function joinTeamByInviteCode(
+  userId: string,
+  inviteCode: string
+): Promise<{ team: Team; alreadyMember: boolean } | null> {
+  const supabase = createClient();
+
+  // 招待コードでチームを検索
+  const { data: team, error: teamError } = await supabase
+    .from("teams")
+    .select("*")
+    .eq("invite_code", inviteCode.toUpperCase())
+    .single();
+
+  if (teamError || !team) {
+    console.error("招待コードが見つかりません:", inviteCode);
+    return null;
+  }
+
+  // 既にメンバーか確認
+  const { data: existing } = await supabase
+    .from("team_members")
+    .select("id")
+    .eq("team_id", team.id)
+    .eq("user_id", userId)
+    .single();
+
+  if (existing) {
+    return { team, alreadyMember: true };
+  }
+
+  // メンバーとして参加
+  const { error: joinError } = await supabase
+    .from("team_members")
+    .insert({
+      team_id: team.id,
+      user_id: userId,
+      role: "member",
+    });
+
+  if (joinError) {
+    console.error("チーム参加エラー:", joinError.message);
+    return null;
+  }
+
+  return { team, alreadyMember: false };
+}
+
+export async function removeTeamMember(
+  teamId: string,
+  userId: string
+): Promise<boolean> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("team_members")
+    .delete()
+    .eq("team_id", teamId)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error("メンバー削除エラー:", error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function updateMemberRole(
+  teamId: string,
+  userId: string,
+  role: "admin" | "member"
+): Promise<boolean> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("team_members")
+    .update({ role })
+    .eq("team_id", teamId)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error("ロール更新エラー:", error.message);
+    return false;
+  }
+  return true;
+}
+
 // ===== 配信 =====
 
 function generateShareCode(): string {
@@ -90,6 +320,7 @@ export async function createBroadcast(params: {
   tournament?: string;
   venue?: string;
   period: string;
+  teamId?: string;
 }): Promise<Broadcast | null> {
   const supabase = createClient();
 
@@ -110,6 +341,7 @@ export async function createBroadcast(params: {
         home_score: 0,
         away_score: 0,
         status: "live",
+        team_id: params.teamId || null,
       })
       .select()
       .single();

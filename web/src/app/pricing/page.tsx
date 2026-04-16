@@ -195,7 +195,7 @@ export default function PricingPage() {
               <li>✓ 大容量アーカイブストレージ</li>
               <li>✓ スケジュール管理</li>
               <li>✓ メンバー管理・自動共有</li>
-              <li>✓ YouTube自動アーカイブ</li>
+              <li className="text-gray-500">✓ YouTube自動アーカイブ（近日公開）</li>
             </ul>
             {currentPlan === "team" ? (
               <button

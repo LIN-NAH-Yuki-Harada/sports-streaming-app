@@ -29,8 +29,11 @@ create table public.teams (
   id uuid default gen_random_uuid() primary key,
   name text not null,
   sport text not null,
+  description text,
+  invite_code text unique,
   owner_id uuid references public.profiles(id) on delete cascade not null,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
 
 alter table public.teams enable row level security;
@@ -43,6 +46,53 @@ create policy "ログインユーザーがチームを作成可能"
 
 create policy "オーナーのみチームを更新可能"
   on public.teams for update using (auth.uid() = owner_id);
+
+create policy "オーナーのみチームを削除可能"
+  on public.teams for delete using (auth.uid() = owner_id);
+
+-- 2.5 チームメンバーテーブル
+create table public.team_members (
+  id uuid default gen_random_uuid() primary key,
+  team_id uuid references public.teams(id) on delete cascade not null,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  role text not null default 'member' check (role in ('owner', 'admin', 'member')),
+  joined_at timestamptz default now(),
+  unique(team_id, user_id)
+);
+
+alter table public.team_members enable row level security;
+
+create policy "チームメンバーが一覧を閲覧可能"
+  on public.team_members for select
+  using (
+    user_id = auth.uid()
+    or team_id in (
+      select team_id from public.team_members where user_id = auth.uid()
+    )
+  );
+
+create policy "自分自身をメンバーとして追加可能"
+  on public.team_members for insert
+  with check (user_id = auth.uid());
+
+create policy "オーナーまたは管理者がメンバーを更新可能"
+  on public.team_members for update
+  using (
+    team_id in (
+      select team_id from public.team_members
+      where user_id = auth.uid() and role in ('owner', 'admin')
+    )
+  );
+
+create policy "オーナー・管理者がメンバー削除可能または自己脱退"
+  on public.team_members for delete
+  using (
+    user_id = auth.uid()
+    or team_id in (
+      select team_id from public.team_members
+      where user_id = auth.uid() and role in ('owner', 'admin')
+    )
+  );
 
 -- 3. 配信テーブル
 create table public.broadcasts (

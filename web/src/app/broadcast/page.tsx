@@ -11,6 +11,7 @@ import {
   endBroadcast,
   cleanupStaleBroadcasts,
   type Broadcast,
+  type Team,
 } from "@/lib/database";
 
 const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
@@ -59,6 +60,28 @@ export default function BroadcastPage() {
   const { user, profile, loading } = useAuth();
   const subscribed = profile?.plan === "broadcaster" || profile?.plan === "team";
   const [trialUsed, setTrialUsed] = useState(false);
+
+  const [myTeams, setMyTeams] = useState<Team[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<string>("");
+
+  // 所属チーム取得
+  useEffect(() => {
+    if (!user) return;
+    const fetchTeams = async () => {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) return;
+      try {
+        const res = await fetch("/api/teams", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json();
+        setMyTeams(json.teams || []);
+      } catch { /* ignore */ }
+    };
+    fetchTeams();
+  }, [user]);
 
   const [sport, setSport] = useState("サッカー");
   const [volleyballRule, setVolleyballRule] = useState("6人制");
@@ -184,6 +207,7 @@ export default function BroadcastPage() {
         tournament: tournament.trim() || undefined,
         venue: venue.trim() || undefined,
         period: periods[0],
+        teamId: selectedTeamId || undefined,
       });
 
       if (broadcast) {
@@ -681,6 +705,34 @@ export default function BroadcastPage() {
                 </button>
               ))}
             </div>
+          </fieldset>
+        )}
+
+        {/* 所属チームから選択 */}
+        {myTeams.length > 0 && (
+          <fieldset>
+            <legend className="text-[11px] text-gray-400 font-medium mb-2">所属チームから選択</legend>
+            <select
+              value={selectedTeamId}
+              onChange={(e) => {
+                const teamId = e.target.value;
+                setSelectedTeamId(teamId);
+                if (teamId) {
+                  const team = myTeams.find((t) => t.id === teamId);
+                  if (team) {
+                    setHome(team.name);
+                    const sportMatch = SPORTS.find((s) => team.sport.includes(s));
+                    if (sportMatch) setSport(sportMatch);
+                  }
+                }
+              }}
+              className="w-full bg-[#111] border border-white/10 rounded-md px-3 py-2 text-sm text-white focus:border-[#e63946]/50 focus:outline-none transition"
+            >
+              <option value="">選択しない（手動入力）</option>
+              {myTeams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}（{t.sport}）</option>
+              ))}
+            </select>
           </fieldset>
         )}
 
