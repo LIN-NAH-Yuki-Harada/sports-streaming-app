@@ -8,6 +8,12 @@ export type Profile = {
   avatar_url: string | null;
   plan: "free" | "broadcaster" | "team";
   trial_used: boolean;
+  // YouTube 連携
+  youtube_channel_id: string | null;
+  youtube_channel_name: string | null;
+  youtube_access_token: string | null;
+  youtube_refresh_token: string | null;
+  youtube_linked_at: string | null;
   // Stripe 連携（2026-04-14追加）
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;

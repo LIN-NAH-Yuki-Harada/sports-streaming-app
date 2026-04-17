@@ -33,8 +33,9 @@ function MyPageInner() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [unlinkingYoutube, setUnlinkingYoutube] = useState(false);
 
-  // 決済後のリダイレクト処理
+  // YouTube連携後・決済後のリダイレクト処理
   useEffect(() => {
     const checkout = searchParams.get("checkout");
     if (checkout === "success") {
@@ -50,6 +51,23 @@ function MyPageInner() {
     }
     if (checkout === "cancel") {
       setToast("決済をキャンセルしました");
+      setTimeout(() => setToast(null), 3000);
+      router.replace("/mypage");
+    }
+    const youtube = searchParams.get("youtube");
+    if (youtube === "linked") {
+      refreshProfile();
+      setToast("YouTubeアカウントを連携しました！");
+      setTimeout(() => setToast(null), 3000);
+      router.replace("/mypage");
+    }
+    if (youtube === "cancelled") {
+      setToast("YouTube連携をキャンセルしました");
+      setTimeout(() => setToast(null), 3000);
+      router.replace("/mypage");
+    }
+    if (youtube === "error") {
+      setToast("YouTube連携でエラーが発生しました");
       setTimeout(() => setToast(null), 3000);
       router.replace("/mypage");
     }
@@ -81,6 +99,50 @@ function MyPageInner() {
     }
     setDeleting(false);
     setShowDeleteConfirm(false);
+  };
+
+  const handleYoutubeLink = async () => {
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return;
+    try {
+      const res = await fetch("/api/youtube/auth", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (json.authUrl) {
+        window.location.href = json.authUrl;
+      } else {
+        setToast(json.error || "YouTube連携の準備に失敗しました");
+        setTimeout(() => setToast(null), 3000);
+      }
+    } catch {
+      setToast("YouTube連携の準備に失敗しました");
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
+  const handleYoutubeUnlink = async () => {
+    if (!confirm("YouTube連携を解除しますか？")) return;
+    setUnlinkingYoutube(true);
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) { setUnlinkingYoutube(false); return; }
+    try {
+      await fetch("/api/youtube/unlink", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      await refreshProfile();
+      setToast("YouTube連携を解除しました");
+      setTimeout(() => setToast(null), 3000);
+    } catch {
+      setToast("連携解除に失敗しました");
+      setTimeout(() => setToast(null), 3000);
+    }
+    setUnlinkingYoutube(false);
   };
 
   const handleSaveName = async () => {
@@ -234,6 +296,58 @@ function MyPageInner() {
                 <span className="text-white">お問い合わせ</span>
                 <span className="text-xs text-gray-400">→</span>
               </Link>
+            </div>
+
+            {/* YouTube連携 */}
+            <div className="mt-6 rounded-lg border border-white/10 bg-[#111] p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <svg className="w-5 h-5 text-red-500" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                </svg>
+                <h3 className="text-sm font-semibold">YouTube連携</h3>
+              </div>
+
+              {profile?.plan !== "team" ? (
+                <div>
+                  <p className="text-xs text-gray-500">
+                    配信のアーカイブをYouTubeに自動保存できます。
+                  </p>
+                  <p className="mt-2 text-xs text-[#e63946]">
+                    チームプラン（¥500/月）で利用可能
+                  </p>
+                </div>
+              ) : profile?.youtube_channel_id ? (
+                <div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-green-400 font-medium">連携済み</p>
+                      <p className="text-sm text-white mt-0.5">{profile.youtube_channel_name}</p>
+                    </div>
+                    <button
+                      onClick={handleYoutubeUnlink}
+                      disabled={unlinkingYoutube}
+                      className="text-xs text-gray-500 hover:text-red-400 transition disabled:opacity-50"
+                    >
+                      {unlinkingYoutube ? "解除中..." : "連携解除"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-xs text-gray-500 mb-3">
+                    YouTubeアカウントを連携すると、配信のアーカイブが自動でチャンネルに保存されます。
+                  </p>
+                  <button
+                    onClick={handleYoutubeLink}
+                    className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-2.5 rounded-md transition"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                    </svg>
+                    YouTubeアカウントを連携
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* ログアウトボタン */}
