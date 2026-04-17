@@ -221,6 +221,8 @@ remaining = [
     ("1", "YouTube録画・自動アップロード（Phase 2-3）", "0.5人月", 450000),
     ("2", "UI最終調整・バグ修正", "0.2人月", 160000),
     ("3", "ベータテスト・品質保証", "0.3人月", 165000),
+    ("4", "外部API利用料・インフラ増強", "—", 300000),
+    ("5", "ローンチ後保守運用・追加開発", "—", 290000),
 ]
 
 for i, (no, item, mm, amount) in enumerate(remaining):
@@ -237,14 +239,14 @@ ws2.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
 ws2.cell(row=row, column=1, value="小計（税抜）").font = f_total
 ws2.cell(row=row, column=1).fill = fill_total; ws2.cell(row=row, column=1).alignment = align_l; ws2.cell(row=row, column=1).border = border_all
 for ci in range(2, 4): ws2.cell(row=row, column=ci).fill = fill_total; ws2.cell(row=row, column=ci).border = border_all
-c = ws2.cell(row=row, column=4, value=775000)
+c = ws2.cell(row=row, column=4, value=1365000)
 c.font = f_total; c.fill = fill_total; c.alignment = align_r; c.border = border_all; c.number_format = NUM
 
 row += 1
 ws2.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
 ws2.cell(row=row, column=1, value="消費税（10%）").font = f_item; ws2.cell(row=row, column=1).alignment = align_l; ws2.cell(row=row, column=1).border = border_all
 for ci in range(2, 4): ws2.cell(row=row, column=ci).border = border_all
-c = ws2.cell(row=row, column=4, value=77500); c.font = f_item; c.alignment = align_r; c.border = border_all; c.number_format = NUM
+c = ws2.cell(row=row, column=4, value=136500); c.font = f_item; c.alignment = align_r; c.border = border_all; c.number_format = NUM
 
 row += 1
 ws2.row_dimensions[row].height = 28
@@ -252,7 +254,7 @@ ws2.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
 c = ws2.cell(row=row, column=1, value="合計（税込）")
 c.font = f_grand; c.fill = fill_grand; c.alignment = align_l; c.border = thick_bottom
 for ci in range(2, 4): ws2.cell(row=row, column=ci).fill = fill_grand; ws2.cell(row=row, column=ci).border = thick_bottom
-c = ws2.cell(row=row, column=4, value=852500)
+c = ws2.cell(row=row, column=4, value=1501500)
 c.font = f_grand; c.fill = fill_grand; c.alignment = align_r; c.border = thick_bottom; c.number_format = NUM
 
 
@@ -280,7 +282,7 @@ for ci, h in enumerate(["項目", "税抜", "税込"], 1):
 
 summary = [
     ("現在完成分（92%）", 7950000, 8745000),
-    ("残り開発分（8%）", 775000, 852500),
+    ("残り開発分（8%）+ 保守・API費", 1365000, 1501500),
 ]
 for i, (item, ex_tax, inc_tax) in enumerate(summary):
     row = 5 + i
@@ -295,7 +297,7 @@ row = 7
 ws3.row_dimensions[row].height = 30
 ws3.cell(row=row, column=1, value="全機能開発 総合計").font = f_grand
 ws3.cell(row=row, column=1).fill = fill_grand; ws3.cell(row=row, column=1).alignment = align_l; ws3.cell(row=row, column=1).border = thick_bottom
-for ci, val in [(2, 8725000), (3, 9597500)]:
+for ci, val in [(2, 9315000), (3, 10246500)]:
     c = ws3.cell(row=row, column=ci, value=val)
     c.font = f_grand; c.fill = fill_grand; c.alignment = align_r; c.border = thick_bottom; c.number_format = NUM
 
