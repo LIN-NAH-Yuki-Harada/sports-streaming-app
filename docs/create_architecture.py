@@ -189,7 +189,12 @@ extensions = [
      "動画解析AI + FFmpeg",
      "約150〜250万円", "2-4ヶ月",
      GREEN, G_LIGHT),
-    ("v3.0", "SNS自動投稿",
+    ("v3.0", "AI得点検知",
+     "映像・音声からAIが得点を\n検知しスコア自動更新",
+     "映像解析AI / 音声認識",
+     "約100〜200万円", "3-6ヶ月",
+     PRIMARY, P_LIGHT),
+    ("v3.5", "SNS自動投稿",
      "ハイライトをInstagram\nTikTokに自動投稿",
      "各SNS API連携",
      "約50〜80万円", "2-3週間",
@@ -197,8 +202,8 @@ extensions = [
 ]
 
 for i, (ver, title, desc, tech, cost, period, ac, bg) in enumerate(extensions):
-    y = Inches(1.85 + i * 1.05)
-    rrect(x_r, y, Inches(5.0), Inches(0.9), bg, ac)
+    y = Inches(1.85 + i * 0.88)
+    rrect(x_r, y, Inches(5.0), Inches(0.75), bg, ac)
     # バージョンバッジ
     rrect(x_r + Inches(0.1), y + Inches(0.1), Inches(0.55), Inches(0.3), ac)
     txt(x_r + Inches(0.1), y + Inches(0.1), Inches(0.55), Inches(0.3),
@@ -224,7 +229,7 @@ for i, (ver, title, desc, tech, cost, period, ac, bg) in enumerate(extensions):
 # 合計
 rrect(x_r, Inches(7.05), Inches(5.0), Inches(0.35), P_LIGHT, PRIMARY)
 txt(x_r + Inches(0.2), Inches(7.08), Inches(3.5), Inches(0.3),
-    "全拡張の概算合計: 約510〜850万円（段階的に投資）", sz=11, color=PRIMARY, bold=True)
+    "全拡張の概算合計: 約610〜1,050万円（段階的に投資）", sz=11, color=PRIMARY, bold=True)
 
 # フッター
 txt(Inches(0.6), Inches(7.2), Inches(7), Inches(0.2),
