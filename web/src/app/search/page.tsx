@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
 import { useToast } from "@/components/toaster";
+import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
 
@@ -299,7 +300,10 @@ export default function TeamPage() {
     return (
       <div>
         <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pt-4 pb-3">
-          <h1 className="text-sm font-bold">チーム</h1>
+          <div className="flex items-center justify-between">
+            <Logo />
+            <h1 className="text-sm font-bold text-gray-400">チーム</h1>
+          </div>
         </div>
         <div className="px-5 md:px-8 lg:px-10 pt-8 pb-20 text-center">
           <div className="w-16 h-16 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-4">
@@ -330,18 +334,17 @@ export default function TeamPage() {
     return (
       <div>
         <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pt-4 pb-3">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <Logo />
             <button
               onClick={() => { setSelectedTeam(null); setEditing(false); }}
-              className="text-gray-400 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e63946] rounded"
+              className="text-xs text-gray-400 hover:text-white transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e63946] rounded"
               aria-label="チーム一覧へ戻る"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-              </svg>
+              ← チーム一覧
             </button>
-            <h1 className="text-sm font-bold">{selectedTeam.name}</h1>
           </div>
+          <h1 className="mt-2 text-sm font-bold text-gray-400 truncate">{selectedTeam.name}</h1>
         </div>
 
         <div className="px-5 md:px-8 lg:px-10 pb-20">
@@ -563,15 +566,18 @@ export default function TeamPage() {
     <div>
       <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pt-4 pb-3">
         <div className="flex items-center justify-between">
-          <h1 className="text-sm font-bold">チーム</h1>
-          {isTeamPlan && (
-            <button
-              onClick={() => setTab(tab === "create" ? "list" : "create")}
-              className="text-[10px] text-[#e63946] border border-[#e63946]/30 px-2.5 py-1 rounded-md hover:bg-[#e63946]/5"
-            >
-              {tab === "create" ? "戻る" : "+ 新規作成"}
-            </button>
-          )}
+          <Logo />
+          <div className="flex items-center gap-3">
+            <h1 className="text-sm font-bold text-gray-400">チーム</h1>
+            {isTeamPlan && (
+              <button
+                onClick={() => setTab(tab === "create" ? "list" : "create")}
+                className="text-[10px] text-[#e63946] border border-[#e63946]/30 px-2.5 py-1 rounded-md hover:bg-[#e63946]/5"
+              >
+                {tab === "create" ? "戻る" : "+ 新規作成"}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

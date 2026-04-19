@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
 import { useToast } from "@/components/toaster";
+import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
 import { updateProfile } from "@/lib/database";
 
@@ -149,7 +150,10 @@ function MyPageInner() {
   return (
     <div>
       <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
-        <h1 className="text-sm font-bold">マイページ</h1>
+        <div className="flex items-center justify-between">
+          <Logo />
+          <h1 className="text-sm font-bold text-gray-400">マイページ</h1>
+        </div>
       </div>
 
       <div className="px-5 md:px-8 lg:px-10 pt-4 md:pt-8 pb-20">

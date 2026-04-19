@@ -6,6 +6,7 @@ import { AuthForm } from "@/components/auth-form";
 import { LiveKitBroadcaster } from "@/components/livekit-video";
 import { CameraPermissionGuide, isCameraPermissionError } from "@/components/camera-permission-guide";
 import { useToast } from "@/components/toaster";
+import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
 import {
   createBroadcast,
@@ -465,8 +466,15 @@ export default function BroadcastPage() {
   // ===== 未ログイン =====
   if (screen === "login") {
     return (
-      <div className="mx-auto max-w-sm md:max-w-md px-5 md:px-8 py-16">
-        <div className="text-center mb-8">
+      <div>
+        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+          <div className="flex items-center justify-between">
+            <Logo />
+            <h1 className="text-sm font-bold text-gray-400">配信</h1>
+          </div>
+        </div>
+        <div className="mx-auto max-w-sm md:max-w-md px-5 md:px-8 py-16">
+          <div className="text-center mb-8">
           <div className="w-16 h-16 mx-auto rounded-full bg-[#e63946]/10 flex items-center justify-center mb-6">
             <svg className="w-7 h-7 text-[#e63946]" fill="currentColor" viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="8" />
@@ -480,16 +488,17 @@ export default function BroadcastPage() {
 
         <AuthForm />
 
-        <div className="mt-8 rounded-md bg-[#111] border border-white/5 p-4">
-          <p className="text-[11px] text-gray-400 font-medium mb-2">配信者プラン</p>
-          <p className="text-lg font-black">¥300<span className="text-xs font-normal text-gray-500">/月</span></p>
-          <p className="text-[10px] text-gray-500 mt-1">初回10分間は無料でお試し</p>
-          <ul className="mt-2 space-y-1 text-[10px] text-gray-500">
-            <li>✓ スコアボード・オーバーレイ</li>
-            <li>✓ リモコンでスコア操作</li>
-            <li>✓ 限定公開の共有コード発行</li>
-            <li>✓ アーカイブ自動保存</li>
-          </ul>
+          <div className="mt-8 rounded-md bg-[#111] border border-white/5 p-4">
+            <p className="text-[11px] text-gray-400 font-medium mb-2">配信者プラン</p>
+            <p className="text-lg font-black">¥300<span className="text-xs font-normal text-gray-500">/月</span></p>
+            <p className="text-[10px] text-gray-500 mt-1">初回10分間は無料でお試し</p>
+            <ul className="mt-2 space-y-1 text-[10px] text-gray-500">
+              <li>✓ スコアボード・オーバーレイ</li>
+              <li>✓ リモコンでスコア操作</li>
+              <li>✓ 限定公開の共有コード発行</li>
+              <li>✓ アーカイブ自動保存</li>
+            </ul>
+          </div>
         </div>
       </div>
     );
@@ -754,7 +763,14 @@ export default function BroadcastPage() {
 
   // ===== 入力フォーム（ログイン済み）=====
   return (
-    <div className="mx-auto md:max-w-2xl px-5 md:px-8 py-10 md:py-12 pb-20">
+    <div>
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+        <div className="flex items-center justify-between">
+          <Logo />
+          <h1 className="text-sm font-bold text-gray-400">配信</h1>
+        </div>
+      </div>
+      <div className="mx-auto md:max-w-2xl px-5 md:px-8 py-10 md:py-12 pb-20">
       <h1 className="text-lg md:text-xl font-bold">配信をはじめる</h1>
       <p className="mt-1 text-xs md:text-sm text-gray-500">
         試合情報を入力して配信を開始すると、共有コードが発行されます。
@@ -977,6 +993,7 @@ export default function BroadcastPage() {
             チーム名と対戦相手を入力してください
           </p>
         )}
+      </div>
       </div>
     </div>
   );

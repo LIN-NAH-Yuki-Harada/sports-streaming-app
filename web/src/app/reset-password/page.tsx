@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase";
+import { Logo } from "@/components/logo";
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
@@ -37,26 +38,35 @@ export default function ResetPasswordPage() {
 
   if (done) {
     return (
-      <div className="mx-auto max-w-sm md:max-w-md px-5 md:px-8 py-16 text-center">
-        <div className="w-14 h-14 mx-auto rounded-full bg-green-500/10 flex items-center justify-center mb-4">
-          <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
+      <div>
+        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+          <Logo />
         </div>
-        <p className="text-sm font-bold">パスワードを再設定しました</p>
-        <p className="mt-2 text-xs text-gray-500">新しいパスワードでログインできます。</p>
-        <a
-          href="/"
-          className="mt-6 inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-6 py-2.5 rounded-md transition"
-        >
-          ホームへ
-        </a>
+        <div className="mx-auto max-w-sm md:max-w-md px-5 md:px-8 py-16 text-center">
+          <div className="w-14 h-14 mx-auto rounded-full bg-green-500/10 flex items-center justify-center mb-4">
+            <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <p className="text-sm font-bold">パスワードを再設定しました</p>
+          <p className="mt-2 text-xs text-gray-500">新しいパスワードでログインできます。</p>
+          <a
+            href="/"
+            className="mt-6 inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-6 py-2.5 rounded-md transition"
+          >
+            ホームへ
+          </a>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-sm md:max-w-md px-5 md:px-8 py-16">
+    <div>
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+        <Logo />
+      </div>
+      <div className="mx-auto max-w-sm md:max-w-md px-5 md:px-8 py-16">
       <h1 className="text-lg md:text-xl font-bold text-center">パスワード再設定</h1>
       <p className="mt-2 text-xs text-gray-500 text-center">新しいパスワードを入力してください。</p>
 
@@ -100,6 +110,7 @@ export default function ResetPasswordPage() {
           {loading ? "処理中..." : "パスワードを再設定"}
         </button>
       </form>
+      </div>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase";
 import { getTeamNames } from "@/lib/database";
+import { Logo } from "@/components/logo";
 
 const SPORT_EMOJI: Record<string, string> = {
   サッカー: "⚽",
@@ -54,12 +55,7 @@ export default function Home() {
       {/* ヘッダー */}
       <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="bg-[#e63946] text-white text-[10px] font-black px-2 py-0.5 rounded tracking-wider">
-              LIVE
-            </span>
-            <span className="text-base font-bold tracking-tight">LIVE SPOtCH</span>
-          </div>
+          <Logo />
           {mounted && teams.length > 0 && (
             <span className="text-xs text-gray-600">{teams.length}チーム利用中</span>
           )}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { getBroadcastHistory, type Broadcast } from "@/lib/database";
+import { Logo } from "@/components/logo";
 
 const SPORT_EMOJI: Record<string, string> = {
   サッカー: "⚽",
@@ -52,7 +53,10 @@ export default function HistoryPage() {
   return (
     <div>
       <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
-        <h1 className="text-sm font-bold">配信履歴</h1>
+        <div className="flex items-center justify-between">
+          <Logo />
+          <h1 className="text-sm font-bold text-gray-400">配信履歴</h1>
+        </div>
       </div>
 
       <div className="px-5 md:px-8 lg:px-10 pb-20">

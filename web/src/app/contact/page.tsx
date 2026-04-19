@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Logo } from "@/components/logo";
 
 export default function ContactPage() {
   const [name, setName] = useState("");
@@ -35,12 +36,18 @@ export default function ContactPage() {
   };
 
   return (
-    <div className="mx-auto max-w-lg px-5 md:px-8 py-10 md:py-14 pb-24">
-      <Link href="/" className="text-xs text-gray-500 hover:text-white transition">
-        ← ホームに戻る
-      </Link>
+    <div>
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+        <div className="flex items-center justify-between">
+          <Logo />
+          <Link href="/" className="text-xs text-gray-400 hover:text-white transition">
+            ← ホーム
+          </Link>
+        </div>
+      </div>
 
-      <h1 className="text-lg font-bold mt-6">お問い合わせ</h1>
+      <div className="mx-auto max-w-lg px-5 md:px-8 py-10 md:py-14 pb-24">
+      <h1 className="text-lg font-bold">お問い合わせ</h1>
       <p className="mt-2 text-xs text-gray-500 leading-relaxed">
         ご質問・ご要望・不具合の報告など、お気軽にお問い合わせください。
       </p>
@@ -122,6 +129,7 @@ export default function ContactPage() {
           </p>
         </form>
       )}
+      </div>
     </div>
   );
 }

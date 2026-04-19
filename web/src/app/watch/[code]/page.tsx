@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, use } from "react";
 import { getBroadcastByCode, type Broadcast } from "@/lib/database";
 import { createClient } from "@/lib/supabase";
 import { LiveKitViewer } from "@/components/livekit-video";
+import { Logo } from "@/components/logo";
 
 export default function WatchPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
@@ -123,6 +124,13 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   // ===== 配信が見つからない =====
   if (notFound || !broadcast) {
     return (
+      <div>
+        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+          <div className="flex items-center justify-between">
+            <Logo />
+            <h1 className="text-sm font-bold text-gray-400">視聴</h1>
+          </div>
+        </div>
       <div className="mx-auto max-w-sm px-5 py-20 text-center">
         <div className="w-16 h-16 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-6">
           <svg className="w-7 h-7 text-gray-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
@@ -171,6 +179,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         >
           トップに戻る
         </a>
+      </div>
       </div>
     );
   }

@@ -1,6 +1,12 @@
+import { Logo } from "@/components/logo";
+
 export default function PrivacyPage() {
   return (
-    <div className="mx-auto max-w-3xl px-5 md:px-8 py-10 md:py-14 pb-20">
+    <div>
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+        <Logo />
+      </div>
+      <div className="mx-auto max-w-3xl px-5 md:px-8 py-10 md:py-14 pb-20">
       <h1 className="text-xl md:text-2xl font-bold">プライバシーポリシー</h1>
       <p className="mt-2 text-[10px] text-gray-600">最終更新日: 2026年4月11日</p>
 
@@ -128,6 +134,7 @@ export default function PrivacyPage() {
         <a href="/" className="inline-block mt-4 text-xs text-gray-400 hover:text-white transition">
           ← トップに戻る
         </a>
+      </div>
       </div>
     </div>
   );

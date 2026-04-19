@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
+import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
 
 type Plan = "free" | "broadcaster" | "team";
@@ -87,16 +88,17 @@ export default function PricingPage() {
     <div className="min-h-screen">
       {/* ヘッダー */}
       <header className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 py-3 border-b border-white/5">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <Logo />
           <button
             onClick={() => router.back()}
-            className="text-gray-400 hover:text-white text-sm"
+            className="text-xs text-gray-400 hover:text-white transition"
             aria-label="戻る"
           >
-            ←
+            ← 戻る
           </button>
-          <h1 className="text-sm font-bold">料金プラン</h1>
         </div>
+        <h1 className="mt-2 text-sm font-bold text-gray-400">料金プラン</h1>
       </header>
 
       <div className="px-5 md:px-8 lg:px-10 pt-8 md:pt-12 pb-24">
