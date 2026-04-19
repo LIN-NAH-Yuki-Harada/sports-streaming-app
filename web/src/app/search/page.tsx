@@ -311,7 +311,7 @@ export default function TeamPage() {
   if (!user) {
     return (
       <div>
-        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pt-4 pb-3">
+        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
           <div className="flex items-center justify-between">
             <Logo />
             <h1 className="text-sm font-bold text-gray-400">チーム</h1>
@@ -345,7 +345,7 @@ export default function TeamPage() {
 
     return (
       <div>
-        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pt-4 pb-3">
+        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
           <div className="flex items-center justify-between gap-3">
             <Logo />
             <button
@@ -586,7 +586,7 @@ export default function TeamPage() {
 
   return (
     <div>
-      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pt-4 pb-3">
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
         <div className="flex items-center justify-between">
           <Logo />
           <div className="flex items-center gap-3">
