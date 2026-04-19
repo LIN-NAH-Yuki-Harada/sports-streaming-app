@@ -302,10 +302,10 @@ export default function TeamPage() {
   if (!user) {
     return (
       <div>
-        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pt-4 pb-3">
+        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pt-4 pb-3">
           <h1 className="text-sm font-bold">チーム</h1>
         </div>
-        <div className="px-5 pt-8 pb-20 text-center">
+        <div className="px-5 md:px-8 lg:px-10 pt-8 pb-20 text-center">
           <div className="w-16 h-16 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-4">
             <svg className="w-7 h-7 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
@@ -333,7 +333,7 @@ export default function TeamPage() {
 
     return (
       <div>
-        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pt-4 pb-3">
+        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pt-4 pb-3">
           <div className="flex items-center gap-3">
             <button onClick={() => { setSelectedTeam(null); setEditing(false); }} className="text-gray-400 hover:text-white">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -344,7 +344,7 @@ export default function TeamPage() {
           </div>
         </div>
 
-        <div className="px-5 pb-20">
+        <div className="px-5 md:px-8 lg:px-10 pb-20">
           {/* チーム情報ヘッダー */}
           <div className="flex items-center gap-3 mt-4 mb-2">
             <div className="w-11 h-11 rounded-full bg-[#e63946]/10 flex items-center justify-center">
@@ -414,7 +414,7 @@ export default function TeamPage() {
 
           {/* メンバー一覧 */}
           {detailTab === "members" && (
-            <div className="space-y-2">
+            <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-3">
               {selectedTeam.team_members
                 .sort((a, b) => {
                   const order = { owner: 0, admin: 1, member: 2 };
@@ -473,7 +473,7 @@ export default function TeamPage() {
 
           {/* 設定タブ（オーナーのみ） */}
           {detailTab === "settings" && isOwner && (
-            <div className="space-y-4">
+            <div className="space-y-4 md:max-w-xl">
               {editing ? (
                 <div className="space-y-3">
                   <div>
@@ -642,7 +642,7 @@ export default function TeamPage() {
                 </div>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-3 lg:grid-cols-3">
                 {teams.map((team) => {
                   const myRole = team.team_members.find((m) => m.user_id === user.id)?.role;
                   return (
@@ -678,7 +678,7 @@ export default function TeamPage() {
 
         {/* 招待コードで参加 */}
         {tab === "join" && (
-          <div className="mt-2">
+          <div className="mt-2 md:max-w-xl">
             <p className="text-xs text-gray-400 mb-3">
               チームの管理者から共有された招待コードを入力してください
             </p>
@@ -703,7 +703,7 @@ export default function TeamPage() {
 
         {/* チーム作成フォーム */}
         {tab === "create" && isTeamPlan && (
-          <div className="mt-2 space-y-3">
+          <div className="mt-2 space-y-3 md:max-w-xl">
             <div>
               <label className="text-[10px] text-gray-500 block mb-1">チーム名 *</label>
               <input

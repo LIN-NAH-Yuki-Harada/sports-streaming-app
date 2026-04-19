@@ -37,7 +37,7 @@ export default function ResetPasswordPage() {
 
   if (done) {
     return (
-      <div className="mx-auto max-w-sm px-5 py-16 text-center">
+      <div className="mx-auto max-w-sm md:max-w-md px-5 md:px-8 py-16 text-center">
         <div className="w-14 h-14 mx-auto rounded-full bg-green-500/10 flex items-center justify-center mb-4">
           <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -56,8 +56,8 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm px-5 py-16">
-      <h1 className="text-lg font-bold text-center">パスワード再設定</h1>
+    <div className="mx-auto max-w-sm md:max-w-md px-5 md:px-8 py-16">
+      <h1 className="text-lg md:text-xl font-bold text-center">パスワード再設定</h1>
       <p className="mt-2 text-xs text-gray-500 text-center">新しいパスワードを入力してください。</p>
 
       <form onSubmit={handleSubmit} className="mt-8 space-y-4">

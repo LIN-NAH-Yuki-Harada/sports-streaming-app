@@ -1,10 +1,10 @@
 export default function TermsPage() {
   return (
-    <div className="mx-auto max-w-3xl px-5 py-10 pb-20">
-      <h1 className="text-xl font-bold">利用規約</h1>
+    <div className="mx-auto max-w-3xl px-5 md:px-8 py-10 md:py-14 pb-20">
+      <h1 className="text-xl md:text-2xl font-bold">利用規約</h1>
       <p className="mt-2 text-[10px] text-gray-600">最終更新日: 2026年4月11日</p>
 
-      <div className="mt-8 space-y-8 text-sm text-gray-300 leading-relaxed">
+      <div className="mt-8 space-y-8 text-sm md:text-[15px] text-gray-300 leading-relaxed">
         <section>
           <h2 className="text-base font-semibold text-white mb-3">第1条（総則）</h2>
           <p>

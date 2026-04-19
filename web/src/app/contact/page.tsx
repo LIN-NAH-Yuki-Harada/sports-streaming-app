@@ -35,7 +35,7 @@ export default function ContactPage() {
   };
 
   return (
-    <div className="mx-auto max-w-lg px-5 py-10 pb-24">
+    <div className="mx-auto max-w-lg px-5 md:px-8 py-10 md:py-14 pb-24">
       <Link href="/" className="text-xs text-gray-500 hover:text-white transition">
         ← ホームに戻る
       </Link>

@@ -156,11 +156,11 @@ function MyPageInner() {
 
   return (
     <div>
-      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
         <h1 className="text-sm font-bold">マイページ</h1>
       </div>
 
-      <div className="px-5 pt-4 pb-20">
+      <div className="px-5 md:px-8 lg:px-10 pt-4 md:pt-8 pb-20">
         {/* トースト通知 */}
         {toast && (
           <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-[#111] border border-[#e63946]/30 text-white text-xs px-4 py-2.5 rounded-md shadow-lg">
@@ -199,8 +199,8 @@ function MyPageInner() {
         {/* ログイン済み: プロフィール表示 */}
         {!loading && user && (
           <>
-            <div className="flex items-center gap-3 mb-8">
-              <div className="w-12 h-12 rounded-full bg-[#e63946]/20 flex items-center justify-center text-[#e63946] text-sm font-bold">
+            <div className="flex items-center gap-3 md:gap-4 mb-8">
+              <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-[#e63946]/20 flex items-center justify-center text-[#e63946] text-sm md:text-lg font-bold shrink-0">
                 {(profile?.display_name || user.email)?.charAt(0).toUpperCase() || "U"}
               </div>
               <div className="flex-1 min-w-0">
@@ -231,7 +231,7 @@ function MyPageInner() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium truncate">
+                    <p className="text-sm md:text-base font-medium truncate">
                       {profile?.display_name || user.email}
                     </p>
                     <button
@@ -258,7 +258,7 @@ function MyPageInner() {
             </div>
 
             {/* メニュー */}
-            <div className="space-y-1">
+            <div className="space-y-1 md:space-y-0 md:grid md:grid-cols-2 md:gap-x-6 lg:gap-x-8">
               {/* サブスクリプション（有効） */}
               <Link
                 href="/pricing"
@@ -299,7 +299,7 @@ function MyPageInner() {
             </div>
 
             {/* YouTube連携 */}
-            <div className="mt-6 rounded-lg border border-white/10 bg-[#111] p-4">
+            <div className="mt-6 md:mt-8 rounded-lg border border-white/10 bg-[#111] p-4 md:p-5">
               <div className="flex items-center gap-2 mb-3">
                 <svg className="w-5 h-5 text-red-500" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
@@ -351,20 +351,22 @@ function MyPageInner() {
             </div>
 
             {/* ログアウトボタン */}
-            <button
-              onClick={signOut}
-              className="mt-8 w-full border border-white/10 text-gray-400 text-sm py-2.5 rounded-md hover:bg-white/5 transition"
-            >
-              ログアウト
-            </button>
+            <div className="md:max-w-sm md:mx-auto">
+              <button
+                onClick={signOut}
+                className="mt-8 w-full border border-white/10 text-gray-400 text-sm py-2.5 rounded-md hover:bg-white/5 transition"
+              >
+                ログアウト
+              </button>
 
-            {/* 退会ボタン */}
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="mt-3 w-full text-[11px] text-gray-600 hover:text-red-400 py-2 transition"
-            >
-              アカウントを削除（退会）
-            </button>
+              {/* 退会ボタン */}
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="mt-3 w-full text-[11px] text-gray-600 hover:text-red-400 py-2 transition"
+              >
+                アカウントを削除（退会）
+              </button>
+            </div>
 
             {/* 退会確認ダイアログ */}
             {showDeleteConfirm && (

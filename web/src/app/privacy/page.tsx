@@ -1,10 +1,10 @@
 export default function PrivacyPage() {
   return (
-    <div className="mx-auto max-w-3xl px-5 py-10 pb-20">
-      <h1 className="text-xl font-bold">プライバシーポリシー</h1>
+    <div className="mx-auto max-w-3xl px-5 md:px-8 py-10 md:py-14 pb-20">
+      <h1 className="text-xl md:text-2xl font-bold">プライバシーポリシー</h1>
       <p className="mt-2 text-[10px] text-gray-600">最終更新日: 2026年4月11日</p>
 
-      <div className="mt-8 space-y-8 text-sm text-gray-300 leading-relaxed">
+      <div className="mt-8 space-y-8 text-sm md:text-[15px] text-gray-300 leading-relaxed">
         <section>
           <p>
             LIVE SPOtCH運営事務局（以下「当事務局」）は、ライブ配信サービス「LIVE SPOtCH」（以下「本サービス」）におけるユーザーの個人情報の取り扱いについて、以下のとおりプライバシーポリシー（以下「本ポリシー」）を定めます。

@@ -52,7 +52,7 @@ export default function Home() {
   return (
     <div>
       {/* ヘッダー */}
-      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="bg-[#e63946] text-white text-[10px] font-black px-2 py-0.5 rounded tracking-wider">
@@ -67,11 +67,11 @@ export default function Home() {
       </div>
 
       {/* 共有コードで視聴 */}
-      <section className="px-5 pt-6">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">
+      <section className="px-5 md:px-8 lg:px-10 pt-6">
+        <h2 className="text-sm md:text-base font-semibold text-gray-300 mb-3">
           共有コードで試合を見る
         </h2>
-        <div className="flex gap-2">
+        <div className="flex gap-2 md:max-w-xl">
           <input
             type="text"
             placeholder="共有コードを入力（例: ABC123）"
@@ -97,7 +97,7 @@ export default function Home() {
       </section>
 
       {/* ホーム画面追加の誘導（PWAモードでは非表示） */}
-      {!isStandalone && <section className="px-5 pt-6">
+      {!isStandalone && <section className="px-5 md:px-8 lg:px-10 pt-6">
         <div className="rounded-xl bg-gradient-to-br from-[#e63946]/10 via-[#111] to-[#111] border border-[#e63946]/20 p-5 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-[#e63946]/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2" />
           <div className="relative">
@@ -153,7 +153,7 @@ export default function Home() {
       </section>}
 
       {/* 現在配信中（DBからリアルタイム取得） */}
-      <section className="px-5 pt-8">
+      <section className="px-5 md:px-8 lg:px-10 pt-8">
         <div className="flex items-center gap-2 mb-3">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e63946] opacity-75" />
@@ -168,7 +168,7 @@ export default function Home() {
             <p className="text-xs text-gray-600">読み込み中...</p>
           </div>
         ) : liveBroadcasts.length > 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-3 lg:grid-cols-3">
             {liveBroadcasts.map((m) => (
               <div
                 key={m.id}
@@ -203,7 +203,7 @@ export default function Home() {
 
       {/* 利用中のチーム（配信実績から自動取得） */}
       {mounted && teams.length > 0 && (
-        <section className="px-5 pt-8 pb-20">
+        <section className="px-5 md:px-8 lg:px-10 pt-8 pb-20">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">
             参加チーム
           </h2>

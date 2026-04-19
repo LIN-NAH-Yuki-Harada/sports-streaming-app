@@ -86,7 +86,7 @@ export default function PricingPage() {
   return (
     <div className="min-h-screen">
       {/* ヘッダー */}
-      <header className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 py-3 border-b border-white/5">
+      <header className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 py-3 border-b border-white/5">
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.back()}
@@ -99,14 +99,14 @@ export default function PricingPage() {
         </div>
       </header>
 
-      <div className="px-5 pt-8 pb-24 max-w-3xl mx-auto">
+      <div className="px-5 md:px-8 lg:px-10 pt-8 md:pt-12 pb-24">
         {/* ヒーロー */}
-        <div className="mb-10">
+        <div className="mb-10 md:mb-12">
           <p className="text-[#e63946] text-sm font-medium tracking-wide mb-2">Pricing</p>
-          <h2 className="text-2xl sm:text-3xl font-black leading-tight">
-            プランを選んで、<br />配信を始めよう。
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-black leading-tight">
+            プランを選んで、<br className="md:hidden" />配信を始めよう。
           </h2>
-          <p className="mt-3 text-sm text-gray-500 leading-relaxed">
+          <p className="mt-3 text-sm md:text-base text-gray-500 leading-relaxed">
             いつでも解約できます。初回10分間は無料でお試しいただけます。
           </p>
         </div>
@@ -127,15 +127,15 @@ export default function PricingPage() {
         )}
 
         {/* プランカード */}
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 md:gap-6 md:grid-cols-3">
           {/* 無料プラン */}
-          <div className="rounded-lg border border-white/10 p-5">
+          <div className="rounded-lg border border-white/10 p-5 md:p-6 flex flex-col">
             <p className="text-xs text-gray-500 mb-1">視聴する人</p>
             <p className="text-2xl font-black">無料</p>
             <p className="text-xs text-gray-500 mt-3 leading-relaxed">
               共有コードで配信・アーカイブを視聴。
             </p>
-            <ul className="mt-3 space-y-1.5 text-[11px] text-gray-500">
+            <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-500 flex-1">
               <li>✓ ライブ視聴</li>
               <li>✓ 1ヶ月以内のアーカイブ視聴</li>
             </ul>
@@ -148,7 +148,7 @@ export default function PricingPage() {
           </div>
 
           {/* 配信者プラン */}
-          <div className="rounded-lg border border-[#e63946]/40 bg-[#e63946]/5 p-5 relative">
+          <div className="rounded-lg border border-[#e63946]/40 bg-[#e63946]/5 p-5 md:p-6 relative flex flex-col">
             <span className="absolute -top-2 right-4 bg-[#e63946] text-white text-[10px] font-bold px-2 py-0.5 rounded">
               人気
             </span>
@@ -157,7 +157,7 @@ export default function PricingPage() {
               ¥300<span className="text-sm font-normal text-gray-400">/月</span>
             </p>
             <p className="text-xs text-gray-400 mt-1">保護者・コーチ向け</p>
-            <ul className="mt-3 space-y-1.5 text-[11px] text-gray-400">
+            <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-400 flex-1">
               <li>✓ ライブ配信</li>
               <li>✓ スコアボード・オーバーレイ</li>
               <li>✓ リモコンでスコア操作</li>
@@ -184,13 +184,13 @@ export default function PricingPage() {
           </div>
 
           {/* チームプラン */}
-          <div className="rounded-lg border border-white/20 bg-white/5 p-5">
+          <div className="rounded-lg border border-white/20 bg-white/5 p-5 md:p-6 flex flex-col">
             <p className="text-xs text-white mb-1">チームプラン</p>
             <p className="text-2xl font-black">
               ¥500<span className="text-sm font-normal text-gray-400">/月</span>
             </p>
             <p className="text-xs text-gray-400 mt-1">チーム代表・コーチ向け</p>
-            <ul className="mt-3 space-y-1.5 text-[11px] text-gray-400">
+            <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-400 flex-1">
               <li>✓ 配信者プランの全機能</li>
               <li>✓ 大容量アーカイブストレージ</li>
               <li>✓ スケジュール管理</li>

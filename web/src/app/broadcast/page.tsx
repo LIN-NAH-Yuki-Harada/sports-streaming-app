@@ -400,7 +400,7 @@ export default function BroadcastPage() {
   // ===== 未ログイン =====
   if (screen === "login") {
     return (
-      <div className="mx-auto max-w-sm px-5 py-16">
+      <div className="mx-auto max-w-sm md:max-w-md px-5 md:px-8 py-16">
         <div className="text-center mb-8">
           <div className="w-16 h-16 mx-auto rounded-full bg-[#e63946]/10 flex items-center justify-center mb-6">
             <svg className="w-7 h-7 text-[#e63946]" fill="currentColor" viewBox="0 0 24 24">
@@ -654,9 +654,9 @@ export default function BroadcastPage() {
 
   // ===== 入力フォーム（ログイン済み）=====
   return (
-    <div className="mx-auto max-w-2xl px-5 py-10 pb-20">
-      <h1 className="text-lg font-bold">配信をはじめる</h1>
-      <p className="mt-1 text-xs text-gray-500">
+    <div className="mx-auto md:max-w-2xl px-5 md:px-8 py-10 md:py-12 pb-20">
+      <h1 className="text-lg md:text-xl font-bold">配信をはじめる</h1>
+      <p className="mt-1 text-xs md:text-sm text-gray-500">
         試合情報を入力して配信を開始すると、共有コードが発行されます。
       </p>
 

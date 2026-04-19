@@ -51,11 +51,11 @@ export default function HistoryPage() {
 
   return (
     <div>
-      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+      <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
         <h1 className="text-sm font-bold">配信履歴</h1>
       </div>
 
-      <div className="px-5 pb-20">
+      <div className="px-5 md:px-8 lg:px-10 pb-20">
         {loading && (
           <div className="flex items-center justify-center py-16">
             <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
@@ -77,7 +77,7 @@ export default function HistoryPage() {
             <h2 className="text-xs text-gray-500 font-medium mb-2">
               {group.date}
             </h2>
-            <div className="space-y-2">
+            <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-3 lg:grid-cols-3">
               {group.items.map((bc) => (
                 <div
                   key={bc.id}
