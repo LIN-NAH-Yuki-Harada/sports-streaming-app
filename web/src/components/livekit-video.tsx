@@ -195,6 +195,8 @@ export function LiveKitBroadcaster({
         audio={true}
         onError={onError}
         options={{
+          adaptiveStream: true,
+          dynacast: true,
           videoCaptureDefaults: {
             facingMode: "environment",
             resolution: { width: 1280, height: 720, frameRate: 30 },
@@ -202,6 +204,14 @@ export function LiveKitBroadcaster({
           audioCaptureDefaults: {
             echoCancellation: true,
             noiseSuppression: true,
+          },
+          publishDefaults: {
+            simulcast: true,
+            videoCodec: "h264",
+            videoEncoding: {
+              maxBitrate: 1_500_000,
+              maxFramerate: 30,
+            },
           },
         }}
         style={{
@@ -238,6 +248,10 @@ export function LiveKitViewer({
         connect={true}
         video={false}
         audio={false}
+        options={{
+          adaptiveStream: true,
+          dynacast: true,
+        }}
         style={{
           position: "absolute",
           inset: 0,
