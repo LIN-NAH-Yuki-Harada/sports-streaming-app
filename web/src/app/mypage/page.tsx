@@ -98,26 +98,6 @@ function MyPageInner() {
     setShowDeleteConfirm(false);
   };
 
-  const handleYoutubeLink = async () => {
-    const supabase = createClient();
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token;
-    if (!token) return;
-    try {
-      const res = await fetch("/api/youtube/auth", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      if (json.authUrl) {
-        window.location.href = json.authUrl;
-      } else {
-        toast.error(json.error || "YouTube連携の準備に失敗しました");
-      }
-    } catch {
-      toast.error("YouTube連携の準備に失敗しました");
-    }
-  };
-
   const handleYoutubeUnlink = async () => {
     if (!confirm("YouTube連携を解除しますか？")) return;
     setUnlinkingYoutube(true);
@@ -287,53 +267,32 @@ function MyPageInner() {
               </Link>
             </div>
 
-            {/* YouTube連携 */}
+            {/* YouTube連携（準備中） */}
             <div className="mt-6 md:mt-8 rounded-lg border border-white/10 bg-[#111] p-4 md:p-5">
               <div className="flex items-center gap-2 mb-3">
-                <svg className="w-5 h-5 text-red-500" viewBox="0 0 24 24" fill="currentColor">
+                <svg className="w-5 h-5 text-gray-500" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
                 </svg>
-                <h3 className="text-sm font-semibold">YouTube連携</h3>
+                <h3 className="text-sm font-semibold text-gray-300">YouTube連携</h3>
+                <span className="text-[10px] text-gray-400 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">準備中</span>
               </div>
-
-              {profile?.plan !== "team" ? (
-                <div>
-                  <p className="text-xs text-gray-500">
-                    配信のアーカイブをYouTubeに自動保存できます。
-                  </p>
-                  <p className="mt-2 text-xs text-[#e63946]">
-                    チームプラン（¥500/月）で利用可能
-                  </p>
-                </div>
-              ) : profile?.youtube_channel_id ? (
-                <div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-green-400 font-medium">連携済み</p>
-                      <p className="text-sm text-white mt-0.5">{profile.youtube_channel_name}</p>
-                    </div>
-                    <button
-                      onClick={handleYoutubeUnlink}
-                      disabled={unlinkingYoutube}
-                      className="text-xs text-gray-500 hover:text-red-400 transition disabled:opacity-50"
-                    >
-                      {unlinkingYoutube ? "解除中..." : "連携解除"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-xs text-gray-500 mb-3">
-                    YouTubeアカウントを連携すると、配信のアーカイブが自動でチャンネルに保存されます。
+              <p className="text-xs text-gray-500 leading-relaxed">
+                配信のアーカイブをYouTubeに自動保存する機能は現在準備中です。
+                <br />
+                正式リリースまで今しばらくお待ちください。
+              </p>
+              {profile?.youtube_channel_id && (
+                <div className="mt-3 pt-3 border-t border-white/5">
+                  <p className="text-[11px] text-gray-500">
+                    以前に連携した YouTube アカウント:{" "}
+                    <span className="text-gray-400">{profile.youtube_channel_name}</span>
                   </p>
                   <button
-                    onClick={handleYoutubeLink}
-                    className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-2.5 rounded-md transition"
+                    onClick={handleYoutubeUnlink}
+                    disabled={unlinkingYoutube}
+                    className="mt-2 text-[11px] text-gray-500 hover:text-red-400 transition disabled:opacity-50 underline"
                   >
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-                    </svg>
-                    YouTubeアカウントを連携
+                    {unlinkingYoutube ? "解除中..." : "連携を解除する"}
                   </button>
                 </div>
               )}
