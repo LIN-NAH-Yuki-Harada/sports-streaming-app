@@ -527,3 +527,57 @@ export async function getBroadcastByCode(
   }
   return data;
 }
+
+// ===== チームスケジュール =====
+
+export type TeamSchedule = {
+  id: string;
+  team_id: string;
+  start_at: string;
+  sport: string;
+  home_team: string;
+  away_team: string;
+  location: string | null;
+  tournament: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// 自分の所属チーム全体の予定を取得（RLS経由）
+export async function listMyUpcomingSchedules(): Promise<TeamSchedule[]> {
+  const supabase = createClient();
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("team_schedules")
+    .select("*")
+    .gte("start_at", nowIso)
+    .order("start_at", { ascending: true });
+
+  if (error) {
+    console.error("予定取得エラー:", error.message);
+    return [];
+  }
+  return data || [];
+}
+
+// 特定チームの予定を取得
+export async function listTeamSchedules(
+  teamId: string,
+  scope: "upcoming" | "past" | "all" = "all"
+): Promise<TeamSchedule[]> {
+  const supabase = createClient();
+  let query = supabase.from("team_schedules").select("*").eq("team_id", teamId);
+  const nowIso = new Date().toISOString();
+  if (scope === "upcoming") query = query.gte("start_at", nowIso);
+  if (scope === "past") query = query.lt("start_at", nowIso);
+  query = query.order("start_at", { ascending: scope !== "past" });
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("チーム予定取得エラー:", error.message);
+    return [];
+  }
+  return data || [];
+}

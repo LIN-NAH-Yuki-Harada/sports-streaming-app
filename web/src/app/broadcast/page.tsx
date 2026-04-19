@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { Suspense, useState, useRef, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
 import { LiveKitBroadcaster } from "@/components/livekit-video";
@@ -60,6 +61,21 @@ const PERIODS: Record<string, string[]> = {
 type Screen = "login" | "form" | "live";
 
 export default function BroadcastPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center py-32">
+          <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <BroadcastPageInner />
+    </Suspense>
+  );
+}
+
+function BroadcastPageInner() {
+  const searchParams = useSearchParams();
   const { user, profile, loading, refreshProfile } = useAuth();
   const toast = useToast();
   const subscribed = profile?.plan === "broadcaster" || profile?.plan === "team";
@@ -87,6 +103,14 @@ export default function BroadcastPage() {
     fetchTeams();
   }, [user]);
 
+  // スケジュールから遷移してきた場合、URLパラメータで所属チームを自動選択
+  useEffect(() => {
+    const tid = searchParams.get("teamId");
+    if (tid && myTeams.find((t) => t.id === tid)) {
+      setSelectedTeamId(tid);
+    }
+  }, [searchParams, myTeams]);
+
   const [sport, setSport] = useState("サッカー");
   const [volleyballRule, setVolleyballRule] = useState("6人制");
   const [baseballRule, setBaseballRule] = useState("高校以上（9回）");
@@ -106,6 +130,21 @@ export default function BroadcastPage() {
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
+
+  // スケジュールから遷移してきた場合、フォームを事前入力
+  useEffect(() => {
+    const s = searchParams.get("sport");
+    if (s && SPORTS.includes(s)) setSport(s);
+    const h = searchParams.get("home");
+    if (h) setHome(h);
+    const a = searchParams.get("away");
+    if (a) setAway(a);
+    const t = searchParams.get("tournament");
+    if (t) setTournament(t);
+    const v = searchParams.get("venue");
+    if (v) setVenue(v);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 無料お試しタイマー（秒数）
   const [trialRemaining, setTrialRemaining] = useState<number | null>(null);
