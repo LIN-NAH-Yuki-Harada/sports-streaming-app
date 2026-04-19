@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
+import { useToast } from "@/components/toaster";
 import { createClient } from "@/lib/supabase";
 import { updateProfile } from "@/lib/database";
 
@@ -27,50 +28,45 @@ function MyPageInner() {
   const { user, profile, loading, signOut, refreshProfile } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const toast = useToast();
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [unlinkingYoutube, setUnlinkingYoutube] = useState(false);
 
   // YouTube連携後・決済後のリダイレクト処理
   useEffect(() => {
     const checkout = searchParams.get("checkout");
     if (checkout === "success") {
-      setToast("決済が完了しました！プランを反映中です…");
-      // Webhookで少し遅れて反映されるため、数秒後にプロフィールを再取得
+      toast.info("決済が完了しました！プランを反映中です…");
       const t = setTimeout(() => {
         refreshProfile();
-        setToast("プランが有効になりました！");
-        setTimeout(() => setToast(null), 3000);
+        toast.success("プランが有効になりました！");
       }, 2500);
       router.replace("/mypage");
       return () => clearTimeout(t);
     }
     if (checkout === "cancel") {
-      setToast("決済をキャンセルしました");
-      setTimeout(() => setToast(null), 3000);
+      toast.info("決済をキャンセルしました");
       router.replace("/mypage");
     }
     const youtube = searchParams.get("youtube");
     if (youtube === "linked") {
       refreshProfile();
-      setToast("YouTubeアカウントを連携しました！");
-      setTimeout(() => setToast(null), 3000);
+      toast.success("YouTubeアカウントを連携しました！");
       router.replace("/mypage");
     }
     if (youtube === "cancelled") {
-      setToast("YouTube連携をキャンセルしました");
-      setTimeout(() => setToast(null), 3000);
+      toast.info("YouTube連携をキャンセルしました");
       router.replace("/mypage");
     }
     if (youtube === "error") {
-      setToast("YouTube連携でエラーが発生しました");
-      setTimeout(() => setToast(null), 3000);
+      toast.error("YouTube連携でエラーが発生しました");
       router.replace("/mypage");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, router, refreshProfile]);
 
   const handleDeleteAccount = async () => {
@@ -80,7 +76,7 @@ function MyPageInner() {
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
-        alert("セッションが無効です。再ログインしてください。");
+        toast.error("セッションが無効です。再ログインしてください。");
         setDeleting(false);
         return;
       }
@@ -92,10 +88,10 @@ function MyPageInner() {
         await signOut();
         window.location.href = "/";
       } else {
-        alert("退会処理に失敗しました。もう一度お試しください。");
+        toast.error("退会処理に失敗しました。もう一度お試しください。");
       }
     } catch {
-      alert("退会処理でエラーが発生しました。");
+      toast.error("退会処理でエラーが発生しました。");
     }
     setDeleting(false);
     setShowDeleteConfirm(false);
@@ -114,12 +110,10 @@ function MyPageInner() {
       if (json.authUrl) {
         window.location.href = json.authUrl;
       } else {
-        setToast(json.error || "YouTube連携の準備に失敗しました");
-        setTimeout(() => setToast(null), 3000);
+        toast.error(json.error || "YouTube連携の準備に失敗しました");
       }
     } catch {
-      setToast("YouTube連携の準備に失敗しました");
-      setTimeout(() => setToast(null), 3000);
+      toast.error("YouTube連携の準備に失敗しました");
     }
   };
 
@@ -136,11 +130,9 @@ function MyPageInner() {
         headers: { Authorization: `Bearer ${token}` },
       });
       await refreshProfile();
-      setToast("YouTube連携を解除しました");
-      setTimeout(() => setToast(null), 3000);
+      toast.success("YouTube連携を解除しました");
     } catch {
-      setToast("連携解除に失敗しました");
-      setTimeout(() => setToast(null), 3000);
+      toast.error("連携解除に失敗しました");
     }
     setUnlinkingYoutube(false);
   };
@@ -161,13 +153,6 @@ function MyPageInner() {
       </div>
 
       <div className="px-5 md:px-8 lg:px-10 pt-4 md:pt-8 pb-20">
-        {/* トースト通知 */}
-        {toast && (
-          <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-[#111] border border-[#e63946]/30 text-white text-xs px-4 py-2.5 rounded-md shadow-lg">
-            {toast}
-          </div>
-        )}
-
         {/* 読み込み中 */}
         {loading && (
           <div className="flex items-center justify-center py-16">

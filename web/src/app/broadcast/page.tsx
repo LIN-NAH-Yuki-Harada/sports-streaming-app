@@ -4,6 +4,8 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
 import { LiveKitBroadcaster } from "@/components/livekit-video";
+import { CameraPermissionGuide, isCameraPermissionError } from "@/components/camera-permission-guide";
+import { useToast } from "@/components/toaster";
 import { createClient } from "@/lib/supabase";
 import {
   createBroadcast,
@@ -58,6 +60,7 @@ type Screen = "login" | "form" | "live";
 
 export default function BroadcastPage() {
   const { user, profile, loading, refreshProfile } = useAuth();
+  const toast = useToast();
   const subscribed = profile?.plan === "broadcaster" || profile?.plan === "team";
   const trialUsed = profile?.trial_used === true;
 
@@ -98,6 +101,7 @@ export default function BroadcastPage() {
   const [starting, setStarting] = useState(false);
   const [livekitToken, setLivekitToken] = useState<string | null>(null);
   const [livekitError, setLivekitError] = useState<string | null>(null);
+  const [showCameraGuide, setShowCameraGuide] = useState(false);
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
@@ -109,6 +113,19 @@ export default function BroadcastPage() {
   const broadcastRef = useRef<Broadcast | null>(null);
   // スコア更新のデバウンス用
   const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // スコアUndo用の履歴スタック（最大10件）
+  type ScoreSnapshot = {
+    homeScore: number;
+    awayScore: number;
+    homeSets: number;
+    awaySets: number;
+    setResults: { home: number; away: number }[];
+    periodIndex: number;
+  };
+  const historyRef = useRef<ScoreSnapshot[]>([]);
+  const [historyLength, setHistoryLength] = useState(0);
+  const MAX_HISTORY = 10;
 
   const vbRule = sport === "バレー" ? VOLLEYBALL_RULES[volleyballRule] : null;
   const bbRule = sport === "野球" ? BASEBALL_RULES[baseballRule] : null;
@@ -175,20 +192,66 @@ export default function BroadcastPage() {
     []
   );
 
+  // 履歴に現在のスコア状態をpush
+  function pushHistory() {
+    historyRef.current.push({
+      homeScore,
+      awayScore,
+      homeSets,
+      awaySets,
+      setResults: [...setResults],
+      periodIndex,
+    });
+    if (historyRef.current.length > MAX_HISTORY) {
+      historyRef.current.shift();
+    }
+    setHistoryLength(historyRef.current.length);
+  }
+
+  // Undo: 直前のスコア状態に戻す
+  function undoScore() {
+    const prev = historyRef.current.pop();
+    if (!prev) return;
+    setHistoryLength(historyRef.current.length);
+    setHomeScore(prev.homeScore);
+    setAwayScore(prev.awayScore);
+    setHomeSets(prev.homeSets);
+    setAwaySets(prev.awaySets);
+    setSetResults(prev.setResults);
+    setPeriodIndex(prev.periodIndex);
+    // 即座にDBへ反映（デバウンスを待たない）
+    if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
+    if (broadcastRef.current) {
+      updateBroadcastScore(
+        broadcastRef.current.id,
+        prev.homeScore,
+        prev.awayScore,
+        periods[prev.periodIndex] || periods[0],
+        prev.homeSets,
+        prev.awaySets,
+        prev.setResults,
+      );
+    }
+    toast.info("1つ戻しました");
+  }
+
   // スコア変更ハンドラー
   function changeHomeScore(delta: number) {
+    pushHistory();
     const newScore = Math.max(0, homeScore + delta);
     setHomeScore(newScore);
     saveScoreToDb(newScore, awayScore, currentPeriod);
   }
 
   function changeAwayScore(delta: number) {
+    pushHistory();
     const newScore = Math.max(0, awayScore + delta);
     setAwayScore(newScore);
     saveScoreToDb(homeScore, newScore, currentPeriod);
   }
 
   function changePeriod(newIndex: number) {
+    pushHistory();
     const clamped = Math.max(0, Math.min(periods.length - 1, newIndex));
     setPeriodIndex(clamped);
     const newPeriod = periods[clamped] || periods[0];
@@ -248,11 +311,11 @@ export default function BroadcastPage() {
           setLivekitError("映像配信の準備に失敗しました");
         }
       } else {
-        alert("配信の開始に失敗しました。もう一度お試しください。");
+        toast.error("配信の開始に失敗しました。もう一度お試しください。");
       }
     } catch (e) {
       console.error("配信開始エラー:", e);
-      alert("配信の開始でエラーが発生しました。");
+      toast.error("配信の開始でエラーが発生しました。");
     }
 
     setStarting(false);
@@ -269,7 +332,7 @@ export default function BroadcastPage() {
     if (broadcastRef.current) {
       const success = await endBroadcast(broadcastRef.current.id);
       if (!success) {
-        alert("配信の終了に失敗しました。もう一度お試しください。");
+        toast.error("配信の終了に失敗しました。もう一度お試しください。");
         return;
       }
       broadcastRef.current = null;
@@ -280,6 +343,8 @@ export default function BroadcastPage() {
     setHomeSets(0);
     setAwaySets(0);
     setSetResults([]);
+    historyRef.current = [];
+    setHistoryLength(0);
     setPeriodIndex(0);
   }
 
@@ -443,12 +508,27 @@ export default function BroadcastPage() {
               serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
               onError={(e) => {
                 console.error("LiveKitエラー:", e);
-                setLivekitError("カメラへの接続に失敗しました。設定からカメラの使用を許可してください。");
+                if (isCameraPermissionError(e)) {
+                  setShowCameraGuide(true);
+                  setLivekitError(null);
+                } else {
+                  setLivekitError("映像配信でエラーが発生しました。ページを再読み込みしてください。");
+                }
               }}
             />
           ) : livekitError ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <p className="text-xs text-red-400">{livekitError}</p>
+            <div className="absolute inset-0 flex items-center justify-center px-6">
+              <div className="max-w-xs text-center space-y-3">
+                <p className="text-sm font-semibold text-[#e63946]">配信エラー</p>
+                <p className="text-xs text-gray-300 leading-relaxed">{livekitError}</p>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="mt-2 px-4 py-2 rounded-md bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold"
+                >
+                  再読み込み
+                </button>
+              </div>
             </div>
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
@@ -534,8 +614,20 @@ export default function BroadcastPage() {
             {/* ピリオド行 */}
             <div className="flex items-center justify-center gap-2 mt-1.5">
               <button
+                onClick={undoScore}
+                disabled={historyLength === 0}
+                className="h-8 px-2 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1 text-[10px] text-gray-300 transition active:scale-90"
+                aria-label="直前のスコア操作を取り消す"
+                title="Undo"
+              >
+                <span className="text-sm leading-none">↶</span>
+                <span>戻す</span>
+              </button>
+              <span className="text-gray-600 text-xs mx-0.5">|</span>
+              <button
                 onClick={() => changePeriod(periodIndex - 1)}
                 className="w-8 h-8 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm transition active:scale-90"
+                aria-label="前のピリオドへ"
               >
                 ‹
               </button>
@@ -543,12 +635,14 @@ export default function BroadcastPage() {
               <button
                 onClick={() => changePeriod(periodIndex + 1)}
                 className="w-8 h-8 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm transition active:scale-90"
+                aria-label="次のピリオドへ"
               >
                 ›
               </button>
               <span className="text-gray-600 text-xs mx-1">|</span>
               <button
                 onClick={() => {
+                  pushHistory();
                   const nextIndex = Math.min(periodIndex + 1, periods.length - 1);
                   // セットスコアを記録
                   const newSetResults = [...setResults, { home: homeScore, away: awayScore }];
@@ -648,6 +742,12 @@ export default function BroadcastPage() {
             </button>
           </div>
         </div>
+
+        {/* カメラ許可拒否時のガイド */}
+        <CameraPermissionGuide
+          open={showCameraGuide}
+          onClose={() => setShowCameraGuide(false)}
+        />
       </div>
     );
   }

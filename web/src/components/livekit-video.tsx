@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LiveKitRoom,
   VideoTrack,
@@ -10,6 +10,28 @@ import {
   useParticipants,
 } from "@livekit/components-react";
 import { Track, ConnectionState } from "livekit-client";
+
+// Reconnecting 状態の経過秒数を計測するフック
+function useReconnectDuration(connectionState: ConnectionState): number {
+  const [seconds, setSeconds] = useState(0);
+  const startRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (connectionState === ConnectionState.Reconnecting) {
+      if (startRef.current === null) startRef.current = Date.now();
+      const interval = window.setInterval(() => {
+        if (startRef.current !== null) {
+          setSeconds(Math.floor((Date.now() - startRef.current) / 1000));
+        }
+      }, 1000);
+      return () => window.clearInterval(interval);
+    }
+    startRef.current = null;
+    setSeconds(0);
+  }, [connectionState]);
+
+  return seconds;
+}
 
 // ============================
 // 配信者用: カメラ映像を表示
@@ -26,6 +48,7 @@ function BroadcasterRenderer({
   const participants = useParticipants();
   const viewerCount = Math.max(0, participants.length - 1); // 自分を除く
   const prevState = useRef(connectionState);
+  const reconnectSeconds = useReconnectDuration(connectionState);
 
   useEffect(() => {
     if (
@@ -72,8 +95,35 @@ function BroadcasterRenderer({
         </div>
       )}
       {connectionState === ConnectionState.Reconnecting && (
-        <div className="absolute inset-0 z-[1] flex items-center justify-center bg-black/50">
-          <p className="text-xs text-yellow-400">再接続中...</p>
+        <div className="absolute inset-0 z-[3] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div
+            className="flex flex-col items-center gap-3 px-6 py-5 bg-[#1a0808] border border-[#e63946]/50 rounded-xl max-w-xs text-center shadow-2xl"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+              <span className="text-sm font-semibold text-[#e63946]">再接続中…</span>
+            </div>
+            <p className="text-xs text-gray-300">
+              ネットワークが不安定です ({reconnectSeconds}秒)
+            </p>
+            {reconnectSeconds >= 30 && (
+              <p className="text-[11px] text-yellow-400 leading-relaxed">
+                📍 電波の良い場所への移動をおすすめします
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+      {connectionState === ConnectionState.Disconnected && prevState.current === ConnectionState.Connected && (
+        <div className="absolute inset-0 z-[3] flex items-center justify-center bg-black/80">
+          <div className="flex flex-col items-center gap-2 px-6 py-5 bg-[#111] border border-white/10 rounded-xl max-w-xs text-center" role="status">
+            <p className="text-sm font-semibold text-gray-200">配信が切断されました</p>
+            <p className="text-[11px] text-gray-400">
+              ネットワークに接続してから、画面を閉じて再度配信を開始してください
+            </p>
+          </div>
         </div>
       )}
 
@@ -112,6 +162,12 @@ function ViewerRenderer() {
   const connectionState = useConnectionState();
   const tracks = useTracks([Track.Source.Camera, Track.Source.Microphone]);
   const participants = useParticipants();
+  const reconnectSeconds = useReconnectDuration(connectionState);
+  const prevState = useRef(connectionState);
+
+  useEffect(() => {
+    prevState.current = connectionState;
+  }, [connectionState]);
 
   const cameraTrack = tracks.find(
     (t) => t.source === Track.Source.Camera && t.publication?.track
@@ -131,8 +187,39 @@ function ViewerRenderer() {
         </div>
       )}
       {connectionState === ConnectionState.Reconnecting && (
-        <div className="absolute inset-0 z-[1] flex items-center justify-center bg-black/50">
-          <p className="text-xs text-yellow-400">再接続中...</p>
+        <div className="absolute inset-0 z-[3] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div
+            className="flex flex-col items-center gap-3 px-6 py-5 bg-[#1a1608] border border-yellow-500/40 rounded-xl max-w-xs text-center shadow-2xl"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+              <span className="text-sm font-semibold text-yellow-400">配信が途切れています</span>
+            </div>
+            <p className="text-xs text-gray-300">再接続中… ({reconnectSeconds}秒)</p>
+            {reconnectSeconds >= 10 && (
+              <p className="text-[11px] text-yellow-300 leading-relaxed">
+                配信者の電波状況が悪い可能性があります
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+      {connectionState === ConnectionState.Disconnected && prevState.current === ConnectionState.Connected && (
+        <div className="absolute inset-0 z-[3] flex items-center justify-center bg-black/80">
+          <div className="flex flex-col items-center gap-2 px-6 py-5 bg-[#111] border border-white/10 rounded-xl max-w-xs text-center" role="status">
+            <p className="text-sm font-semibold text-gray-200">配信が終了しました</p>
+            <p className="text-[11px] text-gray-400">
+              配信者がストリームを停止したか、回線が切断されました
+            </p>
+            <a
+              href="/"
+              className="mt-2 inline-block px-4 py-2 rounded-md bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold"
+            >
+              ホームへ戻る
+            </a>
+          </div>
         </div>
       )}
 

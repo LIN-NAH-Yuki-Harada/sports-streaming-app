@@ -5,6 +5,7 @@ import { BottomNav } from "@/components/bottom-nav";
 import { AuthProvider } from "@/components/auth-provider";
 import { NameSetupModal } from "@/components/name-setup-modal";
 import { MainContainer } from "@/components/main-container";
+import { ToasterProvider } from "@/components/toaster";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -47,9 +48,11 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-black text-white">
         <AuthProvider>
-          <NameSetupModal />
-          <MainContainer>{children}</MainContainer>
-          <BottomNav />
+          <ToasterProvider>
+            <NameSetupModal />
+            <MainContainer>{children}</MainContainer>
+            <BottomNav />
+          </ToasterProvider>
         </AuthProvider>
       </body>
     </html>

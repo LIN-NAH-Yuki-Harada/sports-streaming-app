@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
+import { useToast } from "@/components/toaster";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
 
@@ -56,12 +57,12 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function TeamPage() {
   const { user, profile, loading } = useAuth();
+  const toast = useToast();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [tab, setTab] = useState<"list" | "create" | "join">("list");
   const [detailTab, setDetailTab] = useState<"members" | "settings">("members");
-  const [toast, setToast] = useState<string | null>(null);
 
   // フォーム状態
   const [createForm, setCreateForm] = useState({ name: "", sport: "サッカー", description: "" });
@@ -71,11 +72,6 @@ export default function TeamPage() {
   // 編集状態
   const [editForm, setEditForm] = useState({ name: "", sport: "", description: "" });
   const [editing, setEditing] = useState(false);
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
-  };
 
   const getToken = useCallback(async () => {
     const supabase = createClient();
@@ -94,7 +90,7 @@ export default function TeamPage() {
       const data = await res.json();
       setTeams(data.teams || []);
     } catch {
-      showToast("チームの取得に失敗しました。通信状況を確認してください。");
+      toast.error("チームの取得に失敗しました。通信状況を確認してください。");
     } finally {
       setLoadingTeams(false);
     }
@@ -120,15 +116,15 @@ export default function TeamPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        showToast(data.error || "エラーが発生しました");
+        toast.error(data.error || "エラーが発生しました");
         return;
       }
-      showToast(`「${data.team.name}」を作成しました！`);
+      toast.success(`「${data.team.name}」を作成しました！`);
       setCreateForm({ name: "", sport: "サッカー", description: "" });
       setTab("list");
       fetchTeams();
     } catch {
-      showToast("エラーが発生しました");
+      toast.error("エラーが発生しました");
     } finally {
       setSubmitting(false);
     }
@@ -150,19 +146,19 @@ export default function TeamPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        showToast(data.error || "エラーが発生しました");
+        toast.error(data.error || "エラーが発生しました");
         return;
       }
       if (data.alreadyMember) {
-        showToast("既にこのチームに参加しています");
+        toast.info("既にこのチームに参加しています");
       } else {
-        showToast(`「${data.team.name}」に参加しました！`);
+        toast.success(`「${data.team.name}」に参加しました！`);
       }
       setJoinCode("");
       setTab("list");
       fetchTeams();
     } catch {
-      showToast("エラーが発生しました");
+      toast.error("エラーが発生しました");
     } finally {
       setSubmitting(false);
     }
@@ -184,10 +180,10 @@ export default function TeamPage() {
       });
       if (!res.ok) {
         const data = await res.json();
-        showToast(data.error || "エラーが発生しました");
+        toast.error(data.error || "エラーが発生しました");
         return;
       }
-      showToast("チーム情報を更新しました");
+      toast.success("チーム情報を更新しました");
       setEditing(false);
       fetchTeams();
       // 選択中のチームも更新
@@ -195,7 +191,7 @@ export default function TeamPage() {
         prev ? { ...prev, name: editForm.name, sport: editForm.sport, description: editForm.description || null } : null
       );
     } catch {
-      showToast("エラーが発生しました");
+      toast.error("エラーが発生しました");
     } finally {
       setSubmitting(false);
     }
@@ -213,14 +209,14 @@ export default function TeamPage() {
       });
       if (!res.ok) {
         const data = await res.json();
-        showToast(data.error || "エラーが発生しました");
+        toast.error(data.error || "エラーが発生しました");
         return;
       }
-      showToast("チームを削除しました");
+      toast.success("チームを削除しました");
       setSelectedTeam(null);
       fetchTeams();
     } catch {
-      showToast("エラーが発生しました");
+      toast.error("エラーが発生しました");
     } finally {
       setSubmitting(false);
     }
@@ -242,10 +238,10 @@ export default function TeamPage() {
       });
       if (!res.ok) {
         const data = await res.json();
-        showToast(data.error || "エラーが発生しました");
+        toast.error(data.error || "エラーが発生しました");
         return;
       }
-      showToast("メンバーを削除しました");
+      toast.success("メンバーを削除しました");
       fetchTeams();
       // 選択中チームのメンバーを更新
       setSelectedTeam((prev) =>
@@ -254,7 +250,7 @@ export default function TeamPage() {
           : null
       );
     } catch {
-      showToast("エラーが発生しました");
+      toast.error("エラーが発生しました");
     }
   };
 
@@ -273,10 +269,10 @@ export default function TeamPage() {
       });
       if (!res.ok) {
         const data = await res.json();
-        showToast(data.error || "エラーが発生しました");
+        toast.error(data.error || "エラーが発生しました");
         return;
       }
-      showToast(`ロールを${ROLE_LABELS[newRole]}に変更しました`);
+      toast.success(`ロールを${ROLE_LABELS[newRole]}に変更しました`);
       fetchTeams();
       setSelectedTeam((prev) =>
         prev
@@ -289,7 +285,7 @@ export default function TeamPage() {
           : null
       );
     } catch {
-      showToast("エラーが発生しました");
+      toast.error("エラーが発生しました");
     }
   };
 
@@ -335,8 +331,12 @@ export default function TeamPage() {
       <div>
         <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pt-4 pb-3">
           <div className="flex items-center gap-3">
-            <button onClick={() => { setSelectedTeam(null); setEditing(false); }} className="text-gray-400 hover:text-white">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <button
+              onClick={() => { setSelectedTeam(null); setEditing(false); }}
+              className="text-gray-400 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e63946] rounded"
+              aria-label="チーム一覧へ戻る"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
               </svg>
             </button>
@@ -373,7 +373,7 @@ export default function TeamPage() {
                   onClick={() => {
                     const msg = `「${selectedTeam.name}」のチームに参加しよう！\nLIVE SPOtCHアプリのチームタブで招待コード「${selectedTeam.invite_code}」を入力してね\nhttps://sports-streaming-app.vercel.app`;
                     navigator.clipboard?.writeText(msg);
-                    showToast("コピーしました");
+                    toast.success("コピーしました");
                   }}
                   className="text-[10px] text-gray-400 hover:text-white border border-white/10 rounded px-2 py-0.5"
                 >
@@ -552,13 +552,6 @@ export default function TeamPage() {
             </div>
           )}
         </div>
-
-        {/* トースト */}
-        {toast && (
-          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-white text-black text-xs px-4 py-2 rounded-full shadow-lg z-50">
-            {toast}
-          </div>
-        )}
       </div>
     );
   }
@@ -761,13 +754,6 @@ export default function TeamPage() {
           </div>
         )}
       </div>
-
-      {/* トースト */}
-      {toast && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-white text-black text-xs px-4 py-2 rounded-full shadow-lg z-50">
-          {toast}
-        </div>
-      )}
     </div>
   );
 }
