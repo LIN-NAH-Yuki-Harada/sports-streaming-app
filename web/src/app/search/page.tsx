@@ -6,6 +6,7 @@ import { AuthForm } from "@/components/auth-form";
 import { useToast } from "@/components/toaster";
 import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
+import { getTeamBroadcastHistory, type Broadcast } from "@/lib/database";
 import Link from "next/link";
 
 type TeamMemberProfile = {
@@ -63,7 +64,9 @@ export default function TeamPage() {
   const [loadingTeams, setLoadingTeams] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [tab, setTab] = useState<"list" | "create" | "join">("list");
-  const [detailTab, setDetailTab] = useState<"members" | "settings">("members");
+  const [detailTab, setDetailTab] = useState<"members" | "history" | "settings">("members");
+  const [teamBroadcasts, setTeamBroadcasts] = useState<Broadcast[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // フォーム状態
   const [createForm, setCreateForm] = useState({ name: "", sport: "サッカー", description: "" });
@@ -100,6 +103,15 @@ export default function TeamPage() {
   useEffect(() => {
     if (user) fetchTeams();
   }, [user, fetchTeams]);
+
+  // 試合履歴タブを開いたらチームの配信履歴を取得
+  useEffect(() => {
+    if (!selectedTeam || detailTab !== "history") return;
+    setLoadingHistory(true);
+    getTeamBroadcastHistory(selectedTeam.id)
+      .then(setTeamBroadcasts)
+      .finally(() => setLoadingHistory(false));
+  }, [selectedTeam, detailTab]);
 
   // チーム作成
   const handleCreate = async () => {
@@ -399,6 +411,7 @@ export default function TeamPage() {
           <div className="flex gap-1 mb-4">
             {([
               { key: "members" as const, label: "メンバー" },
+              { key: "history" as const, label: "試合履歴" },
               ...(isOwner ? [{ key: "settings" as const, label: "設定" }] : []),
             ]).map((t) => (
               <button
@@ -472,6 +485,15 @@ export default function TeamPage() {
                   </div>
                 ))}
             </div>
+          )}
+
+          {/* 試合履歴タブ */}
+          {detailTab === "history" && (
+            <TeamHistoryTab
+              broadcasts={teamBroadcasts}
+              loading={loadingHistory}
+              teamName={selectedTeam.name}
+            />
           )}
 
           {/* 設定タブ（オーナーのみ） */}
@@ -759,6 +781,142 @@ export default function TeamPage() {
             </Link>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ===== 試合履歴タブ =====
+function TeamHistoryTab({
+  broadcasts,
+  loading,
+  teamName,
+}: {
+  broadcasts: Broadcast[];
+  loading: boolean;
+  teamName: string;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="w-5 h-5 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (broadcasts.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-14 h-14 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-4">
+          <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
+          </svg>
+        </div>
+        <p className="text-sm font-bold text-gray-400">まだ試合履歴はありません</p>
+        <p className="mt-2 text-[11px] text-gray-500 leading-relaxed">
+          配信画面で「所属チーム」を選んで配信すると、<br />
+          ここに試合履歴が記録されます。
+        </p>
+      </div>
+    );
+  }
+
+  // 統計サマリ
+  const ended = broadcasts.filter((b) => b.status === "ended");
+  const totalHomeScore = ended.reduce((sum, b) => sum + (b.home_score || 0), 0);
+  const totalAwayScore = ended.reduce((sum, b) => sum + (b.away_score || 0), 0);
+
+  // 月別にグループ化
+  const grouped: { month: string; items: Broadcast[] }[] = [];
+  for (const bc of broadcasts) {
+    const d = new Date(bc.started_at);
+    const month = `${d.getFullYear()}年${d.getMonth() + 1}月`;
+    const last = grouped[grouped.length - 1];
+    if (last && last.month === month) {
+      last.items.push(bc);
+    } else {
+      grouped.push({ month, items: [bc] });
+    }
+  }
+
+  return (
+    <div>
+      {/* サマリカード */}
+      <div className="grid grid-cols-3 gap-2 mb-5">
+        <div className="rounded-md bg-[#111] border border-white/5 px-3 py-2.5 text-center">
+          <p className="text-[10px] text-gray-500">試合数</p>
+          <p className="text-base font-bold text-white">{broadcasts.length}</p>
+        </div>
+        <div className="rounded-md bg-[#111] border border-white/5 px-3 py-2.5 text-center">
+          <p className="text-[10px] text-gray-500">総得点</p>
+          <p className="text-base font-bold text-[#e63946]">{totalHomeScore}</p>
+        </div>
+        <div className="rounded-md bg-[#111] border border-white/5 px-3 py-2.5 text-center">
+          <p className="text-[10px] text-gray-500">総失点</p>
+          <p className="text-base font-bold text-gray-400">{totalAwayScore}</p>
+        </div>
+      </div>
+
+      {/* 月別グループ */}
+      <div className="space-y-5">
+        {grouped.map((group) => (
+          <div key={group.month}>
+            <h3 className="text-[11px] font-semibold text-gray-500 mb-2">{group.month}</h3>
+            <div className="space-y-2">
+              {group.items.map((bc) => {
+                const d = new Date(bc.started_at);
+                const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+                const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+                const wd = weekdays[d.getDay()];
+                const isLive = bc.status === "live";
+                const isOurHome = bc.home_team === teamName;
+                const ourScore = isOurHome ? bc.home_score : bc.away_score;
+                const oppScore = isOurHome ? bc.away_score : bc.home_score;
+                const oppName = isOurHome ? bc.away_team : bc.home_team;
+                const won = !isLive && ourScore > oppScore;
+                const lost = !isLive && ourScore < oppScore;
+
+                return (
+                  <Link
+                    key={bc.id}
+                    href={`/watch/${bc.share_code}`}
+                    className="block rounded-md bg-[#111] border border-white/5 hover:border-white/10 transition px-3 py-3"
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                        <span>{dateStr}（{wd}）</span>
+                        {bc.tournament && (
+                          <span className="truncate">{bc.tournament}</span>
+                        )}
+                      </div>
+                      {isLive ? (
+                        <span className="bg-[#e63946] text-white text-[9px] font-black px-1.5 py-0.5 rounded tracking-wider">
+                          LIVE
+                        </span>
+                      ) : won ? (
+                        <span className="text-[9px] font-bold text-green-400 bg-green-400/10 px-1.5 py-0.5 rounded">勝</span>
+                      ) : lost ? (
+                        <span className="text-[9px] font-bold text-gray-500 bg-white/5 px-1.5 py-0.5 rounded">負</span>
+                      ) : (
+                        <span className="text-[9px] font-bold text-gray-500 bg-white/5 px-1.5 py-0.5 rounded">分</span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold truncate flex-1">
+                        vs {oppName}
+                      </p>
+                      <p className="text-sm font-bold whitespace-nowrap">
+                        <span className={won ? "text-[#e63946]" : "text-white"}>{ourScore}</span>
+                        <span className="text-gray-500 mx-1.5">-</span>
+                        <span className="text-gray-400">{oppScore}</span>
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

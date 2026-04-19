@@ -491,6 +491,26 @@ export async function getBroadcastHistory(limit = 50): Promise<Broadcast[]> {
   return data || [];
 }
 
+// チーム別の配信履歴を取得（ライブ含む、新しい順）
+export async function getTeamBroadcastHistory(
+  teamId: string,
+  limit = 100
+): Promise<Broadcast[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("*")
+    .eq("team_id", teamId)
+    .order("started_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("チーム配信履歴取得エラー:", error.message);
+    return [];
+  }
+  return data || [];
+}
+
 export async function getBroadcastByCode(
   shareCode: string
 ): Promise<Broadcast | null> {
