@@ -1,0 +1,25 @@
+  # Dependabot configuration for LIVE SPOtCH
+  # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file          
+                                                                                                                                           
+  version: 2                                                                                                                               
+  updates:                                                                                                                                 
+    # Next.js アプリ (web/)
+    - package-ecosystem: "npm"                                                                                                             
+      directory: "/web"
+      schedule:                                                                                                                            
+        interval: "weekly"                                                                                                                 
+        day: "monday"
+        time: "09:00"                                                                                                                      
+        timezone: "Asia/Tokyo"
+      open-pull-requests-limit: 5
+      labels:
+        - "dependencies"                                                                                                                   
+      commit-message:
+        prefix: "chore(deps)"                                                                                                              
+        include: "scope"
+      groups:                                                                                                                              
+        # マイナー・パッチはまとめて1つのPRに（ノイズ削減）
+        minor-and-patch:                                                                                                                   
+          update-types:                                                                                                                    
+            - "minor"                                                                                                                      
+            - "patch"
