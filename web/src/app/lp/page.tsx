@@ -4,7 +4,10 @@ export default function LandingPage() {
   return (
     <div>
       {/* LP専用ヘッダー */}
-      <header className="sticky top-0 z-50 bg-[#0a0a0a]/90 backdrop-blur-md">
+      <header
+        className="sticky top-0 z-50 bg-[#0a0a0a]/90 backdrop-blur-md"
+        style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
+      >
         <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8 py-3">
           <a href="/lp" className="flex items-center gap-2">
             <span className="bg-[#e63946] text-white text-xs font-black px-1.5 py-0.5 rounded tracking-wider">
