@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 export default function LandingPage() {
   return (
     <div>
@@ -79,18 +81,18 @@ export default function LandingPage() {
               </div>
             </div>
 
-            {/* 配信画面プレビュー（CSSモック） */}
-            <div className="relative mx-auto w-full max-w-sm lg:max-w-none aspect-[9/16] lg:aspect-[4/5] max-h-[500px] rounded-2xl overflow-hidden bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a] border border-white/10 shadow-2xl" aria-hidden="true">
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,#e63946_5%,transparent_70%)] opacity-20" />
-              {/* 擬似的な試合映像 */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="w-20 h-20 mx-auto rounded-full bg-green-500/10 border border-green-500/20 flex items-center justify-center mb-3">
-                    <span className="text-4xl">⚽</span>
-                  </div>
-                  <p className="text-[10px] text-gray-600">配信映像のイメージ</p>
-                </div>
-              </div>
+            {/* 配信画面プレビュー（実写映像 + CSSオーバーレイ） */}
+            <div className="relative mx-auto w-full max-w-sm lg:max-w-none aspect-[9/16] lg:aspect-[4/5] max-h-[500px] rounded-2xl overflow-hidden border border-white/10 shadow-2xl" aria-hidden="true">
+              <Image
+                src="/lp-hero-soccer.jpg"
+                alt=""
+                fill
+                sizes="(max-width: 1024px) 384px, 500px"
+                className="object-cover object-center"
+                priority
+              />
+              {/* UI 視認性確保のための薄い暗幕 */}
+              <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/50" />
               {/* 左上: スコアボード */}
               <div className="absolute top-3 left-3 flex items-center bg-black/70 backdrop-blur-sm rounded overflow-hidden text-[10px]">
                 <div className="px-2 py-1 bg-white/10 font-bold">港FC</div>
