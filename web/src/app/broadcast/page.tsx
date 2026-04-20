@@ -781,12 +781,13 @@ function BroadcastPageInner() {
 
             <button
               onClick={handleEnd}
-              className="flex items-center gap-1 bg-white/10 hover:bg-white/20 rounded px-2 sm:px-3 py-1.5 transition"
+              className="flex items-center gap-1.5 bg-red-600 hover:bg-red-500 active:bg-red-700 rounded-md px-3 sm:px-4 py-2 transition shadow-lg shadow-red-900/40 ring-1 ring-red-400/30"
+              aria-label="配信を終了する"
             >
-              <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+              <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="6" y="6" width="12" height="12" rx="1.5" />
               </svg>
-              <span className="text-[10px] text-gray-400 font-medium">終了</span>
+              <span className="text-xs sm:text-sm text-white font-bold whitespace-nowrap">配信終了</span>
             </button>
           </div>
         </div>
