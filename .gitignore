@@ -1,1 +1,8 @@
 .company/
+.vercel
+.next/
+.DS_Store
+
+# LP・ブランド素材（素材は残すがGit管理外）
+docs/assets/lp-sources/
+docs/assets/brand-sources/

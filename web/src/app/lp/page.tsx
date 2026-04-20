@@ -392,10 +392,10 @@ export default function LandingPage() {
             src="/lp-cta-emotional.jpg"
             alt=""
             fill
-            className="object-cover object-center"
+            className="object-cover object-[25%_30%]"
             sizes="100vw"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-black/40" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/60 to-black/30" />
         </div>
         <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-20 sm:py-28 lg:py-32">
           <div className="text-center">
