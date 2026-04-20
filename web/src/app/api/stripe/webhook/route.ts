@@ -63,7 +63,7 @@ export async function POST(request: Request) {
           break;
         }
 
-        await supabaseAdmin
+        const { error: updateErr } = await supabaseAdmin
           .from("profiles")
           .update({
             plan,
@@ -76,6 +76,10 @@ export async function POST(request: Request) {
               : null,
           })
           .eq("id", userId);
+        if (updateErr) {
+          console.error("[stripe-webhook] checkout.session.completed update failed:", updateErr.message, { userId });
+          throw new Error(`profiles update failed: ${updateErr.message}`);
+        }
         break;
       }
 
@@ -87,7 +91,7 @@ export async function POST(request: Request) {
         const priceId = sub.items.data[0]?.price.id;
         const plan = priceIdToPlan(priceId) || "free";
 
-        await supabaseAdmin
+        const { error: updateErr } = await supabaseAdmin
           .from("profiles")
           .update({
             plan,
@@ -98,6 +102,10 @@ export async function POST(request: Request) {
               : null,
           })
           .eq("id", userId);
+        if (updateErr) {
+          console.error("[stripe-webhook] customer.subscription.updated update failed:", updateErr.message, { userId });
+          throw new Error(`profiles update failed: ${updateErr.message}`);
+        }
         break;
       }
 
@@ -106,7 +114,7 @@ export async function POST(request: Request) {
         const userId = sub.metadata?.supabase_user_id;
         if (!userId) break;
 
-        await supabaseAdmin
+        const { error: updateErr } = await supabaseAdmin
           .from("profiles")
           .update({
             plan: "free",
@@ -115,6 +123,10 @@ export async function POST(request: Request) {
             current_period_end: null,
           })
           .eq("id", userId);
+        if (updateErr) {
+          console.error("[stripe-webhook] customer.subscription.deleted update failed:", updateErr.message, { userId });
+          throw new Error(`profiles update failed: ${updateErr.message}`);
+        }
         break;
       }
 
@@ -122,10 +134,14 @@ export async function POST(request: Request) {
         const invoice = event.data.object as Stripe.Invoice;
         const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id;
         if (!customerId) break;
-        await supabaseAdmin
+        const { error: updateErr } = await supabaseAdmin
           .from("profiles")
           .update({ subscription_status: "past_due" })
           .eq("stripe_customer_id", customerId);
+        if (updateErr) {
+          console.error("[stripe-webhook] invoice.payment_failed update failed:", updateErr.message, { customerId });
+          throw new Error(`profiles update failed: ${updateErr.message}`);
+        }
         break;
       }
 
