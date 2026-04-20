@@ -132,27 +132,22 @@ export default function LandingPage() {
       <section id="how" className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
         <h2 className="text-lg font-bold mb-6 sm:mb-8">かんたん3ステップ</h2>
         <div className="grid gap-4 sm:gap-6 lg:gap-8 grid-cols-1 sm:grid-cols-3">
-          <div className="rounded-lg bg-[#111] border border-white/5 p-5 sm:p-6">
-            <span className="text-[#e63946] text-xs font-bold">STEP 1</span>
-            <h3 className="text-sm sm:text-base font-semibold mt-2 mb-1">アプリに登録して配信開始</h3>
-            <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
-              無料で会員登録。チーム名を入れたら、初回10分間は無料で配信できます。
-            </p>
-          </div>
-          <div className="rounded-lg bg-[#111] border border-white/5 p-5 sm:p-6">
-            <span className="text-[#e63946] text-xs font-bold">STEP 2</span>
-            <h3 className="text-sm sm:text-base font-semibold mt-2 mb-1">共有コードをLINEで送る</h3>
-            <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
-              配信が始まると共有コードを自動発行。チームのLINEグループに送るだけ。
-            </p>
-          </div>
-          <div className="rounded-lg bg-[#111] border border-white/5 p-5 sm:p-6">
-            <span className="text-[#e63946] text-xs font-bold">STEP 3</span>
-            <h3 className="text-sm sm:text-base font-semibold mt-2 mb-1">家族がどこからでも無料で観戦</h3>
-            <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
-              コードを受け取った人はアプリ登録するだけ。視聴は完全無料。スコアボード付きのTV中継品質。
-            </p>
-          </div>
+          {[
+            { step: "STEP 1", title: "アプリに登録して配信開始", desc: "無料で会員登録。チーム名を入れたら、初回10分間は無料で配信できます。", image: "/lp-hero-soccer.jpg" },
+            { step: "STEP 2", title: "共有コードをLINEで送る", desc: "配信が始まると共有コードを自動発行。チームのLINEグループに送るだけ。", image: "/lp-steps-line-share.jpg" },
+            { step: "STEP 3", title: "家族がどこからでも無料で観戦", desc: "コードを受け取った人はアプリ登録するだけ。視聴は完全無料。スコアボード付きのTV中継品質。", image: "/lp-steps-family-watch.jpg" },
+          ].map((item) => (
+            <div key={item.step} className="rounded-lg bg-[#111] border border-white/5 overflow-hidden">
+              <div className="relative aspect-[16/10] w-full">
+                <Image src={item.image} alt="" fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
+              </div>
+              <div className="p-5 sm:p-6">
+                <span className="text-[#e63946] text-xs font-bold">{item.step}</span>
+                <h3 className="text-sm sm:text-base font-semibold mt-2 mb-1">{item.title}</h3>
+                <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">{item.desc}</p>
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -218,16 +213,21 @@ export default function LandingPage() {
       {/* こんなときに使えます */}
       <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 border-t border-white/5">
         <h2 className="text-lg font-bold mb-6 sm:mb-8">こんなときに使えます</h2>
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2">
           {[
-            { title: "試合に行けない日に", desc: "仕事で応援に行けなくても、スマホでリアルタイム観戦。お子さまの活躍を見逃しません。" },
-            { title: "おじいちゃん、おばあちゃんに", desc: "遠方に住む祖父母にもコードを送るだけ。孫の試合を一緒に応援。" },
-            { title: "チームの振り返りに", desc: "アーカイブを活用して、試合後の反省会や戦術確認に。コーチも選手も使えます。" },
-            { title: "大会・講演会の中継に", desc: "スポーツに限らず、学校行事や講演会の限定配信にも対応。" },
+            { title: "試合に行けない日に", desc: "仕事で応援に行けなくても、スマホでリアルタイム観戦。お子さまの活躍を見逃しません。", image: "/lp-scenes-office-dad.jpg" },
+            { title: "おじいちゃん、おばあちゃんに", desc: "遠方に住む祖父母にもコードを送るだけ。孫の試合を一緒に応援。", image: "/lp-scenes-grandparents.jpg" },
+            { title: "チームの振り返りに", desc: "アーカイブを活用して、試合後の反省会や戦術確認に。コーチも選手も使えます。", image: "/lp-scenes-coach-review.jpg" },
+            { title: "大会・講演会の中継に", desc: "スポーツに限らず、学校行事や講演会の限定配信にも対応。", image: "/lp-scenes-school-event.jpg" },
           ].map((item) => (
-            <div key={item.title} className="rounded-lg border border-white/5 p-4 sm:p-5">
-              <h3 className="text-sm font-semibold mb-1">{item.title}</h3>
-              <p className="text-xs text-gray-500 leading-relaxed">{item.desc}</p>
+            <div key={item.title} className="rounded-lg border border-white/5 overflow-hidden bg-[#0f0f0f]">
+              <div className="relative aspect-[4/3] w-full">
+                <Image src={item.image} alt="" fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
+              </div>
+              <div className="p-4 sm:p-5">
+                <h3 className="text-sm font-semibold mb-1">{item.title}</h3>
+                <p className="text-xs text-gray-500 leading-relaxed">{item.desc}</p>
+              </div>
             </div>
           ))}
         </div>
@@ -237,24 +237,20 @@ export default function LandingPage() {
       <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 border-t border-white/5">
         <h2 className="text-lg font-bold mb-4 sm:mb-6">こんなチームに使われています</h2>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-          <div className="rounded-lg border border-white/5 p-4 sm:p-5">
-            <p className="text-sm font-semibold mb-1">⚽ スポーツ少年団</p>
-            <p className="text-xs text-gray-500 leading-relaxed">
-              地域の大会・練習試合を保護者がスマホで配信。試合に来れない家族もリアルタイムで応援。
-            </p>
-          </div>
-          <div className="rounded-lg border border-white/5 p-4 sm:p-5">
-            <p className="text-sm font-semibold mb-1">🏐 中学校・高校の部活</p>
-            <p className="text-xs text-gray-500 leading-relaxed">
-              公式戦の模様をOB/OGや保護者に限定配信。スコアボードで試合展開も一目瞭然。
-            </p>
-          </div>
-          <div className="rounded-lg border border-white/5 p-4 sm:p-5">
-            <p className="text-sm font-semibold mb-1">🏆 地域リーグ・ローカル大会</p>
-            <p className="text-xs text-gray-500 leading-relaxed">
-              メディアが来ない地域の試合も、チーム関係者だけのプライベート中継で盛り上がる。
-            </p>
-          </div>
+          {[
+            { title: "⚽ スポーツ少年団", desc: "地域の大会・練習試合を保護者がスマホで配信。試合に来れない家族もリアルタイムで応援。", image: "/lp-hero-soccer.jpg" },
+            { title: "🏐 中学校・高校の部活", desc: "公式戦の模様をOB/OGや保護者に限定配信。スコアボードで試合展開も一目瞭然。", image: "/lp-teams-junior-volleyball.jpg" },
+            { title: "🏆 地域リーグ・ローカル大会", desc: "メディアが来ない地域の試合も、チーム関係者だけのプライベート中継で盛り上がる。", image: "/lp-teams-local-adult.jpg" },
+          ].map((item) => (
+            <div key={item.title} className="relative rounded-lg border border-white/5 overflow-hidden aspect-[4/3]">
+              <Image src={item.image} alt="" fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/60 to-black/20" />
+              <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-5">
+                <p className="text-sm font-semibold mb-1">{item.title}</p>
+                <p className="text-xs text-gray-200 leading-relaxed">{item.desc}</p>
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -390,23 +386,35 @@ export default function LandingPage() {
       </section>
 
       {/* CTA */}
-      <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-16 sm:py-20">
-        <div className="text-center">
-          <h2 className="text-xl sm:text-2xl lg:text-3xl font-black">
-            その一瞬の感動を手のひらに。
-          </h2>
-          <p className="mt-3 text-sm text-gray-500">
-            会場に行けない日でも、成長の瞬間を見逃さない。
-          </p>
-          <a
-            href="/"
-            className="inline-block mt-8 bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-8 py-3 rounded-md transition"
-          >
-            まずは10分間、無料で試す
-          </a>
-          <p className="mt-3 text-[10px] sm:text-xs text-gray-600">
-            Webブラウザで今すぐ使えます / ホーム画面に追加でアプリ感覚
-          </p>
+      <section className="relative overflow-hidden border-t border-white/5">
+        <div className="absolute inset-0">
+          <Image
+            src="/lp-cta-emotional.jpg"
+            alt=""
+            fill
+            className="object-cover object-center"
+            sizes="100vw"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-black/40" />
+        </div>
+        <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-20 sm:py-28 lg:py-32">
+          <div className="text-center">
+            <h2 className="text-2xl sm:text-3xl lg:text-5xl font-black leading-tight drop-shadow-lg">
+              その一瞬の感動を手のひらに。
+            </h2>
+            <p className="mt-4 text-sm sm:text-base text-gray-100">
+              会場に行けない日でも、成長の瞬間を見逃さない。
+            </p>
+            <a
+              href="/"
+              className="inline-block mt-8 sm:mt-10 bg-[#e63946] hover:bg-[#d62836] text-white text-sm sm:text-base font-semibold px-8 py-3 sm:px-10 sm:py-4 rounded-md transition shadow-2xl shadow-red-900/40"
+            >
+              まずは10分間、無料で試す
+            </a>
+            <p className="mt-4 text-[10px] sm:text-xs text-gray-300">
+              Webブラウザで今すぐ使えます / ホーム画面に追加でアプリ感覚
+            </p>
+          </div>
         </div>
       </section>
 
