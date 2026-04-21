@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { BottomNav } from "@/components/bottom-nav";
 import { AuthProvider } from "@/components/auth-provider";
@@ -101,6 +102,7 @@ export default function RootLayout({
             <BottomNav />
           </ToasterProvider>
         </AuthProvider>
+        <Analytics />
       </body>
     </html>
   );
