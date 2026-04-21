@@ -5,6 +5,13 @@ import { createClient } from "@/lib/supabase";
 
 type Mode = "login" | "signup" | "reset";
 
+function getSiteUrl(): string {
+  const envUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  if (envUrl) return envUrl.replace(/\/$/, "");
+  if (typeof window !== "undefined") return window.location.origin;
+  return "";
+}
+
 export function AuthForm() {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
@@ -23,7 +30,7 @@ export function AuthForm() {
     if (mode === "reset") {
       // --- パスワードリセット ---
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: `${getSiteUrl()}/reset-password`,
       });
       if (error) {
         setError(error.message);
@@ -36,7 +43,7 @@ export function AuthForm() {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/mypage`,
+          emailRedirectTo: `${getSiteUrl()}/mypage`,
         },
       });
       if (error) {
@@ -68,7 +75,7 @@ export function AuthForm() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/mypage`,
+        redirectTo: `${getSiteUrl()}/mypage`,
       },
     });
   }
