@@ -1,5 +1,5 @@
 import { AccessToken } from "livekit-server-sdk";
-import { getAdminClient } from "@/lib/supabase-admin";
+import { getAdminClient, getUser } from "@/lib/supabase-admin";
 
 const TRIAL_DURATION_MS = 10 * 60 * 1000; // 10分
 
@@ -25,11 +25,20 @@ export async function POST(request: Request) {
     // 配信者のトークン発行時に、無料ユーザーの10分制限をチェック
     let ttl = role === "broadcaster" ? "8h" : "6h";
     if (role === "broadcaster") {
+      // broadcaster は必ず認証ユーザーと一致している必要がある
+      const user = await getUser(request);
+      if (!user) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      if (user.id !== participantIdentity) {
+        return Response.json({ error: "Identity mismatch" }, { status: 403 });
+      }
+
       const admin = getAdminClient();
       const { data: profile } = await admin
         .from("profiles")
         .select("plan")
-        .eq("id", participantIdentity)
+        .eq("id", user.id)
         .single();
 
       const subscribed = profile?.plan === "broadcaster" || profile?.plan === "team";

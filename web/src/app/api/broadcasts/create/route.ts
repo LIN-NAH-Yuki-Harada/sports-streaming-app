@@ -1,21 +1,24 @@
-import { getAdminClient } from "@/lib/supabase-admin";
+import { getAdminClient, getUser } from "@/lib/supabase-admin";
 
 // トライアル使用済みフラグを更新するエンドポイント
 export async function POST(request: Request) {
   try {
-    const { markTrialUsed, userId } = await request.json();
+    const user = await getUser(request);
+    if (!user) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    if (!markTrialUsed || !userId) {
+    const { markTrialUsed } = await request.json().catch(() => ({}));
+    if (!markTrialUsed) {
       return Response.json({ error: "Invalid request" }, { status: 400 });
     }
 
     const admin = getAdminClient();
 
-    // userId が実在するか確認（なりすまし防止）
     const { data: profile } = await admin
       .from("profiles")
       .select("plan, trial_used")
-      .eq("id", userId)
+      .eq("id", user.id)
       .single();
 
     if (!profile) {
@@ -27,11 +30,10 @@ export async function POST(request: Request) {
       return Response.json({ success: true });
     }
 
-    // trial_used を true に設定
     await admin
       .from("profiles")
       .update({ trial_used: true })
-      .eq("id", userId);
+      .eq("id", user.id);
 
     return Response.json({ success: true });
   } catch (e) {

@@ -319,21 +319,35 @@ function BroadcastPageInner() {
       if (broadcast) {
         broadcastRef.current = broadcast;
         setShareCode(broadcast.share_code);
+
+        const supabase = createClient();
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+
         // 無料ユーザーのトライアル使用を記録（サーバー側で trial_used を更新）
-        if (!subscribed) {
+        if (!subscribed && accessToken) {
           fetch("/api/broadcasts/create", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ markTrialUsed: true, userId: user.id }),
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ markTrialUsed: true }),
           }).catch(() => {});
           refreshProfile();
         }
 
         // LiveKitトークンを取得
         try {
+          if (!accessToken) {
+            throw new Error("No access token");
+          }
           const res = await fetch("/api/livekit/token", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
             body: JSON.stringify({
               roomName: broadcast.share_code,
               participantIdentity: user.id,
@@ -349,6 +363,7 @@ function BroadcastPageInner() {
         } catch (e) {
           console.error("LiveKitトークン取得エラー:", e);
           setLivekitError("映像配信の準備に失敗しました");
+          setShareCode("");
         }
       } else {
         toast.error("配信の開始に失敗しました。もう一度お試しください。");

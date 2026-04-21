@@ -60,10 +60,21 @@ export async function POST(request: Request) {
         metadata: { supabase_user_id: user.id },
       });
       customerId = customer.id;
-      await supabaseAdmin
+      const { error: updateErr } = await supabaseAdmin
         .from("profiles")
         .update({ stripe_customer_id: customerId })
         .eq("id", user.id);
+      if (updateErr) {
+        // Stripe 顧客は作成済みのためログに残し、手動リカバリを促す
+        console.error(
+          "[stripe/checkout] customer created but DB update failed",
+          { customerId, userId: user.id, error: updateErr.message }
+        );
+        return Response.json(
+          { error: "Billing setup failed. Please contact support." },
+          { status: 500 }
+        );
+      }
     }
 
     // ── リダイレクト先のベースURL ──

@@ -1,9 +1,17 @@
+import { timingSafeEqual } from "node:crypto";
 import { getAdminClient } from "@/lib/supabase-admin";
 
 export async function GET(request: Request) {
-  // Vercel Cron の認証チェック
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  // Vercel Cron の認証チェック（タイミング攻撃対策）
+  const authHeader = request.headers.get("Authorization") ?? "";
+  const expected = `Bearer ${process.env.CRON_SECRET ?? ""}`;
+  const expectedBuf = Buffer.from(expected);
+  const actualBuf = Buffer.from(authHeader);
+  const authorized =
+    !!process.env.CRON_SECRET &&
+    expectedBuf.length === actualBuf.length &&
+    timingSafeEqual(expectedBuf, actualBuf);
+  if (!authorized) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
