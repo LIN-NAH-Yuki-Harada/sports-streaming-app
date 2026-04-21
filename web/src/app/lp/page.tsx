@@ -88,7 +88,7 @@ export default function LandingPage() {
             <div className="relative mx-auto w-full max-w-sm lg:max-w-none aspect-[9/16] lg:aspect-[4/5] max-h-[500px] rounded-2xl overflow-hidden border border-white/10 shadow-2xl" aria-hidden="true">
               <Image
                 src="/lp-hero-soccer.jpg"
-                alt=""
+                alt="子どもの試合を撮影する保護者のイメージ"
                 fill
                 sizes="(max-width: 1024px) 384px, 500px"
                 className="object-cover object-center"
@@ -142,7 +142,7 @@ export default function LandingPage() {
           ].map((item) => (
             <div key={item.step} className="rounded-lg bg-[#111] border border-white/5 overflow-hidden">
               <div className="relative aspect-[16/10] w-full">
-                <Image src={item.image} alt="" fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
+                <Image src={item.image} alt={item.title} fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
               </div>
               <div className="p-5 sm:p-6">
                 <span className="text-[#e63946] text-xs font-bold">{item.step}</span>
@@ -225,7 +225,7 @@ export default function LandingPage() {
           ].map((item) => (
             <div key={item.title} className="rounded-lg border border-white/5 overflow-hidden bg-[#0f0f0f]">
               <div className="relative aspect-[4/3] w-full">
-                <Image src={item.image} alt="" fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
+                <Image src={item.image} alt={item.title} fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
               </div>
               <div className="p-4 sm:p-5">
                 <h3 className="text-sm font-semibold mb-1">{item.title}</h3>
@@ -246,7 +246,7 @@ export default function LandingPage() {
             { title: "🏆 地域リーグ・ローカル大会", desc: "メディアが来ない地域の試合も、チーム関係者だけのプライベート中継で盛り上がる。", image: "/lp-teams-local-adult.jpg" },
           ].map((item) => (
             <div key={item.title} className="relative rounded-lg border border-white/5 overflow-hidden aspect-[4/3]">
-              <Image src={item.image} alt="" fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
+              <Image src={item.image} alt={item.title} fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
               <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/60 to-black/20" />
               <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-5">
                 <p className="text-sm font-semibold mb-1">{item.title}</p>
@@ -393,7 +393,7 @@ export default function LandingPage() {
         <div className="absolute inset-0">
           <Image
             src="/lp-cta-emotional.jpg"
-            alt=""
+            alt="試合の感動を家族と共有するイメージ"
             fill
             className="object-cover object-[25%_30%]"
             sizes="100vw"

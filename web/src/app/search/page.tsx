@@ -8,6 +8,7 @@ import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
 import { getTeamBroadcastHistory, type Broadcast } from "@/lib/database";
 import Link from "next/link";
+import Image from "next/image";
 
 type TeamMemberProfile = {
   id: string;
@@ -438,9 +439,15 @@ export default function TeamPage() {
                 })
                 .map((member) => (
                   <div key={member.id} className="flex items-center gap-3 rounded-md bg-[#111] border border-white/5 px-4 py-3">
-                    <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-xs">
+                    <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-xs overflow-hidden">
                       {member.profiles?.avatar_url ? (
-                        <img src={member.profiles.avatar_url} alt="" className="w-8 h-8 rounded-full" />
+                        <Image
+                          src={member.profiles.avatar_url}
+                          alt={member.profiles.display_name || "メンバー"}
+                          width={32}
+                          height={32}
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
                       ) : (
                         <span>{(member.profiles?.display_name || "?")[0]}</span>
                       )}
