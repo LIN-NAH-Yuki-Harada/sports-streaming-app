@@ -79,7 +79,10 @@ function BroadcastPageInner() {
   const { user, profile, loading, refreshProfile } = useAuth();
   const toast = useToast();
   const subscribed = profile?.plan === "broadcaster" || profile?.plan === "team";
-  const trialUsed = profile?.trial_used === true;
+  // 累積トライアル: profile.trial_seconds_used (0〜600) を元に残秒を算出
+  const trialSecondsUsed = profile?.trial_seconds_used ?? 0;
+  const trialSecondsRemainingInitial = Math.max(0, 600 - trialSecondsUsed);
+  const trialExhausted = trialSecondsRemainingInitial <= 0;
 
   const [myTeams, setMyTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string>("");
@@ -154,6 +157,12 @@ function BroadcastPageInner() {
   // スコア更新のデバウンス用
   const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // LiveKit 接続成功後の「実際の配信開始時刻」— カメラ映像が出始めた瞬間にセット。
+  // この時点からトライアル消費カウントが始まる（接続失敗時は null のまま＝消費ゼロ）。
+  const streamStartedAtRef = useRef<number | null>(null);
+  // 配信開始時点の trial_seconds_used スナップショット（refreshProfile されても表示がブレないように）
+  const trialSnapshotRef = useRef<number>(0);
+
   // スコアUndo用の履歴スタック（最大10件）
   type ScoreSnapshot = {
     homeScore: number;
@@ -177,7 +186,7 @@ function BroadcastPageInner() {
   const currentPeriod = periods[periodIndex] || periods[0];
 
   const canStart = home.trim() && away.trim();
-  const needsSubscription = !subscribed && trialUsed;
+  const needsSubscription = !subscribed && trialExhausted;
 
   // セットポイント・マッチポイント判定
   function getPointLabel(): string | null {
@@ -324,18 +333,8 @@ function BroadcastPageInner() {
         const { data: sessionData } = await supabase.auth.getSession();
         const accessToken = sessionData.session?.access_token;
 
-        // 無料ユーザーのトライアル使用を記録（サーバー側で trial_used を更新）
-        if (!subscribed && accessToken) {
-          fetch("/api/broadcasts/create", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify({ markTrialUsed: true }),
-          }).catch(() => {});
-          refreshProfile();
-        }
+        // トライアル消費は LiveKit 接続成功時（handleLiveKitConnected）に開始する。
+        // ここで markTrialUsed を呼ばない → カメラ許可失敗や接続失敗時に無駄に消費しない。
 
         // LiveKitトークンを取得
         try {
@@ -376,9 +375,51 @@ function BroadcastPageInner() {
     setStarting(false);
   }
 
+  // LiveKit 接続成功時に呼ばれる。ここから実際の配信秒数の計測が始まる。
+  // 再接続時には上書きしない（セッション全体を一続きとして扱う）。
+  const handleLiveKitConnected = useCallback(() => {
+    if (streamStartedAtRef.current != null) return;
+    streamStartedAtRef.current = Date.now();
+    trialSnapshotRef.current = profile?.trial_seconds_used ?? 0;
+  }, [profile?.trial_seconds_used]);
+
+  // 配信終了時、実際に配信した秒数をサーバーに加算する。
+  // keepalive: true はページ離脱時用（pagehide）。通常終了時は false。
+  const consumeTrialElapsed = useCallback(async (accessToken: string | null, keepalive = false) => {
+    if (subscribed) return;
+    const startedAt = streamStartedAtRef.current;
+    if (startedAt == null) return;
+    // 二重送信防止：先にリセット
+    streamStartedAtRef.current = null;
+    if (!accessToken) return;
+
+    const elapsedSec = Math.max(0, Math.ceil((Date.now() - startedAt) / 1000));
+    if (elapsedSec === 0) return;
+
+    try {
+      await fetch("/api/broadcasts/trial-consume", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ seconds: elapsedSec }),
+        keepalive,
+      });
+    } catch {
+      /* ignore: サーバー到達失敗でも次の操作を妨げない */
+    }
+  }, [subscribed]);
+
   // 配信終了
-  async function handleEnd() {
-    if (!confirm("配信を終了しますか？")) return;
+  async function handleEnd(options?: { skipConfirm?: boolean }) {
+    if (!options?.skipConfirm && !confirm("配信を終了しますか？")) return;
+
+    // 実際の配信秒数をサーバーに加算（LiveKit 切断より前に呼ぶ）
+    const supabase = createClient();
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token ?? null;
+    await consumeTrialElapsed(accessToken, false);
 
     // LiveKit切断（トークンをnull化 → LiveKitRoom自動アンマウント）
     setLivekitToken(null);
@@ -401,22 +442,29 @@ function BroadcastPageInner() {
     historyRef.current = [];
     setHistoryLength(0);
     setPeriodIndex(0);
+
+    // profile を最新化（残秒表示を更新するため）
+    refreshProfile();
   }
 
-  // 無料お試しカウントダウンタイマー
+  // 無料お試しカウントダウンタイマー（累積秒数ベース）
   useEffect(() => {
-    if (subscribed || !shareCode || !broadcastRef.current) {
+    if (subscribed || !shareCode) {
       setTrialRemaining(null);
       return;
     }
-    const startedAt = new Date(broadcastRef.current.started_at).getTime();
-    const TRIAL_MS = 10 * 60 * 1000;
 
     const tick = () => {
-      const remaining = Math.max(0, Math.ceil((startedAt + TRIAL_MS - Date.now()) / 1000));
-      setTrialRemaining(remaining);
+      const startedAt = streamStartedAtRef.current;
+      if (startedAt == null) {
+        // LiveKit 接続前（カメラ許可待ち等）— カウントダウン開始前
+        return;
+      }
+      const elapsedSec = (Date.now() - startedAt) / 1000;
+      const remaining = Math.max(0, 600 - trialSnapshotRef.current - elapsedSec);
+      setTrialRemaining(Math.ceil(remaining));
       if (remaining <= 0) {
-        handleEnd();
+        handleEnd({ skipConfirm: true });
       }
     };
     tick();
@@ -441,37 +489,55 @@ function BroadcastPageInner() {
       accessToken = data.session?.access_token ?? null;
     });
 
-    const endBroadcastSync = () => {
-      const bc = broadcastRef.current;
-      if (!bc || !accessToken) return;
+    const handlePageHide = () => {
+      if (!accessToken) return;
 
-      // keepalive: true でページ離脱時にもリクエストを完了させる
-      fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/broadcasts?id=eq.${bc.id}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ status: "ended", ended_at: new Date().toISOString() }),
-          keepalive: true,
+      // 1. 配信を ended にする（既存ロジック）
+      const bc = broadcastRef.current;
+      if (bc) {
+        fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/broadcasts?id=eq.${bc.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ status: "ended", ended_at: new Date().toISOString() }),
+            keepalive: true,
+          }
+        );
+        broadcastRef.current = null;
+      }
+
+      // 2. トライアル消費秒数を加算（無料ユーザーかつ LiveKit 接続済みのみ）
+      const startedAt = streamStartedAtRef.current;
+      if (startedAt != null && !subscribed) {
+        const elapsedSec = Math.max(0, Math.ceil((Date.now() - startedAt) / 1000));
+        streamStartedAtRef.current = null;
+        if (elapsedSec > 0) {
+          fetch("/api/broadcasts/trial-consume", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ seconds: elapsedSec }),
+            keepalive: true,
+          });
         }
-      );
-      broadcastRef.current = null;
+      }
     };
 
     // pagehide: ページが閉じられる・リロードされる時に配信を終了
     // ※ visibilitychange は使わない（通知確認や電話応答で配信が終了してしまうため）
-    const handlePageHide = () => endBroadcastSync();
-
     window.addEventListener("pagehide", handlePageHide);
 
     return () => {
       window.removeEventListener("pagehide", handlePageHide);
     };
-  }, []);
+  }, [subscribed]);
 
   function copyToClipboard(text: string, label: string) {
     if (navigator.clipboard) {
@@ -569,6 +635,7 @@ function BroadcastPageInner() {
             <LiveKitBroadcaster
               token={livekitToken}
               serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
+              onConnected={handleLiveKitConnected}
               onError={(e) => {
                 console.error("LiveKitエラー:", e);
                 if (isCameraPermissionError(e)) {
@@ -795,7 +862,7 @@ function BroadcastPageInner() {
             )}
 
             <button
-              onClick={handleEnd}
+              onClick={() => handleEnd()}
               className="flex items-center gap-1.5 bg-red-600 hover:bg-red-500 active:bg-red-700 rounded-md px-3 sm:px-4 py-2 transition shadow-lg shadow-red-900/40 ring-1 ring-red-400/30"
               aria-label="配信を終了する"
             >
@@ -1039,8 +1106,10 @@ function BroadcastPageInner() {
         >
           {starting
             ? "配信を準備中..."
-            : !subscribed && !trialUsed
-              ? "配信をスタート（10分間無料お試し）"
+            : !subscribed && trialSecondsRemainingInitial > 0
+              ? trialSecondsRemainingInitial === 600
+                ? "配信をスタート（10分間無料お試し）"
+                : `配信をスタート（残り ${Math.floor(trialSecondsRemainingInitial / 60)}:${String(trialSecondsRemainingInitial % 60).padStart(2, "0")} 無料）`
               : "配信をスタート"}
         </button>
         {!canStart && (

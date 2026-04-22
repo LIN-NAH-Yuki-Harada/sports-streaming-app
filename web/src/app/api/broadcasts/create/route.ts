@@ -1,43 +1,19 @@
-import { getAdminClient, getUser } from "@/lib/supabase-admin";
+import { getUser } from "@/lib/supabase-admin";
 
-// トライアル使用済みフラグを更新するエンドポイント
+// 注: このエンドポイントは旧実装で profiles.trial_used を立てていた。
+// 2026-04-22 に累積方式（trial_seconds_used）に変更したため、
+// トライアル記録は /api/broadcasts/trial-consume へ移行。
+// 本エンドポイントは旧キャッシュを持つクライアントとの互換目的で no-op 化して残している。
+// 後日（新バンドル浸透確認後）に削除予定。
 export async function POST(request: Request) {
   try {
     const user = await getUser(request);
     if (!user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-
-    const { markTrialUsed } = await request.json().catch(() => ({}));
-    if (!markTrialUsed) {
-      return Response.json({ error: "Invalid request" }, { status: 400 });
-    }
-
-    const admin = getAdminClient();
-
-    const { data: profile } = await admin
-      .from("profiles")
-      .select("plan, trial_used")
-      .eq("id", user.id)
-      .single();
-
-    if (!profile) {
-      return Response.json({ error: "Profile not found" }, { status: 404 });
-    }
-
-    // 既にサブスク済みなら何もしない
-    if (profile.plan === "broadcaster" || profile.plan === "team") {
-      return Response.json({ success: true });
-    }
-
-    await admin
-      .from("profiles")
-      .update({ trial_used: true })
-      .eq("id", user.id);
-
-    return Response.json({ success: true });
+    return Response.json({ success: true, deprecated: true });
   } catch (e) {
-    console.error("Trial mark error:", e);
+    console.error("broadcasts/create (deprecated) error:", e);
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -8,6 +8,7 @@ export type Profile = {
   avatar_url: string | null;
   plan: "free" | "broadcaster" | "team";
   trial_used: boolean;
+  trial_seconds_used: number;
   // YouTube 連携
   youtube_channel_id: string | null;
   youtube_channel_name: string | null;
