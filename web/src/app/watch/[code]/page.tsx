@@ -260,7 +260,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         )}
 
         {/* 左上: スコアボード */}
-        <div className="absolute top-3 left-3 flex flex-col items-start gap-1">
+        <div
+          className="absolute left-3 flex flex-col items-start gap-1"
+          style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+        >
           <div className="flex items-center bg-black/80 backdrop-blur-sm rounded overflow-hidden text-[10px] sm:text-xs">
             <div className="flex items-center gap-1.5 bg-white/10 px-2 sm:px-3 py-1.5">
               <span className="font-bold">{broadcast.home_team}</span>
@@ -286,7 +289,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         </div>
 
         {/* 右上: 大会名 + LIVE */}
-        <div className="absolute top-3 right-3 flex items-center gap-2">
+        <div
+          className="absolute right-3 flex items-center gap-2"
+          style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+        >
           {(broadcast.tournament || broadcast.sport) && (
             <div className="bg-black/80 backdrop-blur-sm rounded px-2 sm:px-3 py-1.5 text-[9px] sm:text-[10px] text-gray-300">
               {broadcast.tournament || broadcast.sport}
