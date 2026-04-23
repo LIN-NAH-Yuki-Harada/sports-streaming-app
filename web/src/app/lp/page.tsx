@@ -119,37 +119,17 @@ const SOFTWARE_APP_JSONLD = {
     },
     {
       "@type": "Offer",
-      name: "配信者プラン",
+      name: "配信者プラン（月額）",
       price: "300",
       priceCurrency: "JPY",
-      priceSpecification: {
-        "@type": "UnitPriceSpecification",
-        price: "300",
-        priceCurrency: "JPY",
-        referenceQuantity: {
-          "@type": "QuantitativeValue",
-          value: "1",
-          unitCode: "MON",
-        },
-      },
-      description: "無制限ライブ配信・スコアボード・LINE共有・限定公開の共有コード",
+      description: "無制限ライブ配信・スコアボード・LINE共有・限定公開の共有コード（月額¥300）",
     },
     {
       "@type": "Offer",
-      name: "チームプラン",
+      name: "チームプラン（月額）",
       price: "500",
       priceCurrency: "JPY",
-      priceSpecification: {
-        "@type": "UnitPriceSpecification",
-        price: "500",
-        priceCurrency: "JPY",
-        referenceQuantity: {
-          "@type": "QuantitativeValue",
-          value: "1",
-          unitCode: "MON",
-        },
-      },
-      description: "配信者プランの全機能 + チーム・スケジュール管理 + アーカイブ自動保存（開発中）",
+      description: "配信者プランの全機能 + チーム・スケジュール管理 + アーカイブ自動保存（開発中）（月額¥500）",
     },
   ],
   featureList: [
