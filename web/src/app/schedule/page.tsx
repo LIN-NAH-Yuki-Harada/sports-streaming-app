@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
+import { PlanTeaser } from "@/components/plan-teaser";
 import { useToast } from "@/components/toaster";
 import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
@@ -97,10 +98,14 @@ function SchedulePageInner() {
 // ===== 未ログイン =====
 function LoginPrompt() {
   return (
-    <div className="pt-8 text-center">
-      <p className="text-sm text-gray-400">予定を見るにはログインが必要です</p>
+    <div className="pt-8">
+      <p className="text-sm text-gray-400 text-center">予定を見るにはログインが必要です</p>
       <div className="mt-6 max-w-sm mx-auto">
         <AuthForm />
+        <PlanTeaser
+          contextLabel="スケジュール管理はチームプラン（¥500/月）から"
+          highlight="team"
+        />
       </div>
     </div>
   );

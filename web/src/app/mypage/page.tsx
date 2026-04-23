@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
+import { PlanTeaser } from "@/components/plan-teaser";
 import { useToast } from "@/components/toaster";
 import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
@@ -162,6 +163,8 @@ function MyPageInner() {
             </div>
 
             <AuthForm />
+
+            <PlanTeaser contextLabel="3つのプランから選べます" />
           </div>
         )}
 
