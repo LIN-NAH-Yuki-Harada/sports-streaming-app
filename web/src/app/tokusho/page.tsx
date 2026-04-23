@@ -33,11 +33,7 @@ export default function TokushoPage() {
             </Row>
 
             <Row label="所在地">
-              〒XXX-XXXX 【ここに登記上の本社所在地を記載】
-              <br />
-              <span className="text-xs text-gray-500 mt-1 inline-block">
-                ご請求があった場合、遅滞なく開示いたします。
-              </span>
+              〒353-0005 埼玉県志木市幸町4-10-71
             </Row>
 
             <Row label="電話番号">
