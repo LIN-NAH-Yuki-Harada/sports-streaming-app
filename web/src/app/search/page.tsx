@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
+import { PlanTeaser } from "@/components/plan-teaser";
 import { useToast } from "@/components/toaster";
 import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
@@ -352,8 +353,12 @@ function TeamPageInner() {
             <br />
             アーカイブやスケジュールを確認できます。
           </p>
-          <div className="mt-6">
+          <div className="mt-6 text-left max-w-sm mx-auto">
             <AuthForm />
+            <PlanTeaser
+              contextLabel="チーム管理はチームプラン（¥500/月）から"
+              highlight="team"
+            />
           </div>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { Suspense, useState, useRef, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
+import { PlanTeaser } from "@/components/plan-teaser";
 import { LiveKitBroadcaster } from "@/components/livekit-video";
 import { CameraPermissionGuide, isCameraPermissionError } from "@/components/camera-permission-guide";
 import { useToast } from "@/components/toaster";
@@ -608,17 +609,10 @@ function BroadcastPageInner() {
 
         <AuthForm />
 
-          <div className="mt-8 rounded-md bg-[#111] border border-white/5 p-4">
-            <p className="text-[11px] text-gray-400 font-medium mb-2">配信者プラン</p>
-            <p className="text-lg font-black">¥300<span className="text-xs font-normal text-gray-500">/月</span></p>
-            <p className="text-[10px] text-gray-500 mt-1">初回10分間は無料でお試し</p>
-            <ul className="mt-2 space-y-1 text-[10px] text-gray-500">
-              <li>✓ スコアボード・オーバーレイ</li>
-              <li>✓ リモコンでスコア操作</li>
-              <li>✓ 限定公開の共有コード発行</li>
-              <li>✓ アーカイブ自動保存</li>
-            </ul>
-          </div>
+          <PlanTeaser
+            contextLabel="配信は配信者プラン ¥300 から（登録で累計10分は無料お試し）"
+            highlight="broadcaster"
+          />
         </div>
       </div>
     );
