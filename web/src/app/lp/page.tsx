@@ -1,24 +1,184 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://sports-streaming-app.vercel.app";
+
+const FAQ_ITEMS = [
+  {
+    q: "子どもの顔が映るのが心配です。大丈夫ですか？",
+    a: "共有コードを知る人だけが視聴できる限定公開なので、ご家族・チーム関係者以外には配信は届きません。アーカイブも同様です。",
+  },
+  {
+    q: "配信の画質はどれくらいですか？",
+    a: "HD画質(1280x720)・1.5Mbpsで配信しています。一般的なLTE回線・WiFi環境で安定して視聴できます。",
+  },
+  {
+    q: "10分の無料お試し時間が終わったらどうなりますか？",
+    a: "そこまでは完全無料で配信できます。続けて配信したい場合は、配信者プラン（¥300/月）にご登録ください。いつでも解約できます。",
+  },
+  {
+    q: "配信者プランとチームプランの違いは？",
+    a: "配信者プラン（¥300/月）は個人保護者向けの「ライブ配信専用プラン」です。試合をリアルタイムで家族に届ける用途に最適。チームプラン（¥500/月）は記録運用向けで、アーカイブ自動保存・チーム管理・スケジュール管理・リモコン操作（開発中）・YouTube連携（開発中）が追加されます。",
+  },
+  {
+    q: "複数の家族・親戚が同時に視聴できますか？",
+    a: "人数制限はありません。共有コードさえお持ちなら、何人でも同時に視聴いただけます。",
+  },
+  {
+    q: "視聴する側も料金はかかりますか？",
+    a: "視聴は完全無料です。共有コードを受け取ったら、アカウント登録するだけですぐに観戦できます。",
+  },
+  {
+    q: "アプリのダウンロードは必要ですか？",
+    a: "不要です。Webブラウザからアクセスできます。スマホのホーム画面に追加すれば、アプリと同じように使えます。",
+  },
+  {
+    q: "解約はかんたんにできますか？",
+    a: "マイページの「プラン管理」からいつでも解約できます。解約後も当該月末まではご利用可能です。",
+  },
+  {
+    q: "サッカー・野球・バスケ以外のスポーツにも対応していますか？",
+    a: "はい。バレーボール・陸上・テニス・卓球・水泳・ラグビー・ハンドボールなど、すべてのスポーツに対応しています。スポーツ少年団・部活・地域リーグ問わずご利用いただけます。",
+  },
+  {
+    q: "遠方の祖父母や親戚にも試合を見せられますか？",
+    a: "共有コードを LINE 等で送るだけで、遠方のご家族・親戚も試合をリアルタイムで観戦できます。シニア世代にも使いやすいシンプルな操作です。",
+  },
+];
+
+const LP_TITLE =
+  "子どもの試合をスマホでライブ配信｜スポーツ少年団・部活・地域大会対応";
+const LP_DESCRIPTION =
+  "スポーツ少年団・中学部活・高校部活・ジュニアの試合を、保護者のスマホ1台でライブ配信。スコアボード常時表示・低遅延0.25秒・限定公開で安心。サッカー・野球・バスケ・バレー・陸上などあらゆるスポーツ対応。1週間無料クーポン『SPOT1W』配布中。";
+
 export const metadata: Metadata = {
-  title: "子どもの試合を、どこにいても見届ける",
-  description:
-    "保護者のスマホ1台で、スコアボード付きのTV中継品質に。低遅延0.25秒・限定公開でお子さまの試合を安心して家族に届ける、地域スポーツ専用のライブ配信「LIVE SPOtCH」。先着10チームはプロモコード『SPOT1W』で1週間無料トライアル。",
+  title: LP_TITLE,
+  description: LP_DESCRIPTION,
+  keywords: [
+    "スポーツ ライブ配信",
+    "子ども 試合 配信",
+    "スポーツ少年団 ライブ配信",
+    "部活 試合 配信",
+    "ジュニア スポーツ 配信",
+    "スマホ スポーツ配信",
+    "スコアボード オーバーレイ",
+    "保護者 試合 観戦",
+    "地域大会 配信",
+    "サッカー ライブ配信",
+    "バレー ライブ配信",
+    "野球 ライブ配信",
+    "バスケ ライブ配信",
+    "限定公開 試合配信",
+    "低遅延 スポーツ配信",
+  ],
   alternates: { canonical: "/lp" },
   openGraph: {
-    title: "子どもの試合を、どこにいても見届ける | LIVE SPOtCH",
-    description:
-      "保護者のスマホ1台でTV中継品質の配信。スコアボード・低遅延・限定公開で安心。先着10チーム1週間無料コード『SPOT1W』。",
+    title: `${LP_TITLE} | LIVE SPOtCH`,
+    description: LP_DESCRIPTION,
     url: "/lp",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "子どもの試合を、どこにいても見届ける | LIVE SPOtCH",
-    description:
-      "保護者のスマホ1台でTV中継品質の配信。スコアボード・低遅延・限定公開で安心。先着10チーム1週間無料コード『SPOT1W』。",
+    title: `${LP_TITLE} | LIVE SPOtCH`,
+    description: LP_DESCRIPTION,
   },
+};
+
+const FAQ_JSONLD = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: FAQ_ITEMS.map(({ q, a }) => ({
+    "@type": "Question",
+    name: q,
+    acceptedAnswer: {
+      "@type": "Answer",
+      text: a,
+    },
+  })),
+};
+
+const SOFTWARE_APP_JSONLD = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "LIVE SPOtCH",
+  applicationCategory: "SportsApplication",
+  operatingSystem: "Any (Web, iOS, Android PWA)",
+  description:
+    "保護者のスマホ1台でスポーツ少年団・部活・地域大会の試合をライブ配信。スコアボード・低遅延・限定公開に対応したUGC型スポーツライブ配信プラットフォーム。",
+  url: `${SITE_URL}/lp`,
+  image: `${SITE_URL}/opengraph-image.jpg`,
+  offers: [
+    {
+      "@type": "Offer",
+      name: "視聴プラン（無料）",
+      price: "0",
+      priceCurrency: "JPY",
+      description: "共有コードでライブ視聴。1ヶ月以内のアーカイブ視聴可。",
+    },
+    {
+      "@type": "Offer",
+      name: "配信者プラン",
+      price: "300",
+      priceCurrency: "JPY",
+      priceSpecification: {
+        "@type": "UnitPriceSpecification",
+        price: "300",
+        priceCurrency: "JPY",
+        referenceQuantity: {
+          "@type": "QuantitativeValue",
+          value: "1",
+          unitCode: "MON",
+        },
+      },
+      description: "無制限ライブ配信・スコアボード・LINE共有・限定公開の共有コード",
+    },
+    {
+      "@type": "Offer",
+      name: "チームプラン",
+      price: "500",
+      priceCurrency: "JPY",
+      priceSpecification: {
+        "@type": "UnitPriceSpecification",
+        price: "500",
+        priceCurrency: "JPY",
+        referenceQuantity: {
+          "@type": "QuantitativeValue",
+          value: "1",
+          unitCode: "MON",
+        },
+      },
+      description: "配信者プランの全機能 + チーム・スケジュール管理 + アーカイブ自動保存（開発中）",
+    },
+  ],
+  featureList: [
+    "HDスコアボード常時オーバーレイ表示",
+    "低遅延0.25秒のライブ配信",
+    "共有コードによる限定公開",
+    "LINE ワンタップ共有",
+    "サッカー・野球・バスケ・バレー・陸上など全スポーツ対応",
+    "スポーツ少年団・部活・地域大会向け",
+  ],
+};
+
+const BREADCRUMB_JSONLD = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    {
+      "@type": "ListItem",
+      position: 1,
+      name: "ホーム",
+      item: `${SITE_URL}/`,
+    },
+    {
+      "@type": "ListItem",
+      position: 2,
+      name: "サービス紹介",
+      item: `${SITE_URL}/lp`,
+    },
+  ],
 };
 
 export default function LandingPage() {
@@ -74,9 +234,13 @@ export default function LandingPage() {
                 <br />
                 どこにいても見届ける。
               </h1>
-              <p className="mt-4 sm:mt-6 text-gray-500 text-sm sm:text-base max-w-lg leading-relaxed">
-                スポーツ少年団の大会、部活の公式戦、地域リーグ。
-                共有コードひとつで、チームの関係者だけがリアルタイム観戦。
+              <p className="mt-4 sm:mt-6 text-gray-300 text-sm sm:text-base max-w-lg leading-relaxed">
+                <strong className="text-white">スポーツ少年団・中学部活・高校部活・ジュニアスポーツ</strong>の試合を、
+                保護者のスマホ1台でライブ配信。
+                サッカー・野球・バスケ・バレー・陸上など、あらゆるローカル試合をテレビ中継品質でお届けします。
+              </p>
+              <p className="mt-2 text-gray-500 text-xs sm:text-sm max-w-lg leading-relaxed">
+                共有コードひとつで、チームの関係者だけがリアルタイム観戦。地域大会・練習試合・公式戦など、メディアが来ない試合こそ家族に届けたい瞬間を残せます。
               </p>
 
               {/* 安心感バッジ */}
@@ -109,7 +273,7 @@ export default function LandingPage() {
             <div className="relative mx-auto w-full max-w-sm lg:max-w-none aspect-[9/16] lg:aspect-[4/5] max-h-[500px] rounded-2xl overflow-hidden border border-white/10 shadow-2xl" aria-hidden="true">
               <Image
                 src="/lp-hero-soccer.jpg"
-                alt="子どもの試合を撮影する保護者のイメージ"
+                alt="スポーツ少年団のサッカーの試合をスマホでライブ配信する保護者"
                 fill
                 sizes="(max-width: 1024px) 384px, 500px"
                 className="object-cover object-center"
@@ -154,16 +318,16 @@ export default function LandingPage() {
 
       {/* 使い方：3ステップ */}
       <section id="how" className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
-        <h2 className="text-lg font-bold mb-6 sm:mb-8">かんたん3ステップ</h2>
+        <h2 className="text-lg font-bold mb-6 sm:mb-8">スマホ1台でライブ配信する3ステップ</h2>
         <div className="grid gap-4 sm:gap-6 lg:gap-8 grid-cols-1 sm:grid-cols-3">
           {[
-            { step: "STEP 1", title: "アプリに登録して配信開始", desc: "無料で会員登録。チーム名を入れたら、初回10分間は無料で配信できます。", image: "/lp-hero-soccer.jpg" },
-            { step: "STEP 2", title: "共有コードをLINEで送る", desc: "配信が始まると共有コードを自動発行。チームのLINEグループに送るだけ。", image: "/lp-steps-line-share.jpg" },
-            { step: "STEP 3", title: "家族がどこからでも無料で観戦", desc: "コードを受け取った人はアプリ登録するだけ。視聴は完全無料。スコアボード付きのTV中継品質。", image: "/lp-steps-family-watch.jpg" },
+            { step: "STEP 1", title: "アプリに登録して配信開始", desc: "無料で会員登録。チーム名を入れたら、初回10分間は無料で配信できます。", image: "/lp-hero-soccer.jpg", alt: "スマホで少年サッカーの試合を撮影・ライブ配信する保護者" },
+            { step: "STEP 2", title: "共有コードをLINEで送る", desc: "配信が始まると共有コードを自動発行。チームのLINEグループに送るだけ。", image: "/lp-steps-line-share.jpg", alt: "試合のライブ配信コードをLINEで家族・チーム関係者に共有する様子" },
+            { step: "STEP 3", title: "家族がどこからでも無料で観戦", desc: "コードを受け取った人はアプリ登録するだけ。視聴は完全無料。スコアボード付きのTV中継品質。", image: "/lp-steps-family-watch.jpg", alt: "遠方の家族がスマホで子どもの試合をリアルタイム観戦" },
           ].map((item) => (
             <div key={item.step} className="rounded-lg bg-[#111] border border-white/5 overflow-hidden">
               <div className="relative aspect-[16/10] w-full">
-                <Image src={item.image} alt={item.title} fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
+                <Image src={item.image} alt={item.alt} fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
               </div>
               <div className="p-5 sm:p-6">
                 <span className="text-[#e63946] text-xs font-bold">{item.step}</span>
@@ -177,7 +341,9 @@ export default function LandingPage() {
 
       {/* 対応スポーツ */}
       <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 border-t border-white/5">
-        <h2 className="text-sm sm:text-base font-semibold text-gray-300 mb-4 sm:mb-6">あらゆるスポーツに対応</h2>
+        <h2 className="text-sm sm:text-base font-semibold text-gray-300 mb-4 sm:mb-6">
+          対応スポーツ — サッカー・野球・バスケ・バレー・陸上など全ジャンル
+        </h2>
         <div className="flex flex-wrap gap-2 sm:gap-3">
           {[
             { emoji: "⚽", name: "サッカー" },
@@ -201,7 +367,7 @@ export default function LandingPage() {
 
       {/* 特徴 */}
       <section id="features" className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 border-t border-white/5">
-        <h2 className="text-lg font-bold mb-6 sm:mb-8">YouTubeではできないこと</h2>
+        <h2 className="text-lg font-bold mb-6 sm:mb-8">YouTubeライブにはない、試合配信に特化した4つの機能</h2>
         <div className="grid gap-6 sm:gap-8 lg:gap-12 grid-cols-2 lg:grid-cols-4">
           <div>
             <p className="text-[#e63946] text-xl sm:text-2xl font-black mb-2">0.25秒</p>
@@ -236,17 +402,17 @@ export default function LandingPage() {
 
       {/* こんなときに使えます */}
       <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 border-t border-white/5">
-        <h2 className="text-lg font-bold mb-6 sm:mb-8">こんなときに使えます</h2>
+        <h2 className="text-lg font-bold mb-6 sm:mb-8">こんな場面で使える、試合ライブ配信</h2>
         <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2">
           {[
-            { title: "試合に行けない日に", desc: "仕事で応援に行けなくても、スマホでリアルタイム観戦。お子さまの活躍を見逃しません。", image: "/lp-scenes-office-dad.jpg" },
-            { title: "おじいちゃん、おばあちゃんに", desc: "遠方に住む祖父母にもコードを送るだけ。孫の試合を一緒に応援。", image: "/lp-scenes-grandparents.jpg" },
-            { title: "チームの振り返りに", desc: "チームプランのアーカイブ自動保存で、試合後の反省会や戦術確認に。コーチも選手も使えます。", image: "/lp-scenes-coach-review.jpg" },
-            { title: "大会・講演会の中継に", desc: "スポーツに限らず、学校行事や講演会の限定配信にも対応。", image: "/lp-scenes-school-event.jpg" },
+            { title: "試合に行けない日に", desc: "仕事で応援に行けなくても、スマホでリアルタイム観戦。お子さまの活躍を見逃しません。", image: "/lp-scenes-office-dad.jpg", alt: "仕事中の父親がオフィスからスマホで子どもの試合をライブ観戦" },
+            { title: "おじいちゃん、おばあちゃんに", desc: "遠方に住む祖父母にもコードを送るだけ。孫の試合を一緒に応援。", image: "/lp-scenes-grandparents.jpg", alt: "離れた地域の祖父母がタブレットで孫の試合を観戦" },
+            { title: "チームの振り返りに", desc: "チームプランのアーカイブ自動保存で、試合後の反省会や戦術確認に。コーチも選手も使えます。", image: "/lp-scenes-coach-review.jpg", alt: "スポーツ少年団のコーチが試合アーカイブで戦術を振り返る様子" },
+            { title: "大会・講演会の中継に", desc: "スポーツに限らず、学校行事や講演会の限定配信にも対応。", image: "/lp-scenes-school-event.jpg", alt: "学校行事や地域大会をライブ配信して関係者に届ける様子" },
           ].map((item) => (
             <div key={item.title} className="rounded-lg border border-white/5 overflow-hidden bg-[#0f0f0f]">
               <div className="relative aspect-[4/3] w-full">
-                <Image src={item.image} alt={item.title} fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
+                <Image src={item.image} alt={item.alt} fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
               </div>
               <div className="p-4 sm:p-5">
                 <h3 className="text-sm font-semibold mb-1">{item.title}</h3>
@@ -259,15 +425,15 @@ export default function LandingPage() {
 
       {/* こんなチームに使われています */}
       <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 border-t border-white/5">
-        <h2 className="text-lg font-bold mb-4 sm:mb-6">こんなチームに使われています</h2>
+        <h2 className="text-lg font-bold mb-4 sm:mb-6">スポーツ少年団・部活・地域リーグに選ばれています</h2>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
           {[
-            { title: "⚽ スポーツ少年団", desc: "地域の大会・練習試合を保護者がスマホで配信。試合に来れない家族もリアルタイムで応援。", image: "/lp-hero-soccer.jpg" },
-            { title: "🏐 中学校・高校の部活", desc: "公式戦の模様をOB/OGや保護者に限定配信。スコアボードで試合展開も一目瞭然。", image: "/lp-teams-junior-volleyball.jpg" },
-            { title: "🏆 地域リーグ・ローカル大会", desc: "メディアが来ない地域の試合も、チーム関係者だけのプライベート中継で盛り上がる。", image: "/lp-teams-local-adult.jpg" },
+            { title: "⚽ スポーツ少年団", desc: "地域の大会・練習試合を保護者がスマホで配信。試合に来れない家族もリアルタイムで応援。", image: "/lp-hero-soccer.jpg", alt: "スポーツ少年団の地域大会をスマホでライブ配信する保護者" },
+            { title: "🏐 中学校・高校の部活", desc: "公式戦の模様をOB/OGや保護者に限定配信。スコアボードで試合展開も一目瞭然。", image: "/lp-teams-junior-volleyball.jpg", alt: "中学校・高校のバレー部の公式戦をライブ配信" },
+            { title: "🏆 地域リーグ・ローカル大会", desc: "メディアが来ない地域の試合も、チーム関係者だけのプライベート中継で盛り上がる。", image: "/lp-teams-local-adult.jpg", alt: "地域リーグ・ローカル大会の試合をスマホで配信" },
           ].map((item) => (
             <div key={item.title} className="relative rounded-lg border border-white/5 overflow-hidden aspect-[4/3]">
-              <Image src={item.image} alt={item.title} fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
+              <Image src={item.image} alt={item.alt} fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
               <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/60 to-black/20" />
               <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-5">
                 <p className="text-sm font-semibold mb-1">{item.title}</p>
@@ -361,42 +527,9 @@ export default function LandingPage() {
 
       {/* FAQ */}
       <section className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 border-t border-white/5">
-        <h2 className="text-lg font-bold mb-6 sm:mb-8">よくある質問</h2>
+        <h2 className="text-lg font-bold mb-6 sm:mb-8">スポーツライブ配信のよくある質問</h2>
         <div className="space-y-3">
-          {[
-            {
-              q: "子どもの顔が映るのが心配です。大丈夫ですか？",
-              a: "共有コードを知る人だけが視聴できる限定公開なので、ご家族・チーム関係者以外には配信は届きません。アーカイブも同様です。",
-            },
-            {
-              q: "配信の画質はどれくらいですか？",
-              a: "HD画質(1280x720)・1.5Mbpsで配信しています。一般的なLTE回線・WiFi環境で安定して視聴できます。",
-            },
-            {
-              q: "10分の無料お試し時間が終わったらどうなりますか？",
-              a: "そこまでは完全無料で配信できます。続けて配信したい場合は、配信者プラン（¥300/月）にご登録ください。いつでも解約できます。",
-            },
-            {
-              q: "配信者プランとチームプランの違いは？",
-              a: "配信者プラン（¥300/月）は個人保護者向けの「ライブ配信専用プラン」です。試合をリアルタイムで家族に届ける用途に最適。チームプラン（¥500/月）は記録運用向けで、アーカイブ自動保存・チーム管理・スケジュール管理・リモコン操作（開発中）・YouTube連携（開発中）が追加されます。",
-            },
-            {
-              q: "複数の家族・親戚が同時に視聴できますか？",
-              a: "人数制限はありません。共有コードさえお持ちなら、何人でも同時に視聴いただけます。",
-            },
-            {
-              q: "視聴する側も料金はかかりますか？",
-              a: "視聴は完全無料です。共有コードを受け取ったら、アカウント登録するだけですぐに観戦できます。",
-            },
-            {
-              q: "アプリのダウンロードは必要ですか？",
-              a: "不要です。Webブラウザからアクセスできます。スマホのホーム画面に追加すれば、アプリと同じように使えます。",
-            },
-            {
-              q: "解約はかんたんにできますか？",
-              a: "マイページの「プラン管理」からいつでも解約できます。解約後も当該月末まではご利用可能です。",
-            },
-          ].map((faq, i) => (
+          {FAQ_ITEMS.map((faq, i) => (
             <details
               key={i}
               className="group rounded-lg bg-[#111] border border-white/5 open:border-white/10 transition"
@@ -463,6 +596,19 @@ export default function LandingPage() {
           </div>
         </div>
       </footer>
+
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_JSONLD) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(SOFTWARE_APP_JSONLD) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(BREADCRUMB_JSONLD) }}
+      />
     </div>
   );
 }
