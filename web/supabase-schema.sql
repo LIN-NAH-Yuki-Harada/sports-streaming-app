@@ -143,3 +143,20 @@ $$ language plpgsql security definer;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- 5. プロモコード（無料トライアル配布用、営業配布向け）
+-- 詳細は supabase-migration-promo-codes.sql を参照
+create table public.promo_codes (
+  code text primary key,
+  trial_days integer not null check (trial_days between 1 and 90),
+  max_uses integer,
+  uses_count integer not null default 0,
+  active boolean not null default true,
+  expires_at timestamptz,
+  label text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.promo_codes enable row level security;
+-- 一般ユーザー・anon にはアクセス権を与えない（Service Role のみが検証・更新できる）

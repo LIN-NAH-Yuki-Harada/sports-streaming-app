@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { stripe, priceIdToPlan } from "@/lib/stripe";
+import { incrementPromoUsage } from "@/lib/promo";
 import type Stripe from "stripe";
 
 /**
@@ -79,6 +80,12 @@ export async function POST(request: Request) {
         if (updateErr) {
           console.error("[stripe-webhook] checkout.session.completed update failed:", updateErr.message, { userId });
           throw new Error(`profiles update failed: ${updateErr.message}`);
+        }
+
+        // プロモコード経由なら使用回数をインクリメント（失敗はログのみ、Checkout の成功は確定させる）
+        const promoCode = session.metadata?.promo_code;
+        if (promoCode) {
+          await incrementPromoUsage(promoCode);
         }
         break;
       }

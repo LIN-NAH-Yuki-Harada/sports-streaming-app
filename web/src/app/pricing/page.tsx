@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
@@ -14,13 +14,76 @@ const PLAN_LABELS: Record<Plan, string> = {
   team: "チームプラン",
 };
 
+type PromoState =
+  | { status: "idle" }
+  | { status: "checking" }
+  | { status: "valid"; code: string; trialDays: number }
+  | { status: "invalid"; error: string };
+
 export default function PricingPage() {
+  return (
+    <Suspense fallback={<div className="px-5 py-10 text-sm text-gray-500">読み込み中...</div>}>
+      <PricingPageInner />
+    </Suspense>
+  );
+}
+
+function PricingPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, profile, loading: authLoading } = useAuth();
   const [loadingPlan, setLoadingPlan] = useState<Plan | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // プロモコード関連
+  const [promoInput, setPromoInput] = useState("");
+  const [promoState, setPromoState] = useState<PromoState>({ status: "idle" });
+
+  // URL クエリ `?promo=XXX` で届いたら初期値にセット（営業 DM 直リンク用）
+  useEffect(() => {
+    const queryPromo = searchParams.get("promo");
+    if (queryPromo && !promoInput) {
+      setPromoInput(queryPromo.trim().toUpperCase());
+    }
+    // promoInput が変わる度に発火させたくないので依存は searchParams のみ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const currentPlan = profile?.plan ?? "free";
+
+  async function verifyPromo() {
+    const normalized = promoInput.trim().toUpperCase();
+    if (!normalized) {
+      setPromoState({ status: "idle" });
+      return;
+    }
+    setPromoState({ status: "checking" });
+    try {
+      const res = await fetch("/api/promo/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: normalized }),
+      });
+      const data = await res.json();
+      if (data.valid) {
+        setPromoState({
+          status: "valid",
+          code: normalized,
+          trialDays: data.trial_days,
+        });
+      } else {
+        setPromoState({
+          status: "invalid",
+          error: data.error ?? "このコードは利用できません",
+        });
+      }
+    } catch {
+      setPromoState({
+        status: "invalid",
+        error: "通信エラーが発生しました",
+      });
+    }
+  }
 
   const handleSubscribe = async (plan: "broadcaster" | "team") => {
     if (!user) {
@@ -37,13 +100,17 @@ export default function PricingPage() {
         setLoadingPlan(null);
         return;
       }
+      const checkoutBody: { plan: "broadcaster" | "team"; promoCode?: string } = { plan };
+      if (promoState.status === "valid") {
+        checkoutBody.promoCode = promoState.code;
+      }
       const res = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify(checkoutBody),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -120,6 +187,72 @@ export default function PricingPage() {
             <p className="text-sm font-semibold mt-0.5">{PLAN_LABELS[currentPlan as Plan]}</p>
           </div>
         )}
+
+        {/* クーポンコード入力（営業配布・無料トライアル用） */}
+        <div className="mb-6 rounded-lg bg-[#111] border border-white/5 px-4 py-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-bold text-[#e63946] tracking-widest">COUPON</span>
+            <span className="text-xs text-gray-400">
+              無料トライアルコードをお持ちの方
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="例: SPOT1W"
+              value={promoInput}
+              onChange={(e) => {
+                setPromoInput(e.target.value.toUpperCase());
+                if (promoState.status !== "idle") setPromoState({ status: "idle" });
+              }}
+              onBlur={() => {
+                if (promoInput.trim() && promoState.status === "idle") verifyPromo();
+              }}
+              className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-[#e63946]/50 focus:outline-none transition tracking-widest"
+              maxLength={32}
+              autoCapitalize="characters"
+              spellCheck={false}
+              aria-label="クーポンコード"
+            />
+            <button
+              type="button"
+              onClick={verifyPromo}
+              disabled={promoState.status === "checking" || !promoInput.trim()}
+              className="shrink-0 px-4 py-2 rounded-md text-sm font-semibold transition bg-white/10 hover:bg-white/20 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {promoState.status === "checking" ? "確認中..." : "確認"}
+            </button>
+          </div>
+
+          {promoState.status === "valid" && (
+            <div className="mt-3 flex items-start gap-2 text-xs text-[#34d399]">
+              <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              <span>
+                <strong>{promoState.code}</strong> で{" "}
+                <strong>{promoState.trialDays}日間の無料トライアル</strong>{" "}
+                が適用されます。この下のプランに加入ボタンを押すと、トライアル期間は課金されません。
+              </span>
+            </div>
+          )}
+
+          {promoState.status === "invalid" && (
+            <div className="mt-3 flex items-start gap-2 text-xs text-[#e63946]">
+              <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden>
+                <circle cx="12" cy="12" r="10" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 9l-6 6M9 9l6 6" />
+              </svg>
+              <span>{promoState.error}</span>
+            </div>
+          )}
+
+          {promoState.status === "idle" && (
+            <p className="mt-2 text-[11px] text-gray-600">
+              コードがない場合はそのままプランを選んで加入いただけます。初月からの通常課金になります。
+            </p>
+          )}
+        </div>
 
         {/* エラー表示 */}
         {error && (
