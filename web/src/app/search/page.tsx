@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
 import { useToast } from "@/components/toaster";
@@ -59,8 +60,17 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function TeamPage() {
+  return (
+    <Suspense fallback={<div className="px-5 py-10 text-sm text-gray-500">読み込み中...</div>}>
+      <TeamPageInner />
+    </Suspense>
+  );
+}
+
+function TeamPageInner() {
   const { user, profile, loading } = useAuth();
   const toast = useToast();
+  const searchParams = useSearchParams();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
@@ -104,6 +114,18 @@ export default function TeamPage() {
   useEffect(() => {
     if (user) fetchTeams();
   }, [user, fetchTeams]);
+
+  // URL クエリ `?invite=XXX` で届いたら「招待コードで参加」タブに自動切替 + コード自動入力
+  useEffect(() => {
+    const inviteParam = searchParams.get("invite");
+    if (inviteParam) {
+      const normalized = inviteParam.trim().toUpperCase();
+      setJoinCode(normalized);
+      setTab("join");
+    }
+    // searchParams 変更時のみ発火、joinCode/tab の外部変更で再実行したくない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // 試合履歴タブを開いたらチームの配信履歴を取得
   useEffect(() => {
@@ -378,35 +400,41 @@ export default function TeamPage() {
           )}
 
           {/* 招待コード */}
-          {isAdmin && selectedTeam.invite_code && (
-            <div className="rounded-lg bg-[#111] border border-white/5 p-3 mb-4">
-              <p className="text-[10px] text-gray-500 mb-1">招待コード（メンバーに共有してください）</p>
-              <div className="flex items-center gap-2">
-                <code className="text-sm font-mono font-bold text-[#e63946] tracking-wider">
-                  {selectedTeam.invite_code}
-                </code>
-                <button
-                  onClick={() => {
-                    const msg = `「${selectedTeam.name}」のチームに参加しよう！\nLIVE SPOtCHアプリのチームタブで招待コード「${selectedTeam.invite_code}」を入力してね\nhttps://sports-streaming-app.vercel.app`;
-                    navigator.clipboard?.writeText(msg);
-                    toast.success("コピーしました");
-                  }}
-                  className="text-[10px] text-gray-400 hover:text-white border border-white/10 rounded px-2 py-0.5"
+          {isAdmin && selectedTeam.invite_code && (() => {
+            const inviteUrl = `https://sports-streaming-app.vercel.app/search?invite=${selectedTeam.invite_code}`;
+            const inviteMsg = `🏆 「${selectedTeam.name}」のチームに招待します！\n\n下記のリンクを開くと、招待コードが自動で入力されます 👇\n${inviteUrl}\n\n（招待コード: ${selectedTeam.invite_code}）\n\n— LIVE SPOtCH\nhttps://sports-streaming-app.vercel.app`;
+            return (
+              <div className="rounded-lg bg-[#111] border border-white/5 p-3 mb-4">
+                <p className="text-[10px] text-gray-500 mb-1">招待コード（下のボタンでメンバーに送信してください）</p>
+                <div className="flex items-center gap-2">
+                  <code className="text-sm font-mono font-bold text-[#e63946] tracking-wider">
+                    {selectedTeam.invite_code}
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard?.writeText(inviteMsg);
+                      toast.success("招待メッセージをコピーしました");
+                    }}
+                    className="text-[10px] text-gray-400 hover:text-white border border-white/10 rounded px-2 py-0.5"
+                  >
+                    メッセージをコピー
+                  </button>
+                </div>
+                <p className="mt-2 text-[10px] text-gray-600 leading-relaxed">
+                  コピーには「チーム名・参加用URL・招待コード」が含まれます。LINE・メール・SMS などに貼り付けて送信してください。
+                </p>
+                <a
+                  href={`https://line.me/R/msg/text/?${encodeURIComponent(inviteMsg)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 w-full flex items-center justify-center gap-2 bg-[#06C755] hover:bg-[#05b64c] text-white text-xs font-semibold py-2 rounded-md transition"
                 >
-                  コピー
-                </button>
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 5.82 2 10.5c0 2.67 1.35 5.04 3.46 6.62-.05.46-.31 1.72-.35 1.99-.06.36.13.36.27.26.1-.07 1.62-1.07 2.28-1.51.72.2 1.49.32 2.29.35L12 18.2c.08 0 .16 0 .24-.01 5.38-.18 9.76-3.93 9.76-8.49C22 5.82 17.52 2 12 2z"/></svg>
+                  LINEで招待を送る
+                </a>
               </div>
-              <a
-                href={`https://line.me/R/msg/text/?${encodeURIComponent(`「${selectedTeam.name}」のチームに参加しよう！\nLIVE SPOtCHアプリのチームタブで招待コード「${selectedTeam.invite_code}」を入力してね\nhttps://sports-streaming-app.vercel.app`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-2 w-full flex items-center justify-center gap-2 bg-[#06C755] hover:bg-[#05b64c] text-white text-xs font-semibold py-2 rounded-md transition"
-              >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 5.82 2 10.5c0 2.67 1.35 5.04 3.46 6.62-.05.46-.31 1.72-.35 1.99-.06.36.13.36.27.26.1-.07 1.62-1.07 2.28-1.51.72.2 1.49.32 2.29.35L12 18.2c.08 0 .16 0 .24-.01 5.38-.18 9.76-3.93 9.76-8.49C22 5.82 17.52 2 12 2z"/></svg>
-                LINEで招待を送る
-              </a>
-            </div>
-          )}
+            );
+          })()}
 
           {/* タブ */}
           <div className="flex gap-1 mb-4">

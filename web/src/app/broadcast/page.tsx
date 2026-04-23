@@ -823,7 +823,12 @@ function BroadcastPageInner() {
           {/* 左下: 共有コード */}
           <div className="absolute bottom-[calc(8px+env(safe-area-inset-bottom))] left-3 sm:bottom-4 sm:left-4">
             <button
-              onClick={() => copyToClipboard(shareCode, "code")}
+              onClick={() => {
+                const matchup = home && away ? `${home} vs ${away}` : "試合";
+                const tournamentLine = tournament ? `\n${tournament}` : "";
+                const msg = `【LIVE SPOtCH 試合配信中】${tournamentLine}\n${matchup}\n\n視聴はこちら 👇\n${shareUrl}\n\n共有コード: ${shareCode}`;
+                copyToClipboard(msg, "code");
+              }}
               className="flex items-center gap-2 bg-black/70 backdrop-blur-sm rounded px-2 sm:px-3 py-1.5 transition hover:bg-black/90"
             >
               <span className="text-[9px] text-gray-400">共有コード</span>
