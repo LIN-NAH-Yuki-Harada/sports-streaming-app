@@ -334,10 +334,11 @@ export default function LandingPage() {
             <p className="text-2xl sm:text-3xl font-black">¥300<span className="text-sm font-normal text-gray-400">/月</span></p>
             <p className="text-xs text-gray-400 mt-1">初回10分間は無料でお試し</p>
             <ul className="mt-3 space-y-1.5 text-[11px] sm:text-xs text-gray-400">
-              <li>✓ ライブ配信</li>
+              <li>✓ 無制限ライブ配信</li>
               <li>✓ スコアボード・オーバーレイ</li>
               <li>✓ LINE共有（ワンタップ）</li>
-              <li>✓ アーカイブ自動保存</li>
+              <li>✓ 限定公開の共有コード</li>
+              <li className="text-gray-600">🔜 リモコンでスコア操作（開発中）</li>
             </ul>
           </div>
           <div className="rounded-lg border border-white/20 bg-white/5 p-5 sm:p-6">
@@ -346,9 +347,10 @@ export default function LandingPage() {
             <p className="text-xs text-gray-400 mt-1">配信者プランの全機能 +</p>
             <ul className="mt-3 space-y-1.5 text-[11px] sm:text-xs text-gray-400">
               <li>✓ チーム管理・メンバー招待</li>
-              <li>✓ YouTube自動アーカイブ</li>
-              <li>✓ スケジュール管理</li>
-              <li className="text-gray-600">✓ AIハイライト自動生成（近日）</li>
+              <li>✓ 試合スケジュール管理</li>
+              <li>✓ 共有コードのチーム自動配布</li>
+              <li className="text-gray-600">🔜 YouTube 自動アーカイブ（開発中）</li>
+              <li className="text-gray-600">🔜 AI ハイライト自動生成（開発中）</li>
             </ul>
           </div>
         </div>

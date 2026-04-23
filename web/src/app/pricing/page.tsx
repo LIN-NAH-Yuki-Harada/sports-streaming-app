@@ -378,11 +378,12 @@ function PricingPageInner() {
             </p>
             <p className="text-xs text-gray-400 mt-1">保護者・コーチ向け</p>
             <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-400 flex-1">
-              <li>✓ ライブ配信</li>
-              <li>✓ スコアボード・オーバーレイ</li>
-              <li>✓ リモコンでスコア操作</li>
-              <li>✓ 限定公開の共有コード</li>
-              <li>✓ アーカイブ自動保存</li>
+              <li>✓ 無制限ライブ配信</li>
+              <li>✓ スコアボード・オーバーレイ（手動入力）</li>
+              <li>✓ 限定公開の共有コード発行</li>
+              <li>✓ LINE ワンタップ共有</li>
+              <li className="text-gray-500">🔜 リモコンでスコア操作（開発中）</li>
+              <li className="text-gray-500">🔜 アーカイブ自動保存（開発中）</li>
             </ul>
             {currentPlan === "broadcaster" ? (
               <button
@@ -427,10 +428,11 @@ function PricingPageInner() {
             <p className="text-xs text-gray-400 mt-1">チーム代表・コーチ向け</p>
             <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-400 flex-1">
               <li>✓ 配信者プランの全機能</li>
-              <li>✓ 大容量アーカイブストレージ</li>
-              <li>✓ スケジュール管理</li>
-              <li>✓ メンバー管理・自動共有</li>
-              <li className="text-gray-500">✓ YouTube自動アーカイブ（近日公開）</li>
+              <li>✓ チーム作成・メンバー招待</li>
+              <li>✓ 試合スケジュール管理</li>
+              <li>✓ 共有コードのチーム自動配布</li>
+              <li className="text-gray-500">🔜 YouTube 自動アーカイブ（開発中）</li>
+              <li className="text-gray-500">🔜 AI ハイライト自動生成（開発中）</li>
             </ul>
             {currentPlan === "team" ? (
               <button
