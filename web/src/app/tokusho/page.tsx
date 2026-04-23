@@ -37,10 +37,10 @@ export default function TokushoPage() {
             </Row>
 
             <Row label="電話番号">
-              【ここに連絡可能な電話番号を記載（例: 03-XXXX-XXXX）】
+              090-5884-8132
               <br />
               <span className="text-xs text-gray-500 mt-1 inline-block">
-                ご請求があった場合、遅滞なく開示いたします。営業時間: 平日 10:00〜18:00（土日祝を除く）
+                営業時間: 平日 10:00〜18:00（土日祝を除く）
               </span>
             </Row>
 
