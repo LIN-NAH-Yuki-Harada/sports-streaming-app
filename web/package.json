@@ -19,6 +19,7 @@
     "livekit-client": "^2.18.1",
     "livekit-server-sdk": "^2.15.1",
     "next": "16.2.3",
+    "qrcode.react": "^4.2.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "resend": "^6.12.2",

@@ -1,4 +1,25 @@
+import type { Metadata } from "next";
 import Image from "next/image";
+
+export const metadata: Metadata = {
+  title: "子どもの試合を、どこにいても見届ける",
+  description:
+    "保護者のスマホ1台で、スコアボード付きのTV中継品質に。低遅延0.25秒・限定公開でお子さまの試合を安心して家族に届ける、地域スポーツ専用のライブ配信「LIVE SPOtCH」。先着20チームはプロモコード『SPOT』で初月無料。",
+  alternates: { canonical: "/lp" },
+  openGraph: {
+    title: "子どもの試合を、どこにいても見届ける | LIVE SPOtCH",
+    description:
+      "保護者のスマホ1台でTV中継品質の配信。スコアボード・低遅延・限定公開で安心。先着20チーム初月無料コード『SPOT』。",
+    url: "/lp",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "子どもの試合を、どこにいても見届ける | LIVE SPOtCH",
+    description:
+      "保護者のスマホ1台でTV中継品質の配信。スコアボード・低遅延・限定公開で安心。先着20チーム初月無料コード『SPOT』。",
+  },
+};
 
 export default function LandingPage() {
   return (

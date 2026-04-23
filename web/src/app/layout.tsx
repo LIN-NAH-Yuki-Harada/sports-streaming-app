@@ -85,6 +85,34 @@ export const metadata: Metadata = {
   },
 };
 
+const ORGANIZATION_JSONLD = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "LIVE SPOtCH",
+  alternateName: ["LIVE SPOtCH", "ライブスポッチ"],
+  url: SITE_URL,
+  logo: `${SITE_URL}/icon-512.png`,
+  description: SITE_DESCRIPTION,
+  sameAs: [] as string[],
+  founder: {
+    "@type": "Organization",
+    name: "LIN-NAH株式会社",
+  },
+};
+
+const WEBSITE_JSONLD = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "LIVE SPOtCH",
+  url: SITE_URL,
+  inLanguage: "ja-JP",
+  potentialAction: {
+    "@type": "SearchAction",
+    target: `${SITE_URL}/discover?q={search_term_string}`,
+    "query-input": "required name=search_term_string",
+  },
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -105,6 +133,14 @@ export default function RootLayout({
         </AuthProvider>
         <Analytics />
         <SpeedInsights />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(ORGANIZATION_JSONLD) }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(WEBSITE_JSONLD) }}
+        />
       </body>
     </html>
   );
