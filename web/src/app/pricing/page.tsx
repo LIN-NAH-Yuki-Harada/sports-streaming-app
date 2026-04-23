@@ -376,14 +376,13 @@ function PricingPageInner() {
             <p className="text-2xl font-black">
               ¥300<span className="text-sm font-normal text-gray-400">/月</span>
             </p>
-            <p className="text-xs text-gray-400 mt-1">保護者・コーチ向け</p>
+            <p className="text-xs text-gray-400 mt-1">個人保護者向け・ライブ専用</p>
             <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-400 flex-1">
               <li>✓ 無制限ライブ配信</li>
               <li>✓ スコアボード・オーバーレイ（手動入力）</li>
               <li>✓ 限定公開の共有コード発行</li>
               <li>✓ LINE ワンタップ共有</li>
-              <li className="text-gray-500">🔜 リモコンでスコア操作（開発中）</li>
-              <li className="text-gray-500">🔜 アーカイブ自動保存（開発中）</li>
+              <li className="text-gray-500">※ アーカイブ保存はチームプラン限定</li>
             </ul>
             {currentPlan === "broadcaster" ? (
               <button
@@ -425,14 +424,16 @@ function PricingPageInner() {
             <p className="text-2xl font-black">
               ¥500<span className="text-sm font-normal text-gray-400">/月</span>
             </p>
-            <p className="text-xs text-gray-400 mt-1">チーム代表・コーチ向け</p>
+            <p className="text-xs text-gray-400 mt-1">チーム代表・コーチ向け・記録運用</p>
             <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-400 flex-1">
               <li>✓ 配信者プランの全機能</li>
               <li>✓ チーム作成・メンバー招待</li>
               <li>✓ 試合スケジュール管理</li>
               <li>✓ 共有コードのチーム自動配布</li>
-              <li className="text-gray-500">🔜 YouTube 自動アーカイブ（開発中）</li>
-              <li className="text-gray-500">🔜 AI ハイライト自動生成（開発中）</li>
+              <li className="text-gray-500">🔜 リモコンでスコア操作（別端末から）</li>
+              <li className="text-gray-500">🔜 アーカイブ自動保存（1ヶ月視聴可）</li>
+              <li className="text-gray-500">🔜 YouTube 自動アーカイブ（長期保存）</li>
+              <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
             </ul>
             {currentPlan === "team" ? (
               <button

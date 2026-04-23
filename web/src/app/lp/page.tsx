@@ -241,7 +241,7 @@ export default function LandingPage() {
           {[
             { title: "試合に行けない日に", desc: "仕事で応援に行けなくても、スマホでリアルタイム観戦。お子さまの活躍を見逃しません。", image: "/lp-scenes-office-dad.jpg" },
             { title: "おじいちゃん、おばあちゃんに", desc: "遠方に住む祖父母にもコードを送るだけ。孫の試合を一緒に応援。", image: "/lp-scenes-grandparents.jpg" },
-            { title: "チームの振り返りに", desc: "アーカイブを活用して、試合後の反省会や戦術確認に。コーチも選手も使えます。", image: "/lp-scenes-coach-review.jpg" },
+            { title: "チームの振り返りに", desc: "チームプランのアーカイブ自動保存で、試合後の反省会や戦術確認に。コーチも選手も使えます。", image: "/lp-scenes-coach-review.jpg" },
             { title: "大会・講演会の中継に", desc: "スポーツに限らず、学校行事や講演会の限定配信にも対応。", image: "/lp-scenes-school-event.jpg" },
           ].map((item) => (
             <div key={item.title} className="rounded-lg border border-white/5 overflow-hidden bg-[#0f0f0f]">
@@ -322,35 +322,38 @@ export default function LandingPage() {
             <p className="text-xs text-gray-500 mb-1">視聴する人</p>
             <p className="text-2xl sm:text-3xl font-black">無料</p>
             <p className="text-xs text-gray-500 mt-3 leading-relaxed">
-              共有コードで配信・アーカイブを視聴。
+              共有コードでライブ視聴。チームプラン配信はアーカイブも視聴可。
             </p>
             <ul className="mt-3 space-y-1.5 text-[11px] sm:text-xs text-gray-500">
               <li>✓ ライブ視聴</li>
-              <li>✓ 1ヶ月以内のアーカイブ視聴</li>
+              <li>✓ 1ヶ月以内のアーカイブ視聴（チームプラン配信のみ）</li>
             </ul>
           </div>
           <div className="rounded-lg border border-[#e63946]/30 bg-[#e63946]/5 p-5 sm:p-6">
             <p className="text-xs text-[#e63946] mb-1">配信者プラン</p>
             <p className="text-2xl sm:text-3xl font-black">¥300<span className="text-sm font-normal text-gray-400">/月</span></p>
-            <p className="text-xs text-gray-400 mt-1">初回10分間は無料でお試し</p>
+            <p className="text-xs text-gray-400 mt-1">個人保護者向け・ライブ専用</p>
             <ul className="mt-3 space-y-1.5 text-[11px] sm:text-xs text-gray-400">
               <li>✓ 無制限ライブ配信</li>
               <li>✓ スコアボード・オーバーレイ</li>
               <li>✓ LINE共有（ワンタップ）</li>
               <li>✓ 限定公開の共有コード</li>
-              <li className="text-gray-600">🔜 リモコンでスコア操作（開発中）</li>
+              <li className="text-gray-600">※ アーカイブ保存はチームプラン限定</li>
             </ul>
           </div>
           <div className="rounded-lg border border-white/20 bg-white/5 p-5 sm:p-6">
             <p className="text-xs text-white mb-1">チームプラン</p>
             <p className="text-2xl sm:text-3xl font-black">¥500<span className="text-sm font-normal text-gray-400">/月</span></p>
-            <p className="text-xs text-gray-400 mt-1">配信者プランの全機能 +</p>
+            <p className="text-xs text-gray-400 mt-1">チーム代表・コーチ向け・記録運用</p>
             <ul className="mt-3 space-y-1.5 text-[11px] sm:text-xs text-gray-400">
-              <li>✓ チーム管理・メンバー招待</li>
+              <li>✓ 配信者プランの全機能</li>
+              <li>✓ チーム作成・メンバー招待</li>
               <li>✓ 試合スケジュール管理</li>
               <li>✓ 共有コードのチーム自動配布</li>
-              <li className="text-gray-600">🔜 YouTube 自動アーカイブ（開発中）</li>
-              <li className="text-gray-600">🔜 AI ハイライト自動生成（開発中）</li>
+              <li className="text-gray-600">🔜 リモコンでスコア操作（別端末から）</li>
+              <li className="text-gray-600">🔜 アーカイブ自動保存（1ヶ月視聴可）</li>
+              <li className="text-gray-600">🔜 YouTube 自動アーカイブ（長期保存）</li>
+              <li className="text-gray-600">🔜 AI ハイライト自動生成</li>
             </ul>
           </div>
         </div>
@@ -372,6 +375,10 @@ export default function LandingPage() {
             {
               q: "10分の無料お試し時間が終わったらどうなりますか？",
               a: "そこまでは完全無料で配信できます。続けて配信したい場合は、配信者プラン（¥300/月）にご登録ください。いつでも解約できます。",
+            },
+            {
+              q: "配信者プランとチームプランの違いは？",
+              a: "配信者プラン（¥300/月）は個人保護者向けの「ライブ配信専用プラン」です。試合をリアルタイムで家族に届ける用途に最適。チームプラン（¥500/月）は記録運用向けで、アーカイブ自動保存・チーム管理・スケジュール管理・リモコン操作（開発中）・YouTube連携（開発中）が追加されます。",
             },
             {
               q: "複数の家族・親戚が同時に視聴できますか？",
