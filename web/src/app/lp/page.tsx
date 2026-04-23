@@ -455,9 +455,10 @@ export default function LandingPage() {
       <footer className="border-t border-white/5 py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-600">
           <p>© 2026 LIVE SPOtCH / LIN-NAH株式会社</p>
-          <div className="flex gap-4 sm:gap-6">
+          <div className="flex flex-wrap gap-4 sm:gap-6 justify-center">
             <a href="/terms" className="hover:text-gray-400 transition">利用規約</a>
             <a href="/privacy" className="hover:text-gray-400 transition">プライバシーポリシー</a>
+            <a href="/tokusho" className="hover:text-gray-400 transition">特定商取引法に基づく表示</a>
             <a href="/contact" className="hover:text-gray-400 transition">お問い合わせ</a>
           </div>
         </div>
