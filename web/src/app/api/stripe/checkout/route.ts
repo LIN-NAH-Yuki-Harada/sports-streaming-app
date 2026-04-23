@@ -67,7 +67,31 @@ export async function POST(request: Request) {
       .single();
 
     // ── Stripe 顧客の取得 or 作成 ──
-    let customerId = profile?.stripe_customer_id as string | null | undefined;
+    // profile の stripe_customer_id が TEST モード時代の ID や、Stripe 側で削除済みの場合、
+    // そのまま Checkout 作成すると "No such customer" になる。事前に retrieve して存在確認する。
+    let customerId: string | null = null;
+    const storedCustomerId = (profile?.stripe_customer_id as string | null | undefined) ?? null;
+    if (storedCustomerId) {
+      try {
+        const existing = await stripe.customers.retrieve(storedCustomerId);
+        // deleted customer は {deleted: true} で返ってくる
+        if (existing && !(existing as { deleted?: boolean }).deleted) {
+          customerId = storedCustomerId;
+        } else {
+          console.warn(
+            "[stripe/checkout] stored customer is deleted, recreating",
+            { storedCustomerId, userId: user.id }
+          );
+        }
+      } catch (e) {
+        // "No such customer" など、Stripe 側に存在しないケース（LIVE/TEST モード切替等）
+        console.warn(
+          "[stripe/checkout] stored customer not found in Stripe, recreating",
+          { storedCustomerId, userId: user.id, error: e instanceof Error ? e.message : String(e) }
+        );
+      }
+    }
+
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: user.email ?? undefined,
@@ -80,14 +104,11 @@ export async function POST(request: Request) {
         .update({ stripe_customer_id: customerId })
         .eq("id", user.id);
       if (updateErr) {
-        // Stripe 顧客は作成済みのためログに残し、手動リカバリを促す
+        // Stripe 顧客は作成済みのためログに残し、今回の Checkout は続行する
+        // （次回 Checkout 時にも retrieve が失敗→再作成されるが、決済自体はこの新 customerId で成立する）
         console.error(
-          "[stripe/checkout] customer created but DB update failed",
+          "[stripe/checkout] customer created but DB update failed (proceeding anyway)",
           { customerId, userId: user.id, error: updateErr.message }
-        );
-        return Response.json(
-          { error: "Billing setup failed. Please contact support." },
-          { status: 500 }
         );
       }
     }

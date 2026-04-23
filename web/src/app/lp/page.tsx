@@ -4,12 +4,12 @@ import Image from "next/image";
 export const metadata: Metadata = {
   title: "子どもの試合を、どこにいても見届ける",
   description:
-    "保護者のスマホ1台で、スコアボード付きのTV中継品質に。低遅延0.25秒・限定公開でお子さまの試合を安心して家族に届ける、地域スポーツ専用のライブ配信「LIVE SPOtCH」。先着20チームはプロモコード『SPOT』で初月無料。",
+    "保護者のスマホ1台で、スコアボード付きのTV中継品質に。低遅延0.25秒・限定公開でお子さまの試合を安心して家族に届ける、地域スポーツ専用のライブ配信「LIVE SPOtCH」。先着10チームはプロモコード『SPOT1W』で1週間無料トライアル。",
   alternates: { canonical: "/lp" },
   openGraph: {
     title: "子どもの試合を、どこにいても見届ける | LIVE SPOtCH",
     description:
-      "保護者のスマホ1台でTV中継品質の配信。スコアボード・低遅延・限定公開で安心。先着20チーム初月無料コード『SPOT』。",
+      "保護者のスマホ1台でTV中継品質の配信。スコアボード・低遅延・限定公開で安心。先着10チーム1週間無料コード『SPOT1W』。",
     url: "/lp",
     type: "website",
   },
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "子どもの試合を、どこにいても見届ける | LIVE SPOtCH",
     description:
-      "保護者のスマホ1台でTV中継品質の配信。スコアボード・低遅延・限定公開で安心。先着20チーム初月無料コード『SPOT』。",
+      "保護者のスマホ1台でTV中継品質の配信。スコアボード・低遅延・限定公開で安心。先着10チーム1週間無料コード『SPOT1W』。",
   },
 };
 
@@ -334,10 +334,11 @@ export default function LandingPage() {
             <p className="text-2xl sm:text-3xl font-black">¥300<span className="text-sm font-normal text-gray-400">/月</span></p>
             <p className="text-xs text-gray-400 mt-1">初回10分間は無料でお試し</p>
             <ul className="mt-3 space-y-1.5 text-[11px] sm:text-xs text-gray-400">
-              <li>✓ ライブ配信</li>
+              <li>✓ 無制限ライブ配信</li>
               <li>✓ スコアボード・オーバーレイ</li>
               <li>✓ LINE共有（ワンタップ）</li>
-              <li>✓ アーカイブ自動保存</li>
+              <li>✓ 限定公開の共有コード</li>
+              <li className="text-gray-600">🔜 リモコンでスコア操作（開発中）</li>
             </ul>
           </div>
           <div className="rounded-lg border border-white/20 bg-white/5 p-5 sm:p-6">
@@ -346,9 +347,10 @@ export default function LandingPage() {
             <p className="text-xs text-gray-400 mt-1">配信者プランの全機能 +</p>
             <ul className="mt-3 space-y-1.5 text-[11px] sm:text-xs text-gray-400">
               <li>✓ チーム管理・メンバー招待</li>
-              <li>✓ YouTube自動アーカイブ</li>
-              <li>✓ スケジュール管理</li>
-              <li className="text-gray-600">✓ AIハイライト自動生成（近日）</li>
+              <li>✓ 試合スケジュール管理</li>
+              <li>✓ 共有コードのチーム自動配布</li>
+              <li className="text-gray-600">🔜 YouTube 自動アーカイブ（開発中）</li>
+              <li className="text-gray-600">🔜 AI ハイライト自動生成（開発中）</li>
             </ul>
           </div>
         </div>
