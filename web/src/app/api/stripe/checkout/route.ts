@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { stripe, PRICE_IDS } from "@/lib/stripe";
+import { validatePromoCode } from "@/lib/promo";
 
 /**
  * Stripe Checkout Session を作成する
@@ -37,6 +38,20 @@ export async function POST(request: Request) {
     const priceId = PRICE_IDS[plan];
     if (!priceId) {
       return Response.json({ error: "Price ID not configured" }, { status: 500 });
+    }
+
+    // ── プロモコード検証（任意） ──
+    const rawPromoCode =
+      typeof body.promoCode === "string" ? body.promoCode : "";
+    let trialDays: number | null = null;
+    let normalizedPromoCode: string | null = null;
+    if (rawPromoCode.trim()) {
+      const promo = await validatePromoCode(rawPromoCode);
+      if (!promo.valid) {
+        return Response.json({ error: promo.error }, { status: 400 });
+      }
+      trialDays = promo.promo.trial_days;
+      normalizedPromoCode = promo.promo.code;
     }
 
     // ── プロフィール取得（Service Role で RLS をバイパス） ──
@@ -81,6 +96,19 @@ export async function POST(request: Request) {
     const origin = request.headers.get("origin") || new URL(request.url).origin;
 
     // ── Checkout Session 作成 ──
+    const subscriptionMetadata: Record<string, string> = {
+      supabase_user_id: user.id,
+      plan,
+    };
+    const sessionMetadata: Record<string, string> = {
+      supabase_user_id: user.id,
+      plan,
+    };
+    if (normalizedPromoCode) {
+      subscriptionMetadata.promo_code = normalizedPromoCode;
+      sessionMetadata.promo_code = normalizedPromoCode;
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
@@ -88,12 +116,13 @@ export async function POST(request: Request) {
       success_url: `${origin}/mypage?checkout=success`,
       cancel_url: `${origin}/mypage?checkout=cancel`,
       locale: "ja",
-      allow_promotion_codes: true,
-      // Webhookと紐づけるためのメタデータ
+      // プロモコード経由でない場合のみ、Stripe ネイティブのプロモコード入力欄を表示
+      allow_promotion_codes: normalizedPromoCode ? undefined : true,
       subscription_data: {
-        metadata: { supabase_user_id: user.id, plan },
+        metadata: subscriptionMetadata,
+        ...(trialDays !== null ? { trial_period_days: trialDays } : {}),
       },
-      metadata: { supabase_user_id: user.id, plan },
+      metadata: sessionMetadata,
     });
 
     return Response.json({ url: session.url });
