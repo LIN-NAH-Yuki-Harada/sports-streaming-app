@@ -12,13 +12,28 @@ function getSiteUrl(): string {
   return "";
 }
 
-export function AuthForm() {
+type AuthFormProps = {
+  /**
+   * ログイン・新規登録成功後の遷移先（Google OAuth と メール新規登録の確認メール両方で使う）。
+   * 省略時は `/mypage`。
+   */
+  redirectTo?: string;
+};
+
+export function AuthForm({ redirectTo }: AuthFormProps = {}) {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+
+  // redirectTo は「/pricing?promo=SPOT1W」等の相対パスで来ることもあるため、絶対URLに展開する
+  const successUrl = redirectTo
+    ? redirectTo.startsWith("http")
+      ? redirectTo
+      : `${getSiteUrl()}${redirectTo.startsWith("/") ? "" : "/"}${redirectTo}`
+    : `${getSiteUrl()}/mypage`;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,7 +58,7 @@ export function AuthForm() {
         email,
         password,
         options: {
-          emailRedirectTo: `${getSiteUrl()}/mypage`,
+          emailRedirectTo: successUrl,
         },
       });
       if (error) {
@@ -75,7 +90,7 @@ export function AuthForm() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${getSiteUrl()}/mypage`,
+        redirectTo: successUrl,
       },
     });
   }
