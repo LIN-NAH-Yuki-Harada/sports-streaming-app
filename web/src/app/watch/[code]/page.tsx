@@ -7,6 +7,9 @@ import { LiveKitViewer } from "@/components/livekit-video";
 import { Logo } from "@/components/logo";
 import { ShareButtons } from "@/components/share-buttons";
 
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
+
 export default function WatchPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
   const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
@@ -341,7 +344,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             url={
               typeof window !== "undefined"
                 ? window.location.href
-                : `https://sports-streaming-app.vercel.app/watch/${broadcast.share_code}`
+                : `${SITE_URL}/watch/${broadcast.share_code}`
             }
             title={`【試合配信${broadcast.status === "live" ? "中" : "アーカイブ"}】${broadcast.home_team} vs ${broadcast.away_team}`}
             description={

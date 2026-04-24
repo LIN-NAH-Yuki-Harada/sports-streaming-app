@@ -37,6 +37,9 @@ type Team = {
   team_members: TeamMember[];
 };
 
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
+
 const SPORT_EMOJI: Record<string, string> = {
   "サッカー": "⚽",
   "野球": "⚾",
@@ -406,8 +409,8 @@ function TeamPageInner() {
 
           {/* 招待コード */}
           {isAdmin && selectedTeam.invite_code && (() => {
-            const inviteUrl = `https://sports-streaming-app.vercel.app/search?invite=${selectedTeam.invite_code}`;
-            const inviteMsg = `🏆 「${selectedTeam.name}」のチームに招待します！\n\n下記のリンクを開くと、招待コードが自動で入力されます 👇\n${inviteUrl}\n\n（招待コード: ${selectedTeam.invite_code}）\n\n— LIVE SPOtCH\nhttps://sports-streaming-app.vercel.app`;
+            const inviteUrl = `${SITE_URL}/search?invite=${selectedTeam.invite_code}`;
+            const inviteMsg = `🏆 「${selectedTeam.name}」のチームに招待します！\n\n下記のリンクを開くと、招待コードが自動で入力されます 👇\n${inviteUrl}\n\n（招待コード: ${selectedTeam.invite_code}）\n\n— LIVE SPOtCH\n${SITE_URL}`;
             return (
               <div className="rounded-lg bg-[#111] border border-white/5 p-3 mb-4">
                 <p className="text-[10px] text-gray-500 mb-1">招待コード（下のボタンでメンバーに送信してください）</p>

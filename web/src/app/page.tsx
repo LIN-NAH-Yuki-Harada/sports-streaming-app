@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 
 const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://sports-streaming-app.vercel.app";
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
 
 const FAQ_ITEMS = [
   {
