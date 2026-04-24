@@ -20,13 +20,13 @@ export default function NotFound() {
       </p>
       <div className="mt-8 flex flex-col gap-3 w-full max-w-[240px]">
         <Link
-          href="/"
+          href="/discover"
           className="w-full bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold py-3 rounded-md transition"
         >
-          ホームに戻る
+          配信を探す
         </Link>
         <Link
-          href="/lp"
+          href="/"
           className="w-full border border-white/20 hover:bg-white/5 text-white text-sm font-semibold py-3 rounded-md transition"
         >
           LIVE SPOtCH について

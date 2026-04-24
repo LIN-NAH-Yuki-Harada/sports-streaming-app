@@ -3,7 +3,7 @@ import Link from "next/link";
 export function Logo({ className = "" }: { className?: string }) {
   return (
     <Link
-      href="/lp"
+      href="/"
       aria-label="LIVE SPOtCH サービス紹介へ"
       className={`inline-flex items-center gap-2 hover:opacity-80 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e63946] rounded-sm ${className}`}
     >

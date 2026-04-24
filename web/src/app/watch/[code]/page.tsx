@@ -237,7 +237,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
                   配信をはじめる（初回10分間無料）
                 </a>
                 <a
-                  href="/lp"
+                  href="/"
                   className="block w-full border border-white/10 text-gray-300 text-xs font-semibold py-2.5 rounded-md text-center hover:bg-white/5 transition"
                 >
                   LIVE SPOtCH について詳しく見る

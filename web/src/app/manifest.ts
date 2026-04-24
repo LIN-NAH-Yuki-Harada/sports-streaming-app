@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "LIVE SPOtCH",
     description:
       "子どもの部活・スポーツ少年団・ローカル大会を、保護者がスマホで配信できるUGC型スポーツライブ配信アプリ。",
-    start_url: "/",
+    start_url: "/discover",
     display: "standalone",
     background_color: "#000000",
     theme_color: "#e63946",

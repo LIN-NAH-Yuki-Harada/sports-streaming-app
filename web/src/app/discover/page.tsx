@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Logo } from "@/components/logo";
+import { ShareCodeInput, InstallGuide } from "@/components/home-extras";
 import { getAdminClient } from "@/lib/supabase-admin";
 import type { Broadcast } from "@/lib/database";
 
@@ -136,6 +137,12 @@ export default async function DiscoverPage() {
           </span>
         </div>
       </div>
+
+      {/* 共有コード入力 */}
+      <ShareCodeInput />
+
+      {/* ホーム画面追加ガイド */}
+      <InstallGuide />
 
       {/* LIVE 中 */}
       <section className="px-5 md:px-8 lg:px-10 pt-6">
@@ -299,7 +306,7 @@ export default async function DiscoverPage() {
               配信を始める
             </Link>
             <Link
-              href="/lp"
+              href="/"
               className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition"
             >
               サービス詳細

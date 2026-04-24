@@ -2,16 +2,15 @@
 
 import { usePathname } from "next/navigation";
 
-const FULL_WIDTH_PATHS = ["/lp"];
 const TEXT_PATHS = ["/terms", "/privacy", "/contact", "/reset-password"];
 const WIDE_PREFIXES = ["/search", "/schedule"];
 
 type Variant = "full" | "wide" | "normal" | "text";
 
 function getVariant(pathname: string): Variant {
-  if (FULL_WIDTH_PATHS.some((p) => pathname.startsWith(p))) return "full";
+  if (pathname === "/") return "full"; // LP はフル幅
   if (TEXT_PATHS.some((p) => pathname.startsWith(p))) return "text";
-  if (pathname === "/") return "wide";
+  if (pathname === "/discover") return "wide";
   if (WIDE_PREFIXES.some((p) => pathname.startsWith(p))) return "wide";
   return "normal";
 }
