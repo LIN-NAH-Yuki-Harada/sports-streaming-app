@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
@@ -39,9 +39,12 @@ function MyPageInner() {
   const [unlinkingYoutube, setUnlinkingYoutube] = useState(false);
 
   // YouTube連携後・決済後のリダイレクト処理
+  const handledCheckoutRef = useRef<string | null>(null);
+  const handledYoutubeRef = useRef<string | null>(null);
   useEffect(() => {
     const checkout = searchParams.get("checkout");
-    if (checkout === "success") {
+    if (checkout === "success" && handledCheckoutRef.current !== "success") {
+      handledCheckoutRef.current = "success";
       toast.info("決済が完了しました！プランを反映中です…");
       const t = setTimeout(() => {
         refreshProfile();
@@ -50,21 +53,25 @@ function MyPageInner() {
       router.replace("/mypage");
       return () => clearTimeout(t);
     }
-    if (checkout === "cancel") {
+    if (checkout === "cancel" && handledCheckoutRef.current !== "cancel") {
+      handledCheckoutRef.current = "cancel";
       toast.info("決済をキャンセルしました");
       router.replace("/mypage");
     }
     const youtube = searchParams.get("youtube");
-    if (youtube === "linked") {
+    if (youtube === "linked" && handledYoutubeRef.current !== "linked") {
+      handledYoutubeRef.current = "linked";
       refreshProfile();
       toast.success("YouTubeアカウントを連携しました！");
       router.replace("/mypage");
     }
-    if (youtube === "cancelled") {
+    if (youtube === "cancelled" && handledYoutubeRef.current !== "cancelled") {
+      handledYoutubeRef.current = "cancelled";
       toast.info("YouTube連携をキャンセルしました");
       router.replace("/mypage");
     }
-    if (youtube === "error") {
+    if (youtube === "error" && handledYoutubeRef.current !== "error") {
+      handledYoutubeRef.current = "error";
       toast.error("YouTube連携でエラーが発生しました");
       router.replace("/mypage");
     }
