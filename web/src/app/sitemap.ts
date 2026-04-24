@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 
 const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://sports-streaming-app.vercel.app";
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const lastModified = new Date();

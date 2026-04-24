@@ -28,7 +28,7 @@ export const viewport: Viewport = {
 };
 
 const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://sports-streaming-app.vercel.app";
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
 
 const SITE_DESCRIPTION =
   "子どもの部活・スポーツ少年団・ローカル大会を、保護者がスマホで配信。離れた家族や応援団が一緒に観戦できる、UGC型スポーツライブ配信プラットフォーム。";
