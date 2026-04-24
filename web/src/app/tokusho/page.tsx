@@ -50,10 +50,10 @@ export default function TokushoPage() {
 
             <Row label="URL">
               <a
-                href="https://sports-streaming-app.vercel.app/"
+                href="https://live-spotch.com/"
                 className="text-[#e63946] hover:underline"
               >
-                https://sports-streaming-app.vercel.app/
+                https://live-spotch.com/
               </a>
             </Row>
 
