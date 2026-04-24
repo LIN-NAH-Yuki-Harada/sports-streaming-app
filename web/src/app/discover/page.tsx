@@ -3,25 +3,17 @@ import Link from "next/link";
 import { Logo } from "@/components/logo";
 import { ShareCodeInput, InstallGuide } from "@/components/home-extras";
 import { getAdminClient } from "@/lib/supabase-admin";
+import { getServerUser } from "@/lib/supabase-server";
 import type { Broadcast } from "@/lib/database";
 
 export const metadata: Metadata = {
-  title: "配信を探す",
+  title: "ホーム",
   description:
-    "LIVE SPOtCH でいま配信中の地域スポーツ・部活・スポーツ少年団の試合一覧。参加チームも随時更新。視聴は完全無料、共有コード不要でオープンな試合を観戦できます。",
+    "LIVE SPOtCH のアプリホーム。共有コードでの視聴、あなたが配信した試合・所属チームの試合を一覧できます。",
   alternates: { canonical: "/discover" },
-  openGraph: {
-    title: "配信を探す | LIVE SPOtCH",
-    description:
-      "いま配信中の地域スポーツ・部活・スポーツ少年団の試合一覧。視聴は完全無料。",
-    url: "/discover",
-    type: "website",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "配信を探す | LIVE SPOtCH",
-    description:
-      "いま配信中の地域スポーツ・部活・スポーツ少年団の試合一覧。視聴は完全無料。",
+  robots: {
+    index: false,
+    follow: false,
   },
 };
 
@@ -42,68 +34,58 @@ const SPORT_EMOJI: Record<string, string> = {
   ハンドボール: "🤾",
 };
 
-async function fetchLive(): Promise<Broadcast[]> {
+async function fetchMyTeamIds(userId: string): Promise<string[]> {
   const supabase = getAdminClient();
   const { data, error } = await supabase
-    .from("broadcasts")
-    .select("*")
-    .eq("status", "live")
-    .order("started_at", { ascending: false })
-    .limit(20);
-  if (error) return [];
-  return (data as Broadcast[]) ?? [];
-}
-
-async function fetchRecentlyEnded(): Promise<Broadcast[]> {
-  const supabase = getAdminClient();
-  const now = new Date();
-  const since = new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString();
-  const { data, error } = await supabase
-    .from("broadcasts")
-    .select("*")
-    .eq("status", "ended")
-    .gte("started_at", since)
-    .order("started_at", { ascending: false })
-    .limit(12);
-  if (error) return [];
-  return (data as Broadcast[]) ?? [];
-}
-
-async function fetchTeams(): Promise<{ name: string; sport: string }[]> {
-  const supabase = getAdminClient();
-  const { data, error } = await supabase
-    .from("broadcasts")
-    .select("home_team, sport")
-    .order("started_at", { ascending: false })
-    .limit(200);
+    .from("team_members")
+    .select("team_id")
+    .eq("user_id", userId);
   if (error || !data) return [];
-  const seen = new Set<string>();
-  const result: { name: string; sport: string }[] = [];
-  for (const row of data) {
-    const name = (row as { home_team?: string | null }).home_team;
-    if (name && !seen.has(name)) {
-      seen.add(name);
-      result.push({
-        name,
-        sport: (row as { sport?: string }).sport ?? "その他",
-      });
-    }
-    if (result.length >= 40) break;
-  }
-  return result;
+  return data.map((r: { team_id: string }) => r.team_id);
 }
 
-function aggregateSports(broadcasts: Broadcast[]): {
-  sport: string;
-  count: number;
-}[] {
-  const map = new Map<string, number>();
-  for (const b of broadcasts) {
-    map.set(b.sport, (map.get(b.sport) ?? 0) + 1);
+async function fetchMyTeams(
+  teamIds: string[],
+): Promise<{ id: string; name: string; sport: string }[]> {
+  if (teamIds.length === 0) return [];
+  const supabase = getAdminClient();
+  const { data, error } = await supabase
+    .from("teams")
+    .select("id, name, sport")
+    .in("id", teamIds);
+  if (error || !data) return [];
+  return data as { id: string; name: string; sport: string }[];
+}
+
+/**
+ * 自分が配信した + 所属チームの配信 を取得（status で絞り込み）。
+ * 他人の配信は意図的に除外する（プライバシー保護）。
+ */
+async function fetchMyRelatedBroadcasts(
+  userId: string,
+  teamIds: string[],
+  status: "live" | "ended",
+  opts: { limit: number; since?: Date },
+): Promise<Broadcast[]> {
+  const supabase = getAdminClient();
+  let query = supabase
+    .from("broadcasts")
+    .select("*")
+    .eq("status", status)
+    .order("started_at", { ascending: false })
+    .limit(opts.limit);
+  if (opts.since) {
+    query = query.gte("started_at", opts.since.toISOString());
   }
-  return Array.from(map.entries())
-    .map(([sport, count]) => ({ sport, count }))
-    .sort((a, b) => b.count - a.count);
+  // broadcaster_id = 自分 OR team_id in 所属チーム
+  const orClauses: string[] = [`broadcaster_id.eq.${userId}`];
+  if (teamIds.length > 0) {
+    orClauses.push(`team_id.in.(${teamIds.join(",")})`);
+  }
+  query = query.or(orClauses.join(","));
+  const { data, error } = await query;
+  if (error) return [];
+  return (data as Broadcast[]) ?? [];
 }
 
 function formatTime(iso: string): string {
@@ -116,12 +98,21 @@ function formatTime(iso: string): string {
 }
 
 export default async function DiscoverPage() {
-  const [live, ended, teams] = await Promise.all([
-    fetchLive(),
-    fetchRecentlyEnded(),
-    fetchTeams(),
-  ]);
-  const sports = aggregateSports([...live, ...ended]);
+  const user = await getServerUser();
+
+  let live: Broadcast[] = [];
+  let ended: Broadcast[] = [];
+  let myTeams: { id: string; name: string; sport: string }[] = [];
+
+  if (user) {
+    const teamIds = await fetchMyTeamIds(user.id);
+    const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    [live, ended, myTeams] = await Promise.all([
+      fetchMyRelatedBroadcasts(user.id, teamIds, "live", { limit: 20 }),
+      fetchMyRelatedBroadcasts(user.id, teamIds, "ended", { limit: 12, since }),
+      fetchMyTeams(teamIds),
+    ]);
+  }
 
   return (
     <div>
@@ -132,188 +123,226 @@ export default async function DiscoverPage() {
       >
         <div className="flex items-center justify-between">
           <Logo />
-          <span className="text-xs text-gray-600">
-            {live.length} 件配信中
-          </span>
+          {user && (
+            <span className="text-xs text-gray-600">
+              あなたの試合 {live.length} 件配信中
+            </span>
+          )}
         </div>
       </div>
 
-      {/* 共有コード入力 */}
+      {/* 共有コード入力（常時表示） */}
       <ShareCodeInput />
 
-      {/* ホーム画面追加ガイド */}
+      {/* ホーム画面追加ガイド（常時、PWA モードでは非表示） */}
       <InstallGuide />
 
-      {/* LIVE 中 */}
-      <section className="px-5 md:px-8 lg:px-10 pt-6">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e63946] opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#e63946]" />
-          </span>
-          <h1 className="text-base font-bold text-gray-200">いま配信中</h1>
-        </div>
-
-        {live.length > 0 ? (
-          <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-            {live.map((b) => (
-              <Link
-                key={b.id}
-                href={`/watch/${b.share_code}`}
-                className="rounded-lg bg-[#111] border border-white/5 hover:border-[#e63946]/40 transition p-4 group"
+      {/* 未ログイン時の誘導 */}
+      {!user && (
+        <section className="px-5 md:px-8 lg:px-10 pt-8 pb-24">
+          <div className="rounded-xl bg-[#111] border border-white/5 p-5 md:p-6 text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-[#e63946]/10 flex items-center justify-center mb-3">
+              <svg
+                className="w-5 h-5 text-[#e63946]"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold truncate">
-                      <span className="mr-1.5">
-                        {SPORT_EMOJI[b.sport] ?? "🏆"}
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                />
+              </svg>
+            </div>
+            <p className="text-sm font-semibold text-gray-200">
+              ログインしてあなたの試合を表示
+            </p>
+            <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+              LIVE SPOtCH は限定公開サービスです。
+              <br />
+              ログインすると、あなたが配信した試合や所属チームの試合のみが表示されます。
+            </p>
+            <div className="mt-5 flex flex-col sm:flex-row gap-2 justify-center">
+              <Link
+                href="/mypage"
+                className="inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-6 py-2.5 rounded-md transition"
+              >
+                ログイン・新規登録
+              </Link>
+              <Link
+                href="/"
+                className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition"
+              >
+                サービス詳細
+              </Link>
+            </div>
+            <p className="mt-4 text-[10px] text-gray-600 leading-relaxed">
+              共有コードをお持ちの場合は、上のフォームにコードを入力して視聴できます（ログイン不要）
+            </p>
+          </div>
+        </section>
+      )}
+
+      {/* ログイン時のみ: 自分に関係する配信 */}
+      {user && (
+        <>
+          {/* LIVE 中（自分・所属チーム） */}
+          <section className="px-5 md:px-8 lg:px-10 pt-6">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e63946] opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#e63946]" />
+              </span>
+              <h1 className="text-base font-bold text-gray-200">
+                あなたに関係する配信（LIVE中）
+              </h1>
+            </div>
+
+            {live.length > 0 ? (
+              <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                {live.map((b) => (
+                  <Link
+                    key={b.id}
+                    href={`/watch/${b.share_code}`}
+                    className="rounded-lg bg-[#111] border border-white/5 hover:border-[#e63946]/40 transition p-4 group"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold truncate">
+                          <span className="mr-1.5">
+                            {SPORT_EMOJI[b.sport] ?? "🏆"}
+                          </span>
+                          {b.home_team} vs {b.away_team}
+                        </p>
+                        {b.tournament && (
+                          <p className="text-[11px] text-gray-500 truncate mt-0.5">
+                            {b.tournament}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="text-[10px] text-gray-600">
+                            {b.sport}
+                          </span>
+                          <span className="text-[10px] text-gray-600">
+                            開始 {formatTime(b.started_at)}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="shrink-0 bg-[#e63946] text-white text-[9px] font-black px-1.5 py-0.5 rounded tracking-wider">
+                        LIVE
                       </span>
-                      {b.home_team} vs {b.away_team}
-                    </p>
-                    {b.tournament && (
-                      <p className="text-[11px] text-gray-500 truncate mt-0.5">
-                        {b.tournament}
+                    </div>
+                    <div className="mt-3 flex items-center justify-between pt-2 border-t border-white/5">
+                      <span className="tabular-nums text-base font-black">
+                        {b.home_score}{" "}
+                        <span className="text-gray-600 text-sm">-</span>{" "}
+                        {b.away_score}
+                      </span>
+                      <span className="text-[10px] text-[#e63946] group-hover:text-white transition">
+                        視聴する →
+                      </span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg bg-[#111] border border-white/5 px-4 py-8 text-center">
+                <p className="text-sm text-gray-500">
+                  現在 LIVE 中の試合はありません
+                </p>
+                <p className="text-[11px] text-gray-700 mt-1">
+                  あなた・所属チームの配信が始まるとここに表示されます
+                </p>
+              </div>
+            )}
+          </section>
+
+          {/* 直近終了した試合（自分・所属チーム） */}
+          {ended.length > 0 && (
+            <section className="px-5 md:px-8 lg:px-10 pt-10">
+              <h2 className="text-sm font-bold text-gray-300 mb-3">
+                直近終了した試合（48時間以内）
+              </h2>
+              <div className="grid gap-2 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                {ended.map((b) => (
+                  <div
+                    key={b.id}
+                    className="rounded-md bg-[#0f0f0f] border border-white/5 px-3 py-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium truncate">
+                        <span className="mr-1">
+                          {SPORT_EMOJI[b.sport] ?? "🏆"}
+                        </span>
+                        {b.home_team} vs {b.away_team}
                       </p>
-                    )}
-                    <div className="flex items-center gap-2 mt-2">
-                      <span className="text-[10px] text-gray-600">
-                        {b.sport}
+                      <span className="shrink-0 text-[9px] text-gray-600 font-bold">
+                        終了
                       </span>
-                      <span className="text-[10px] text-gray-600">
-                        開始 {formatTime(b.started_at)}
+                    </div>
+                    <div className="flex items-center justify-between mt-1.5">
+                      <span className="text-[10px] text-gray-600 tabular-nums">
+                        {b.home_score} - {b.away_score}
+                      </span>
+                      <span className="text-[10px] text-gray-700">
+                        {formatTime(b.started_at)}
                       </span>
                     </div>
                   </div>
-                  <span className="shrink-0 bg-[#e63946] text-white text-[9px] font-black px-1.5 py-0.5 rounded tracking-wider">
-                    LIVE
-                  </span>
-                </div>
-                <div className="mt-3 flex items-center justify-between pt-2 border-t border-white/5">
-                  <span className="tabular-nums text-base font-black">
-                    {b.home_score}{" "}
-                    <span className="text-gray-600 text-sm">-</span>{" "}
-                    {b.away_score}
-                  </span>
-                  <span className="text-[10px] text-[#e63946] group-hover:text-white transition">
-                    視聴する →
-                  </span>
-                </div>
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-lg bg-[#111] border border-white/5 px-4 py-8 text-center">
-            <p className="text-sm text-gray-500">
-              現在ライブ配信中の試合はありません
-            </p>
-            <p className="text-[11px] text-gray-700 mt-1">
-              配信が始まるとここに表示されます
-            </p>
-          </div>
-        )}
-      </section>
-
-      {/* 直近終了した試合 */}
-      {ended.length > 0 && (
-        <section className="px-5 md:px-8 lg:px-10 pt-10">
-          <h2 className="text-sm font-bold text-gray-300 mb-3">
-            直近終了した試合（48時間以内）
-          </h2>
-          <div className="grid gap-2 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-            {ended.map((b) => (
-              <div
-                key={b.id}
-                className="rounded-md bg-[#0f0f0f] border border-white/5 px-3 py-2.5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium truncate">
-                    <span className="mr-1">
-                      {SPORT_EMOJI[b.sport] ?? "🏆"}
-                    </span>
-                    {b.home_team} vs {b.away_team}
-                  </p>
-                  <span className="shrink-0 text-[9px] text-gray-600 font-bold">
-                    終了
-                  </span>
-                </div>
-                <div className="flex items-center justify-between mt-1.5">
-                  <span className="text-[10px] text-gray-600 tabular-nums">
-                    {b.home_score} - {b.away_score}
-                  </span>
-                  <span className="text-[10px] text-gray-700">
-                    {formatTime(b.started_at)}
-                  </span>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </section>
-      )}
+            </section>
+          )}
 
-      {/* 対応スポーツ分布 */}
-      {sports.length > 0 && (
-        <section className="px-5 md:px-8 lg:px-10 pt-10">
-          <h2 className="text-sm font-bold text-gray-300 mb-3">
-            配信されたスポーツ
-          </h2>
-          <div className="flex flex-wrap gap-2">
-            {sports.map((s) => (
-              <span
-                key={s.sport}
-                className="text-xs text-gray-400 bg-white/5 px-3 py-1.5 rounded-md"
-              >
-                {SPORT_EMOJI[s.sport] ?? "🏆"} {s.sport}{" "}
-                <span className="text-gray-600">({s.count})</span>
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
+          {/* 所属チーム */}
+          {myTeams.length > 0 && (
+            <section className="px-5 md:px-8 lg:px-10 pt-10 pb-12">
+              <h2 className="text-sm font-bold text-gray-300 mb-3">
+                あなたのチーム {myTeams.length} 件
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {myTeams.map((team) => (
+                  <Link
+                    key={team.id}
+                    href="/search"
+                    className="text-xs text-gray-400 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-md transition"
+                  >
+                    {SPORT_EMOJI[team.sport] ?? "🏆"} {team.name}
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
 
-      {/* 参加チーム */}
-      {teams.length > 0 && (
-        <section className="px-5 md:px-8 lg:px-10 pt-10 pb-12">
-          <h2 className="text-sm font-bold text-gray-300 mb-3">
-            参加チーム {teams.length} 件
-          </h2>
-          <div className="flex flex-wrap gap-2">
-            {teams.map((team) => (
-              <span
-                key={team.name}
-                className="text-xs text-gray-500 bg-white/5 px-3 py-1.5 rounded-md"
-              >
-                {SPORT_EMOJI[team.sport] ?? "🏆"} {team.name}
-              </span>
-            ))}
-          </div>
-        </section>
+          {/* CTA */}
+          <section className="px-5 md:px-8 lg:px-10 pb-24">
+            <div className="rounded-xl bg-gradient-to-br from-[#e63946]/20 via-[#111] to-[#111] border border-[#e63946]/30 p-6 text-center">
+              <p className="text-base font-bold mb-1">
+                あなたのチームも配信しませんか？
+              </p>
+              <p className="text-xs text-gray-400 leading-relaxed max-w-md mx-auto">
+                保護者のスマホ1台で TV 中継品質のライブ配信。初回10分間は無料でお試しいただけます。
+              </p>
+              <div className="mt-4 flex flex-col sm:flex-row gap-2 justify-center">
+                <Link
+                  href="/broadcast"
+                  className="inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-6 py-2.5 rounded-md transition"
+                >
+                  配信を始める
+                </Link>
+                <Link
+                  href="/"
+                  className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition"
+                >
+                  サービス詳細
+                </Link>
+              </div>
+            </div>
+          </section>
+        </>
       )}
-
-      {/* CTA */}
-      <section className="px-5 md:px-8 lg:px-10 pb-24">
-        <div className="rounded-xl bg-gradient-to-br from-[#e63946]/20 via-[#111] to-[#111] border border-[#e63946]/30 p-6 text-center">
-          <p className="text-base font-bold mb-1">
-            あなたのチームも配信しませんか？
-          </p>
-          <p className="text-xs text-gray-400 leading-relaxed max-w-md mx-auto">
-            保護者のスマホ1台で TV 中継品質のライブ配信。初回10分間は無料でお試しいただけます。
-          </p>
-          <div className="mt-4 flex flex-col sm:flex-row gap-2 justify-center">
-            <Link
-              href="/broadcast"
-              className="inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-6 py-2.5 rounded-md transition"
-            >
-              配信を始める
-            </Link>
-            <Link
-              href="/"
-              className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition"
-            >
-              サービス詳細
-            </Link>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }
