@@ -102,6 +102,13 @@ export function useStageFullscreen<T extends HTMLElement = HTMLDivElement>(
       const video = stage.querySelector("video") as IOSVideoElement | null;
       if (video?.webkitEnterFullscreen && video.readyState >= 2) {
         try {
+          // iOS は webkitendfullscreen で video が一時停止状態になる。
+          // 戻った瞬間に play() を呼んでストリーム再生を継続させる。
+          const onEnd = () => {
+            video.removeEventListener("webkitendfullscreen", onEnd);
+            video.play().catch(() => {});
+          };
+          video.addEventListener("webkitendfullscreen", onEnd, { once: true });
           video.webkitEnterFullscreen();
           return;
         } catch {}

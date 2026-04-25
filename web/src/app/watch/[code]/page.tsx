@@ -18,6 +18,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [notFound, setNotFound] = useState(false);
   const [viewerToken, setViewerToken] = useState<string | null>(null);
   const [isWatching, setIsWatching] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
   const { stageRef, isFullscreen, isFakeFullscreen, toggleFullscreen } =
     useStageFullscreen<HTMLDivElement>();
 
@@ -34,6 +35,32 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     }
     fetchBroadcast();
   }, [code]);
+
+  // 配信時間（経過秒数）を 1 秒ごとに更新
+  useEffect(() => {
+    if (!broadcast?.started_at) {
+      setElapsedSeconds(null);
+      return;
+    }
+    const startedAtMs = new Date(broadcast.started_at).getTime();
+    if (Number.isNaN(startedAtMs)) {
+      setElapsedSeconds(null);
+      return;
+    }
+    const isLiveBroadcast = broadcast.status === "live";
+    const endedAtMs = broadcast.ended_at
+      ? new Date(broadcast.ended_at).getTime()
+      : null;
+
+    function compute() {
+      const reference = isLiveBroadcast ? Date.now() : (endedAtMs ?? Date.now());
+      setElapsedSeconds(Math.max(0, Math.floor((reference - startedAtMs) / 1000)));
+    }
+    compute();
+    if (!isLiveBroadcast) return;
+    const interval = setInterval(compute, 1000);
+    return () => clearInterval(interval);
+  }, [broadcast?.started_at, broadcast?.ended_at, broadcast?.status]);
 
   // リアルタイム更新: Supabase Realtime でスコア変更を受信
   useEffect(() => {
@@ -294,6 +321,20 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
           )}
         </div>
 
+        {/* 左下: 配信時間 */}
+        {elapsedSeconds !== null && (
+          <div
+            className="absolute left-3 z-[2] flex items-center gap-1 bg-black/70 backdrop-blur-sm rounded px-2 py-1 text-[10px] sm:text-xs tabular-nums font-medium text-white"
+            style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}
+          >
+            <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="9" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2" />
+            </svg>
+            {formatElapsed(elapsedSeconds)}
+          </div>
+        )}
+
         {/* 右下: 全画面ボタン（視聴中のみ表示） */}
         {isWatching && viewerToken && (
           <button
@@ -358,4 +399,14 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
 
     </div>
   );
+}
+
+function formatElapsed(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  if (h > 0) return `${h}:${mm}:${ss}`;
+  return `${mm}:${ss}`;
 }
