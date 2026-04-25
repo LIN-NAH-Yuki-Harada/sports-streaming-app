@@ -240,13 +240,15 @@ function BroadcastPageInner() {
     pointLabel,
   };
 
-  // 配信中ステージの全画面化（Safari URL バー・タブバーを隠して画面を最大化）
+  // 配信中ステージの全画面化（Safari URL バー・タブバーを隠して画面を最大化）。
+  // 配信ページの主役は canvas で video は隠し source なので、video 全画面フォールバックは
+  // 無効化する（iPhone Safari では Fake Fullscreen にフォールバック）。
   const {
     stageRef: liveStageRef,
     isFullscreen: isLiveFullscreen,
     isFakeFullscreen: isLiveFakeFullscreen,
     toggleFullscreen: toggleLiveFullscreen,
-  } = useStageFullscreen<HTMLDivElement>();
+  } = useStageFullscreen<HTMLDivElement>({ allowVideoFallback: false });
 
   function getScreen(): Screen {
     if (!user) return "login";

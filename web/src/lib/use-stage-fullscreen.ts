@@ -9,16 +9,35 @@ type FullscreenDocument = Document & {
   webkitFullscreenElement?: Element | null;
   webkitExitFullscreen?: () => Promise<void> | void;
 };
+type IOSVideoElement = HTMLVideoElement & {
+  webkitEnterFullscreen?: () => void;
+};
+
+type Options = {
+  /**
+   * iPhone Safari 等で要素単位 Fullscreen API が使えないとき、
+   * ステージ内の `<video>` 要素に対して `webkitEnterFullscreen()` を呼ぶ。
+   * デフォルト true（視聴ページ向け）。配信ページのようにステージの主役が
+   * canvas の場合は false にして、Fake Fullscreen に直接フォールバックする。
+   */
+  allowVideoFallback?: boolean;
+};
 
 /**
  * ステージ要素を全画面化するフック。
  *
- * 要素単位の Fullscreen API が使える環境（PC Chrome, Android Chrome, iPad Safari 16.4+）
- * ではネイティブ全画面、使えない環境（iPhone Safari 等）ではフェイク全画面
- * (`fixed inset-0 z-50`) にフォールバックする。どちらの経路でも、ステージ内に置いた
- * オーバーレイ（スコアボード等）が表示され続ける。
+ * 試行順序:
+ *   1. element.requestFullscreen() — PC Chrome, Android Chrome, iPad Safari 16.4+
+ *   2. element.webkitRequestFullscreen() — 旧プレフィックス
+ *   3. video.webkitEnterFullscreen() — iPhone Safari, iPad Safari < 16.4
+ *      （`allowVideoFallback=true` のときのみ。スコアボードが映像に焼き込まれているので
+ *       iOS ネイティブ動画プレイヤーでも見える）
+ *   4. Fake Fullscreen — 上記すべてが使えない or 失敗した場合
  */
-export function useStageFullscreen<T extends HTMLElement = HTMLDivElement>() {
+export function useStageFullscreen<T extends HTMLElement = HTMLDivElement>(
+  options: Options = {},
+) {
+  const { allowVideoFallback = true } = options;
   const stageRef = useRef<T | null>(null);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [isFakeFullscreen, setIsFakeFullscreen] = useState(false);
@@ -77,7 +96,19 @@ export function useStageFullscreen<T extends HTMLElement = HTMLDivElement>() {
       }
     } catch {}
 
-    // フォールバック: フェイク全画面
+    // iPhone Safari: 要素単位 Fullscreen API が使えないので video 単独で全画面化。
+    // スコアボードは映像に焼き込み済みなので iOS ネイティブ動画プレイヤーでも見える。
+    if (allowVideoFallback) {
+      const video = stage.querySelector("video") as IOSVideoElement | null;
+      if (video?.webkitEnterFullscreen && video.readyState >= 2) {
+        try {
+          video.webkitEnterFullscreen();
+          return;
+        } catch {}
+      }
+    }
+
+    // 最終フォールバック: フェイク全画面（CSS）
     setIsFakeFullscreen(true);
   }
 
