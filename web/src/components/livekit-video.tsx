@@ -11,6 +11,7 @@ import {
 } from "@livekit/components-react";
 import { Track, ConnectionState } from "livekit-client";
 import { CompositeBroadcasterRenderer } from "@/components/composite-broadcaster-renderer";
+import { useWakeLock } from "@/lib/use-wake-lock";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import type { BroadcastResolution } from "@/lib/user-agent";
 
@@ -69,18 +70,8 @@ function BroadcasterRenderer({
     prevState.current = connectionState;
   }, [connectionState, onConnected, onDisconnected]);
 
-  // 画面スリープ防止
-  useEffect(() => {
-    let wakeLock: WakeLockSentinel | null = null;
-    if ("wakeLock" in navigator) {
-      navigator.wakeLock.request("screen").then((wl) => {
-        wakeLock = wl;
-      }).catch(() => {});
-    }
-    return () => {
-      wakeLock?.release();
-    };
-  }, []);
+  // 画面スリープ防止（visibilitychange で自動再取得）
+  useWakeLock(true);
 
   const cameraTrack = tracks.find(
     (t) => t.source === Track.Source.Camera && t.publication?.track

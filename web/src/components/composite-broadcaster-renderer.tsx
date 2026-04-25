@@ -9,6 +9,7 @@ import {
 import { ConnectionState, Track, type LocalTrackPublication } from "livekit-client";
 import { useReconnectDuration } from "@/components/livekit-video";
 import { useCompositeBroadcastTrack } from "@/lib/use-composite-broadcast-track";
+import { useWakeLock } from "@/lib/use-wake-lock";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import type { BroadcastResolution } from "@/lib/user-agent";
 
@@ -61,21 +62,8 @@ export function CompositeBroadcasterRenderer({
     prevConn.current = connectionState;
   }, [connectionState, onConnected, onDisconnected]);
 
-  // 画面スリープ防止
-  useEffect(() => {
-    let wakeLock: WakeLockSentinel | null = null;
-    if ("wakeLock" in navigator) {
-      navigator.wakeLock
-        .request("screen")
-        .then((wl) => {
-          wakeLock = wl;
-        })
-        .catch(() => {});
-    }
-    return () => {
-      wakeLock?.release();
-    };
-  }, []);
+  // 画面スリープ防止（visibilitychange で自動再取得）
+  useWakeLock(true);
 
   // Connected + 合成トラック準備完了で publish
   useEffect(() => {
