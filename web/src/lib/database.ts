@@ -64,7 +64,7 @@ export async function getProfile(userId: string): Promise<Profile | null> {
 
 export async function updateProfile(
   userId: string,
-  updates: Partial<Pick<Profile, "display_name">>
+  updates: Partial<Pick<Profile, "display_name" | "avatar_url">>
 ): Promise<Profile | null> {
   const supabase = createClient();
   const { data, error } = await supabase
