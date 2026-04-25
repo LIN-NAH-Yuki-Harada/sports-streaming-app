@@ -11,7 +11,7 @@ import {
 } from "@livekit/components-react";
 import { Track, ConnectionState, AudioPresets } from "livekit-client";
 import { CompositeBroadcasterRenderer } from "@/components/composite-broadcaster-renderer";
-import { useWakeLock } from "@/lib/use-wake-lock";
+import { BroadcastHealthBadges } from "@/components/broadcast-health-badges";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import type { BroadcastResolution } from "@/lib/user-agent";
 
@@ -70,8 +70,7 @@ function BroadcasterRenderer({
     prevState.current = connectionState;
   }, [connectionState, onConnected, onDisconnected]);
 
-  // 画面スリープ防止（visibilitychange で自動再取得）
-  useWakeLock(true);
+  // 画面スリープ防止 + 電池警告は BroadcastHealthBadges 内で取得・保持する。
 
   const cameraTrack = tracks.find(
     (t) => t.source === Track.Source.Camera && t.publication?.track
@@ -145,6 +144,9 @@ function BroadcasterRenderer({
           <span className="text-[10px] text-gray-300 font-medium tabular-nums">{viewerCount}</span>
         </div>
       )}
+
+      {/* 配信ヘルスバッジ（Wake Lock 失敗・電池残少の警告。接続中のみ表示） */}
+      {connectionState === ConnectionState.Connected && <BroadcastHealthBadges />}
     </>
   );
 }
