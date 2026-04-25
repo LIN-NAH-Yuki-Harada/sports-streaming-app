@@ -18,6 +18,8 @@ import {
   type Broadcast,
   type Team,
 } from "@/lib/database";
+import { pickBroadcastResolution } from "@/lib/user-agent";
+import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 
 const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
 
@@ -214,6 +216,28 @@ function BroadcastPageInner() {
   }
 
   const pointLabel = getPointLabel();
+
+  // スコアボード焼き込み: URL に ?burn=1 を付けると映像に合成して配信する。
+  // デフォルトは false（既存パス）。実機検証が完了したらデフォルトを true に切り替える。
+  const burnScoreboard = searchParams.get("burn") === "1";
+  const broadcastResolutionRef = useRef<ReturnType<typeof pickBroadcastResolution> | null>(null);
+  if (broadcastResolutionRef.current === null) {
+    broadcastResolutionRef.current = pickBroadcastResolution();
+  }
+  const broadcastResolution = broadcastResolutionRef.current;
+
+  const scoreboardState: ScoreboardState = {
+    home_team: home || "HOME",
+    away_team: away || "AWAY",
+    home_score: homeScore,
+    away_score: awayScore,
+    home_sets: homeSets,
+    away_sets: awaySets,
+    period: currentPeriod,
+    tournament: tournament || null,
+    sport,
+    pointLabel,
+  };
 
   function getScreen(): Screen {
     if (!user) return "login";
@@ -639,6 +663,9 @@ function BroadcastPageInner() {
                   setLivekitError("映像配信でエラーが発生しました。ページを再読み込みしてください。");
                 }
               }}
+              burnScoreboard={burnScoreboard}
+              scoreboardState={scoreboardState}
+              broadcastResolution={broadcastResolution}
             />
           ) : livekitError ? (
             <div className="absolute inset-0 flex items-center justify-center px-6">
@@ -663,37 +690,39 @@ function BroadcastPageInner() {
             </div>
           )}
 
-          {/* 左上: スコアボード・オーバーレイ */}
-          <div className="absolute top-3 left-3 sm:top-4 sm:left-4 flex flex-col items-start gap-1">
-            <div className="flex items-center bg-black/70 backdrop-blur-sm rounded overflow-hidden text-[10px] sm:text-xs">
-              <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-white/10 flex items-center gap-1.5">
-                <span className="font-bold">{home}</span>
-                {(homeSets > 0 || awaySets > 0) && (
-                  <span className="text-[8px] text-yellow-400 font-bold">{homeSets}</span>
-                )}
+          {/* 左上: スコアボード・オーバーレイ（焼き込み時は canvas 内に同じ内容を描画するので非表示） */}
+          {!burnScoreboard && (
+            <div className="absolute top-3 left-3 sm:top-4 sm:left-4 flex flex-col items-start gap-1">
+              <div className="flex items-center bg-black/70 backdrop-blur-sm rounded overflow-hidden text-[10px] sm:text-xs">
+                <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-white/10 flex items-center gap-1.5">
+                  <span className="font-bold">{home}</span>
+                  {(homeSets > 0 || awaySets > 0) && (
+                    <span className="text-[8px] text-yellow-400 font-bold">{homeSets}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-0.5 px-2 sm:px-3 py-1 sm:py-1.5 bg-[#e63946]">
+                  <span className="font-black tabular-nums">{homeScore}</span>
+                  <span className="text-[8px] text-white/60">-</span>
+                  <span className="font-black tabular-nums">{awayScore}</span>
+                </div>
+                <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-white/10 flex items-center gap-1.5">
+                  {(homeSets > 0 || awaySets > 0) && (
+                    <span className="text-[8px] text-yellow-400 font-bold">{awaySets}</span>
+                  )}
+                  <span className="font-bold">{away}</span>
+                </div>
+                <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-black/60">
+                  <span className="tabular-nums font-medium">{currentPeriod}</span>
+                </div>
               </div>
-              <div className="flex items-center gap-0.5 px-2 sm:px-3 py-1 sm:py-1.5 bg-[#e63946]">
-                <span className="font-black tabular-nums">{homeScore}</span>
-                <span className="text-[8px] text-white/60">-</span>
-                <span className="font-black tabular-nums">{awayScore}</span>
-              </div>
-              <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-white/10 flex items-center gap-1.5">
-                {(homeSets > 0 || awaySets > 0) && (
-                  <span className="text-[8px] text-yellow-400 font-bold">{awaySets}</span>
-                )}
-                <span className="font-bold">{away}</span>
-              </div>
-              <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-black/60">
-                <span className="tabular-nums font-medium">{currentPeriod}</span>
-              </div>
+              {/* セットポイント・マッチポイント表示 */}
+              {pointLabel && (
+                <div className="bg-yellow-500 text-black px-2 py-0.5 rounded text-[9px] font-bold animate-pulse">
+                  {pointLabel}
+                </div>
+              )}
             </div>
-            {/* セットポイント・マッチポイント表示 */}
-            {pointLabel && (
-              <div className="bg-yellow-500 text-black px-2 py-0.5 rounded text-[9px] font-bold animate-pulse">
-                {pointLabel}
-              </div>
-            )}
-          </div>
+          )}
 
           {/* スコア操作パネル — 縦画面では2段構成 */}
           <div className="absolute bottom-[calc(12px+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-sm rounded-lg px-2 sm:px-3 py-2 max-w-[95vw]">

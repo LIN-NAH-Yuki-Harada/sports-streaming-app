@@ -10,9 +10,12 @@ import {
   useParticipants,
 } from "@livekit/components-react";
 import { Track, ConnectionState } from "livekit-client";
+import { CompositeBroadcasterRenderer } from "@/components/composite-broadcaster-renderer";
+import type { ScoreboardState } from "@/lib/scoreboard-canvas";
+import type { BroadcastResolution } from "@/lib/user-agent";
 
 // Reconnecting 状態の経過秒数を計測するフック
-function useReconnectDuration(connectionState: ConnectionState): number {
+export function useReconnectDuration(connectionState: ConnectionState): number {
   const [seconds, setSeconds] = useState(0);
   const startRef = useRef<number | null>(null);
 
@@ -265,13 +268,53 @@ export function LiveKitBroadcaster({
   onConnected,
   onDisconnected,
   onError,
+  burnScoreboard = false,
+  scoreboardState,
+  broadcastResolution,
 }: {
   token: string;
   serverUrl: string;
   onConnected?: () => void;
   onDisconnected?: () => void;
   onError?: (error: Error) => void;
+  burnScoreboard?: boolean;
+  scoreboardState?: ScoreboardState;
+  broadcastResolution?: BroadcastResolution;
 }) {
+  // 焼き込みモード: カメラ + スコアを canvas 合成してから publish
+  if (burnScoreboard && scoreboardState && broadcastResolution) {
+    return (
+      <div style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+        <LiveKitRoom
+          serverUrl={serverUrl}
+          token={token}
+          connect={true}
+          video={false}
+          audio={false}
+          onError={onError}
+          options={{
+            adaptiveStream: true,
+            dynacast: true,
+          }}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+          }}
+        >
+          <CompositeBroadcasterRenderer
+            state={scoreboardState}
+            targetResolution={broadcastResolution}
+            onConnected={onConnected}
+            onDisconnected={onDisconnected}
+          />
+        </LiveKitRoom>
+      </div>
+    );
+  }
+
+  // 既存経路: LiveKit 自動 publish + CSS オーバーレイ（視聴者側）
   return (
     <div style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
       <LiveKitRoom

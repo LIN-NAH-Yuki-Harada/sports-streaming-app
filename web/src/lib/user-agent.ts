@@ -40,3 +40,31 @@ export function detectInAppBrowser(ua?: string): InAppBrowserInfo {
     appName,
   };
 }
+
+export type BroadcastResolution = {
+  width: number;
+  height: number;
+  frameRate: number;
+};
+
+// Canvas 合成配信の解像度を、端末性能に応じて選ぶ。
+// 旧 iOS（13 以下）や低コア数端末では 720p にフォールバックして CPU 負荷を抑える。
+export function pickBroadcastResolution(): BroadcastResolution {
+  if (typeof navigator === "undefined") {
+    return { width: 1920, height: 1080, frameRate: 30 };
+  }
+  const ua = navigator.userAgent;
+  const cores = navigator.hardwareConcurrency ?? 4;
+
+  let iosMajor: number | null = null;
+  const iosMatch = ua.match(/OS (\d+)[_\.]/);
+  if (iosMatch && /iPhone|iPad|iPod/.test(ua)) {
+    iosMajor = parseInt(iosMatch[1], 10);
+  }
+
+  const lowPower = cores < 4 || (iosMajor !== null && iosMajor < 14);
+  if (lowPower) {
+    return { width: 1280, height: 720, frameRate: 30 };
+  }
+  return { width: 1920, height: 1080, frameRate: 30 };
+}
