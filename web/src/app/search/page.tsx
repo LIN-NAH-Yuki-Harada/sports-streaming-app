@@ -262,10 +262,15 @@ function TeamPageInner() {
     }
   };
 
-  // メンバー削除
-  const handleRemoveMember = async (userId: string) => {
-    if (!selectedTeam) return;
-    if (!confirm("このメンバーを削除しますか？")) return;
+  // メンバー削除（自己脱退 / 管理者による削除を文言で区別）
+  // 戻り値: 削除に成功したら true、キャンセル/失敗なら false
+  const handleRemoveMember = async (userId: string): Promise<boolean> => {
+    if (!selectedTeam) return false;
+    const isSelfLeave = userId === user?.id;
+    const confirmMsg = isSelfLeave
+      ? `「${selectedTeam.name}」から脱退しますか？\n\n再加入には招待コードが必要になります。`
+      : "このメンバーをチームから削除しますか？";
+    if (!confirm(confirmMsg)) return false;
     try {
       const token = await getToken();
       const res = await fetch(`/api/teams/${selectedTeam.id}/members`, {
@@ -279,9 +284,9 @@ function TeamPageInner() {
       if (!res.ok) {
         const data = await res.json();
         toast.error(data.error || "エラーが発生しました");
-        return;
+        return false;
       }
-      toast.success("メンバーを削除しました");
+      toast.success(isSelfLeave ? "チームから脱退しました" : "メンバーを削除しました");
       fetchTeams();
       // 選択中チームのメンバーを更新
       setSelectedTeam((prev) =>
@@ -289,8 +294,10 @@ function TeamPageInner() {
           ? { ...prev, team_members: prev.team_members.filter((m) => m.user_id !== userId) }
           : null
       );
+      return true;
     } catch {
       toast.error("エラーが発生しました");
+      return false;
     }
   };
 
@@ -516,13 +523,14 @@ function TeamPageInner() {
                     {/* 自分自身の脱退（オーナー以外） */}
                     {!isOwner && member.user_id === user.id && (
                       <button
-                        onClick={() => {
-                          handleRemoveMember(user.id);
-                          setSelectedTeam(null);
+                        onClick={async () => {
+                          const ok = await handleRemoveMember(user.id);
+                          if (ok) setSelectedTeam(null);
                         }}
-                        className="text-[10px] text-red-400 hover:text-red-300"
+                        className="shrink-0 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-400/40 hover:border-red-400/60 rounded-md px-2 py-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
+                        aria-label={`${selectedTeam.name}から脱退する`}
                       >
-                        脱退
+                        チームを脱退
                       </button>
                     )}
                   </div>
