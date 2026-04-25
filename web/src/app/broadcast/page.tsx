@@ -1195,6 +1195,46 @@ function BroadcastPageInner() {
           </p>
         </div>
 
+        {/* 配信前チェックリスト（発熱対策） */}
+        <details className="rounded-md bg-amber-500/5 border border-amber-500/20 group">
+          <summary className="cursor-pointer list-none px-3 py-2.5 text-[11px] font-medium text-amber-200 flex items-center justify-between select-none">
+            <span className="flex items-center gap-2">
+              <span aria-hidden="true">🌡️</span>
+              <span>配信前のチェック（夏・屋外は要確認）</span>
+            </span>
+            <span className="text-amber-300/60 text-[10px] group-open:rotate-180 transition-transform" aria-hidden="true">▼</span>
+          </summary>
+          <div className="px-3 pb-3 text-[10px] text-gray-300 leading-relaxed space-y-2.5">
+            <p className="text-amber-100/90">スマホの発熱で配信が止まるのを防ぐため、開始前にご確認ください。</p>
+            <div>
+              <p className="text-amber-200 font-semibold mb-1">📱 端末</p>
+              <ul className="space-y-0.5 list-disc list-inside marker:text-gray-600">
+                <li>ケースを外す（特にシリコン・厚手革は熱が溜まります）</li>
+                <li>フル充電してからケーブルを抜いて配信（充電しながらは熱が倍増）</li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-amber-200 font-semibold mb-1">🌞 環境</p>
+              <ul className="space-y-0.5 list-disc list-inside marker:text-gray-600">
+                <li>直射日光・車内・人工芝の照り返しを避ける</li>
+                <li>体育館内では日陰側に立つ</li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-amber-200 font-semibold mb-1">📶 通信</p>
+              <ul className="space-y-0.5 list-disc list-inside marker:text-gray-600">
+                <li>5G より WiFi または 4G が安定（5G モデムは発熱大）</li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-amber-200 font-semibold mb-1">❄️ おすすめアクセサリ</p>
+              <ul className="space-y-0.5 list-disc list-inside marker:text-gray-600">
+                <li>モバイル冷却ファン（¥2,000〜）で大幅に安定します</li>
+              </ul>
+            </div>
+          </div>
+        </details>
+
         {/* 配信ボタン */}
         <button
           disabled={!canStart || needsSubscription || starting}
