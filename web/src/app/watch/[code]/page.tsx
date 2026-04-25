@@ -274,45 +274,11 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
           </div>
         )}
 
-        {/* 左上: スコアボード */}
-        <div
-          className="absolute left-2 flex flex-col items-start gap-1 z-[2]"
-          style={{ top: "calc(env(safe-area-inset-top, 0px) + 8px)" }}
-        >
-          <div className="flex items-center bg-black/80 backdrop-blur-sm rounded overflow-hidden text-[9px] sm:text-[10px]">
-            <div className="flex items-center gap-1 bg-white/10 px-1.5 sm:px-2 py-1">
-              <span className="font-bold">{broadcast.home_team}</span>
-              {(broadcast.home_sets > 0 || broadcast.away_sets > 0) && (
-                <span className="text-[7px] text-yellow-400 font-bold">{broadcast.home_sets}</span>
-              )}
-            </div>
-            <div className="flex items-center gap-0.5 px-1.5 sm:px-2 py-1 bg-[#e63946]">
-              <span className="font-black tabular-nums">{broadcast.home_score}</span>
-              <span className="text-[7px] text-white/60">-</span>
-              <span className="font-black tabular-nums">{broadcast.away_score}</span>
-            </div>
-            <div className="flex items-center gap-1 bg-white/10 px-1.5 sm:px-2 py-1">
-              {(broadcast.home_sets > 0 || broadcast.away_sets > 0) && (
-                <span className="text-[7px] text-yellow-400 font-bold">{broadcast.away_sets}</span>
-              )}
-              <span className="font-bold">{broadcast.away_team}</span>
-            </div>
-            <div className="px-1.5 sm:px-2 py-1 bg-black/60">
-              <span className="tabular-nums font-medium">{broadcast.period}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 右上: 大会名 + LIVE */}
+        {/* 右上: LIVE / 終了 バッジ（スコアボードと大会名は映像に焼き込み済みなので CSS 側は不要） */}
         <div
           className="absolute right-2 flex items-center gap-1.5 z-[2]"
           style={{ top: "calc(env(safe-area-inset-top, 0px) + 8px)" }}
         >
-          {(broadcast.tournament || broadcast.sport) && (
-            <div className="bg-black/80 backdrop-blur-sm rounded px-1.5 sm:px-2 py-1 text-[8px] sm:text-[9px] text-gray-300">
-              {broadcast.tournament || broadcast.sport}
-            </div>
-          )}
           {isLive ? (
             <div className="flex items-center gap-1 bg-[#e63946] px-1.5 py-1 rounded text-[8px] sm:text-[9px] font-bold">
               <span className="relative flex h-1.5 w-1.5">

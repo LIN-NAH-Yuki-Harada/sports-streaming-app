@@ -218,9 +218,9 @@ function BroadcastPageInner() {
 
   const pointLabel = getPointLabel();
 
-  // スコアボード焼き込み: URL に ?burn=1 を付けると映像に合成して配信する。
-  // デフォルトは false（既存パス）。実機検証が完了したらデフォルトを true に切り替える。
-  const burnScoreboard = searchParams.get("burn") === "1";
+  // スコアボード焼き込み: 2026-04-25 検証完了後、デフォルト ON に切替（PR #28→#29 経由）。
+  // 緊急時は `?burn=0` で旧経路（LiveKit 自動 publish + 視聴側 CSS オーバーレイ）にロールバック可能。
+  const burnScoreboard = searchParams.get("burn") !== "0";
   const broadcastResolutionRef = useRef<ReturnType<typeof pickBroadcastResolution> | null>(null);
   if (broadcastResolutionRef.current === null) {
     broadcastResolutionRef.current = pickBroadcastResolution();
