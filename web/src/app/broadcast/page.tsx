@@ -422,6 +422,12 @@ function BroadcastPageInner() {
         } catch (e) {
           console.error("LiveKitトークン取得エラー:", e);
           setLivekitError("映像配信の準備に失敗しました");
+          // DB 上の broadcast を終了させて status=live が残らないようにする
+          // （ここで終了させないと再配信時に古い "live" 状態が衝突する）
+          if (broadcastRef.current) {
+            await endBroadcast(broadcastRef.current.id).catch(() => {});
+            broadcastRef.current = null;
+          }
           setShareCode("");
           setBroadcastStartedAt(null);
         }

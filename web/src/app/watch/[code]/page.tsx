@@ -22,45 +22,48 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const { stageRef, isFullscreen, isFakeFullscreen, toggleFullscreen } =
     useStageFullscreen<HTMLDivElement>();
 
-  // ステージ内の <video> 要素の一時停止状態を追従
+  // ステージ内の <video> 要素の一時停止状態を追従。
+  // LiveKit 再接続で video 要素が再生成された場合に備えて、現在 attach 済みの要素を
+  // ref で追跡し、二重登録 / 古い要素のリスナー残留を防ぐ。
   useEffect(() => {
     if (!isWatching || !viewerToken) return;
     const stage = stageRef.current;
     if (!stage) return;
 
-    let video: HTMLVideoElement | null = null;
+    let attachedVideo: HTMLVideoElement | null = null;
     const onPause = () => setVideoPaused(true);
     const onPlay = () => setVideoPaused(false);
 
-    function attach() {
-      video = stage!.querySelector("video");
+    function detach() {
+      if (attachedVideo) {
+        attachedVideo.removeEventListener("pause", onPause);
+        attachedVideo.removeEventListener("play", onPlay);
+        attachedVideo = null;
+      }
+    }
+
+    function attach(): boolean {
+      const video = stage!.querySelector("video");
       if (!video) return false;
+      if (video === attachedVideo) return true; // 既に attach 済み
+      detach(); // 古い要素のリスナーを必ず解除してから新しく登録
       video.addEventListener("pause", onPause);
       video.addEventListener("play", onPlay);
+      attachedVideo = video;
       setVideoPaused(video.paused);
       return true;
     }
 
-    if (!attach()) {
-      // LiveKit が <video> を生成するまで少し待ってから再試行
-      const observer = new MutationObserver(() => {
-        if (attach()) observer.disconnect();
-      });
-      observer.observe(stage, { childList: true, subtree: true });
-      return () => {
-        observer.disconnect();
-        if (video) {
-          video.removeEventListener("pause", onPause);
-          video.removeEventListener("play", onPlay);
-        }
-      };
-    }
+    attach();
+    // LiveKit が <video> を再生成するケースを継続的に拾うために MutationObserver を維持。
+    // disconnect は cleanup でのみ行う（一度 attach できたら止める設計だと、再接続で
+    // 新しい video が登場した時に検知できなくなる）
+    const observer = new MutationObserver(() => attach());
+    observer.observe(stage, { childList: true, subtree: true });
 
     return () => {
-      if (video) {
-        video.removeEventListener("pause", onPause);
-        video.removeEventListener("play", onPlay);
-      }
+      observer.disconnect();
+      detach();
     };
   }, [isWatching, viewerToken, stageRef]);
 
@@ -117,6 +120,9 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       });
 
     return () => {
+      // unsubscribe を先に呼んで以降の payload コールバックを止めてから removeChannel する。
+      // これで素早い broadcast 切替時に古い subscription が新 state を上書きする事故を防ぐ
+      channel.unsubscribe().catch(() => {});
       supabase.removeChannel(channel);
     };
   }, [broadcast?.id]);
