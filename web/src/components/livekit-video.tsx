@@ -272,7 +272,8 @@ export function LiveKitBroadcaster({
   scoreboardState?: ScoreboardState;
   broadcastResolution?: BroadcastResolution;
 }) {
-  // 焼き込みモード: カメラ + スコアを canvas 合成してから publish
+  // 焼き込みモード: カメラ + スコアを canvas 合成して video のみ手動 publish。
+  // 音声は LiveKit の auto-publish (audio=true) で枯れたコードパスに任せる。
   if (burnScoreboard && scoreboardState && broadcastResolution) {
     return (
       <div style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
@@ -281,11 +282,15 @@ export function LiveKitBroadcaster({
           token={token}
           connect={true}
           video={false}
-          audio={false}
+          audio={true}
           onError={onError}
           options={{
             adaptiveStream: true,
             dynacast: true,
+            audioCaptureDefaults: {
+              echoCancellation: true,
+              noiseSuppression: true,
+            },
           }}
           style={{
             position: "absolute",

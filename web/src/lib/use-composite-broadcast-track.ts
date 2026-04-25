@@ -20,7 +20,6 @@ type UseCompositeBroadcastTrackResult = {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   videoTrack: MediaStreamTrack | null;
-  audioTrack: MediaStreamTrack | null;
   status: Status;
   error: Error | null;
 };
@@ -41,7 +40,6 @@ export function useCompositeBroadcastTrack({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const stateRef = useRef<ScoreboardState>(state);
   const [videoTrack, setVideoTrack] = useState<MediaStreamTrack | null>(null);
-  const [audioTrack, setAudioTrack] = useState<MediaStreamTrack | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<Error | null>(null);
 
@@ -66,6 +64,8 @@ export function useCompositeBroadcastTrack({
       setError(null);
 
       try {
+        // 音声は LiveKitRoom の audio={true} 経由で auto-publish させる（枯れたコードパス）。
+        // ここでは video 専用ストリームのみ取得して Canvas 合成に使う。
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "environment",
@@ -73,10 +73,7 @@ export function useCompositeBroadcastTrack({
             height: { ideal: targetResolution.height },
             frameRate: { ideal: targetResolution.frameRate },
           },
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-          },
+          audio: false,
         });
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
@@ -182,9 +179,8 @@ export function useCompositeBroadcastTrack({
         const cs = canvasEl.captureStream(targetResolution.frameRate);
         captureStream = cs;
         const vt = cs.getVideoTracks()[0] ?? null;
-        const at = stream.getAudioTracks()[0] ?? null;
-        if (!vt || !at) {
-          throw new Error("MediaStreamTrack を取得できませんでした");
+        if (!vt) {
+          throw new Error("Canvas の MediaStreamTrack を取得できませんでした");
         }
 
         if (cancelled) {
@@ -194,7 +190,6 @@ export function useCompositeBroadcastTrack({
         }
 
         setVideoTrack(vt);
-        setAudioTrack(at);
         setStatus("ready");
       } catch (e) {
         if (cancelled) return;
@@ -230,7 +225,6 @@ export function useCompositeBroadcastTrack({
         videoRef.current.srcObject = null;
       }
       setVideoTrack(null);
-      setAudioTrack(null);
       setStatus("idle");
     };
     // targetResolution の各値は安定していることが前提。再取得を避けるため個別依存にせず JSON で比較
@@ -242,5 +236,5 @@ export function useCompositeBroadcastTrack({
     targetResolution.frameRate,
   ]);
 
-  return { canvasRef, videoRef, videoTrack, audioTrack, status, error };
+  return { canvasRef, videoRef, videoTrack, status, error };
 }
