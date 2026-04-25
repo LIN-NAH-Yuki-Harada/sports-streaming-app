@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
+import { detectInAppBrowser, type InAppBrowserInfo } from "@/lib/user-agent";
 
 type Mode = "login" | "signup" | "reset";
 
@@ -27,6 +28,24 @@ export function AuthForm({ redirectTo }: AuthFormProps = {}) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [inApp, setInApp] = useState<InAppBrowserInfo | null>(null);
+  const [urlCopied, setUrlCopied] = useState(false);
+
+  useEffect(() => {
+    setInApp(detectInAppBrowser());
+  }, []);
+
+  async function handleCopyUrl() {
+    if (typeof window === "undefined") return;
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      setUrlCopied(true);
+      setTimeout(() => setUrlCopied(false), 2500);
+    } catch {
+      // クリップボード API が使えない場合は手動コピー誘導のため何もしない
+    }
+  }
 
   // redirectTo は「/pricing?promo=SPOT1W」等の相対パスで来ることもあるため、絶対URLに展開する
   const successUrl = redirectTo
@@ -125,8 +144,56 @@ export function AuthForm({ redirectTo }: AuthFormProps = {}) {
     );
   }
 
+  const isInAppBrowser = inApp?.isInApp ?? false;
+  const recommendedBrowser =
+    inApp?.platform === "ios"
+      ? "Safari"
+      : inApp?.platform === "android"
+        ? "Chrome"
+        : "外部ブラウザ";
+
   return (
     <div>
+      {/* アプリ内ブラウザ検出時: Google ログイン上に誘導パネルを先に表示 */}
+      {isInAppBrowser && (
+        <div className="mb-4 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3.5">
+          <p className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2L1 21h22L12 2zm0 6l7.5 13h-15L12 8zm-1 4v4h2v-4h-2zm0 5v2h2v-2h-2z" />
+            </svg>
+            {recommendedBrowser} で開いてからログインしてください
+          </p>
+          <p className="text-[11px] text-amber-100/80 mt-1.5 leading-relaxed">
+            {inApp?.appName ?? "アプリ内ブラウザ"} など Google 公式以外のアプリ内ブラウザからの Google ログインは、Google の方針でブロックされます（403 エラー）。
+            <strong className="text-white">{recommendedBrowser}</strong> で開き直すと、そのままログインできます。
+          </p>
+          <button
+            type="button"
+            onClick={handleCopyUrl}
+            className="mt-3 w-full bg-white text-black text-xs font-semibold py-2.5 rounded-md hover:bg-gray-100 transition flex items-center justify-center gap-2"
+          >
+            {urlCopied ? (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                URL をコピーしました
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                URL をコピーして {recommendedBrowser} で開く
+              </>
+            )}
+          </button>
+          <p className="text-[10px] text-amber-100/60 mt-2 leading-relaxed">
+            またはメニュー（{inApp?.platform === "ios" ? "右上の「…」→「Safariで開く」" : "右上の「⋮」→「ブラウザで開く」"}）からも開けます。
+          </p>
+        </div>
+      )}
+
       {/* ソーシャルログインボタン */}
       <div className="space-y-2.5">
         <button
