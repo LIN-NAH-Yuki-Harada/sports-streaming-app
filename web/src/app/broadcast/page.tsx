@@ -227,24 +227,27 @@ function BroadcastPageInner() {
   }
   const broadcastResolution = broadcastResolutionRef.current;
 
-  // 配信経過時間（焼き込み用）
+  // 配信経過時間（焼き込み用）— started_at を state で保持して effect の依存にする
+  // （ref 経由だとマウント直後のタイミングで未取得になり得る）
+  const [broadcastStartedAt, setBroadcastStartedAt] = useState<string | null>(null);
   const [broadcastElapsed, setBroadcastElapsed] = useState<number | null>(null);
   useEffect(() => {
-    if (!shareCode) {
+    if (!broadcastStartedAt) {
       setBroadcastElapsed(null);
       return;
     }
-    const startedAt = broadcastRef.current?.started_at;
-    if (!startedAt) return;
-    const startedAtMs = new Date(startedAt).getTime();
-    if (Number.isNaN(startedAtMs)) return;
+    const startedAtMs = new Date(broadcastStartedAt).getTime();
+    if (Number.isNaN(startedAtMs)) {
+      setBroadcastElapsed(null);
+      return;
+    }
     function compute() {
       setBroadcastElapsed(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
     }
     compute();
     const interval = setInterval(compute, 1000);
     return () => clearInterval(interval);
-  }, [shareCode]);
+  }, [broadcastStartedAt]);
 
   const scoreboardState: ScoreboardState = {
     home_team: home || "HOME",
@@ -384,6 +387,7 @@ function BroadcastPageInner() {
       if (broadcast) {
         broadcastRef.current = broadcast;
         setShareCode(broadcast.share_code);
+        setBroadcastStartedAt(broadcast.started_at);
 
         const supabase = createClient();
         const { data: sessionData } = await supabase.auth.getSession();
@@ -419,6 +423,7 @@ function BroadcastPageInner() {
           console.error("LiveKitトークン取得エラー:", e);
           setLivekitError("映像配信の準備に失敗しました");
           setShareCode("");
+          setBroadcastStartedAt(null);
         }
       } else {
         toast.error("配信の開始に失敗しました。もう一度お試しください。");
@@ -490,6 +495,7 @@ function BroadcastPageInner() {
       broadcastRef.current = null;
     }
     setShareCode("");
+    setBroadcastStartedAt(null);
     setHomeScore(0);
     setAwayScore(0);
     setHomeSets(0);
