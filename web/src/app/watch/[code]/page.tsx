@@ -7,6 +7,17 @@ import { LiveKitViewer } from "@/components/livekit-video";
 import { Logo } from "@/components/logo";
 import { ShareButtons } from "@/components/share-buttons";
 
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+type IOSVideoElement = HTMLVideoElement & {
+  webkitEnterFullscreen?: () => void;
+};
+
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
 
@@ -17,6 +28,55 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [notFound, setNotFound] = useState(false);
   const [viewerToken, setViewerToken] = useState<string | null>(null);
   const [isWatching, setIsWatching] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+
+  // 全画面状態を OS のイベントで追従（ESC や iOS のスワイプ離脱に対応）
+  useEffect(() => {
+    const doc = document as FullscreenDocument;
+    const handler = () => {
+      const active = doc.fullscreenElement || doc.webkitFullscreenElement;
+      setIsFullscreen(Boolean(active));
+    };
+    document.addEventListener("fullscreenchange", handler);
+    document.addEventListener("webkitfullscreenchange", handler);
+    return () => {
+      document.removeEventListener("fullscreenchange", handler);
+      document.removeEventListener("webkitfullscreenchange", handler);
+    };
+  }, []);
+
+  async function toggleFullscreen() {
+    const stage = stageRef.current as FullscreenElement | null;
+    if (!stage) return;
+    const doc = document as FullscreenDocument;
+    const active = doc.fullscreenElement || doc.webkitFullscreenElement;
+
+    if (active) {
+      try {
+        if (doc.exitFullscreen) await doc.exitFullscreen();
+        else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen();
+      } catch {}
+      return;
+    }
+
+    try {
+      if (stage.requestFullscreen) {
+        await stage.requestFullscreen();
+        return;
+      }
+      if (stage.webkitRequestFullscreen) {
+        await stage.webkitRequestFullscreen();
+        return;
+      }
+    } catch {}
+
+    // iOS Safari フォールバック: video 要素単独で全画面
+    const video = stage.querySelector("video") as IOSVideoElement | null;
+    if (video?.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+    }
+  }
 
   // 初回: DBから配信データを取得
   useEffect(() => {
@@ -193,7 +253,11 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   return (
     <div className="min-h-screen bg-black flex flex-col">
       {/* メイン映像エリア — 画面全体を使用 */}
-      <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden" style={{ minHeight: "60vh" }}>
+      <div
+        ref={stageRef}
+        className="relative flex-1 bg-black flex items-center justify-center overflow-hidden"
+        style={{ minHeight: "60vh" }}
+      >
         {isWatching && viewerToken ? (
           <LiveKitViewer
             token={viewerToken}
@@ -265,28 +329,28 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
 
         {/* 左上: スコアボード */}
         <div
-          className="absolute left-3 flex flex-col items-start gap-1"
-          style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+          className="absolute left-2 flex flex-col items-start gap-1 z-[2]"
+          style={{ top: "calc(env(safe-area-inset-top, 0px) + 8px)" }}
         >
-          <div className="flex items-center bg-black/80 backdrop-blur-sm rounded overflow-hidden text-[10px] sm:text-xs">
-            <div className="flex items-center gap-1.5 bg-white/10 px-2 sm:px-3 py-1.5">
+          <div className="flex items-center bg-black/80 backdrop-blur-sm rounded overflow-hidden text-[9px] sm:text-[10px]">
+            <div className="flex items-center gap-1 bg-white/10 px-1.5 sm:px-2 py-1">
               <span className="font-bold">{broadcast.home_team}</span>
               {(broadcast.home_sets > 0 || broadcast.away_sets > 0) && (
-                <span className="text-[8px] text-yellow-400 font-bold">{broadcast.home_sets}</span>
+                <span className="text-[7px] text-yellow-400 font-bold">{broadcast.home_sets}</span>
               )}
             </div>
-            <div className="flex items-center gap-1 px-2 sm:px-3 py-1.5 bg-[#e63946]">
+            <div className="flex items-center gap-0.5 px-1.5 sm:px-2 py-1 bg-[#e63946]">
               <span className="font-black tabular-nums">{broadcast.home_score}</span>
-              <span className="text-[8px] text-white/60">-</span>
+              <span className="text-[7px] text-white/60">-</span>
               <span className="font-black tabular-nums">{broadcast.away_score}</span>
             </div>
-            <div className="flex items-center gap-1.5 bg-white/10 px-2 sm:px-3 py-1.5">
+            <div className="flex items-center gap-1 bg-white/10 px-1.5 sm:px-2 py-1">
               {(broadcast.home_sets > 0 || broadcast.away_sets > 0) && (
-                <span className="text-[8px] text-yellow-400 font-bold">{broadcast.away_sets}</span>
+                <span className="text-[7px] text-yellow-400 font-bold">{broadcast.away_sets}</span>
               )}
               <span className="font-bold">{broadcast.away_team}</span>
             </div>
-            <div className="px-2 sm:px-3 py-1.5 bg-black/60">
+            <div className="px-1.5 sm:px-2 py-1 bg-black/60">
               <span className="tabular-nums font-medium">{broadcast.period}</span>
             </div>
           </div>
@@ -294,16 +358,16 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
 
         {/* 右上: 大会名 + LIVE */}
         <div
-          className="absolute right-3 flex items-center gap-2"
-          style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+          className="absolute right-2 flex items-center gap-1.5 z-[2]"
+          style={{ top: "calc(env(safe-area-inset-top, 0px) + 8px)" }}
         >
           {(broadcast.tournament || broadcast.sport) && (
-            <div className="bg-black/80 backdrop-blur-sm rounded px-2 sm:px-3 py-1.5 text-[9px] sm:text-[10px] text-gray-300">
+            <div className="bg-black/80 backdrop-blur-sm rounded px-1.5 sm:px-2 py-1 text-[8px] sm:text-[9px] text-gray-300">
               {broadcast.tournament || broadcast.sport}
             </div>
           )}
           {isLive ? (
-            <div className="flex items-center gap-1 bg-[#e63946] px-2 py-1.5 rounded text-[9px] sm:text-[10px] font-bold">
+            <div className="flex items-center gap-1 bg-[#e63946] px-1.5 py-1 rounded text-[8px] sm:text-[9px] font-bold">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white" />
@@ -311,11 +375,30 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               LIVE
             </div>
           ) : (
-            <div className="bg-gray-600 px-2 py-1.5 rounded text-[9px] sm:text-[10px] font-bold">
+            <div className="bg-gray-600 px-1.5 py-1 rounded text-[8px] sm:text-[9px] font-bold">
               終了
             </div>
           )}
         </div>
+
+        {/* 右下: 全画面ボタン（視聴中のみ表示） */}
+        {isWatching && viewerToken && (
+          <button
+            onClick={toggleFullscreen}
+            aria-label={isFullscreen ? "全画面を解除" : "全画面表示"}
+            className="absolute bottom-3 right-3 z-[2] w-9 h-9 flex items-center justify-center rounded-md bg-black/70 hover:bg-black/85 backdrop-blur-sm text-white transition"
+          >
+            {isFullscreen ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4M9 9H4M15 9V4M15 9h5M9 15v5M9 15H4M15 15v5M15 15h5" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" />
+              </svg>
+            )}
+          </button>
+        )}
       </div>
 
       {/* 試合情報（映像下部） */}
