@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { detectInAppBrowser, type InAppBrowserInfo } from "@/lib/user-agent";
 
@@ -30,6 +30,8 @@ export function AuthForm({ redirectTo }: AuthFormProps = {}) {
   const [sent, setSent] = useState(false);
   const [inApp, setInApp] = useState<InAppBrowserInfo | null>(null);
   const [urlCopied, setUrlCopied] = useState(false);
+  const [warningPulse, setWarningPulse] = useState(false);
+  const warningRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setInApp(detectInAppBrowser());
@@ -105,6 +107,14 @@ export function AuthForm({ redirectTo }: AuthFormProps = {}) {
   }
 
   async function handleGoogleLogin() {
+    // アプリ内ブラウザでは Google が必ず 403 (disallowed_useragent) でブロックする。
+    // OAuth を発火する前に警告パネルへスクロール + パルスして気づきを促す。
+    if (inApp?.isInApp) {
+      warningRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setWarningPulse(true);
+      window.setTimeout(() => setWarningPulse(false), 1500);
+      return;
+    }
     const supabase = createClient();
     await supabase.auth.signInWithOAuth({
       provider: "google",
@@ -156,7 +166,10 @@ export function AuthForm({ redirectTo }: AuthFormProps = {}) {
     <div>
       {/* アプリ内ブラウザ検出時: Google ログイン上に誘導パネルを先に表示 */}
       {isInAppBrowser && (
-        <div className="mb-4 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3.5">
+        <div
+          ref={warningRef}
+          className={`mb-4 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3.5 transition-all ${warningPulse ? "ring-4 ring-amber-400/60 scale-[1.02]" : ""}`}
+        >
           <p className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 2L1 21h22L12 2zm0 6l7.5 13h-15L12 8zm-1 4v4h2v-4h-2zm0 5v2h2v-2h-2z" />
@@ -198,7 +211,9 @@ export function AuthForm({ redirectTo }: AuthFormProps = {}) {
       <div className="space-y-2.5">
         <button
           onClick={handleGoogleLogin}
-          className="w-full flex items-center justify-center gap-3 bg-white text-black text-sm font-semibold py-2.5 rounded-md hover:bg-gray-200 transition"
+          aria-disabled={isInAppBrowser}
+          title={isInAppBrowser ? `${recommendedBrowser} で開いてからご利用ください` : undefined}
+          className={`w-full flex items-center justify-center gap-3 bg-white text-black text-sm font-semibold py-2.5 rounded-md transition ${isInAppBrowser ? "opacity-60" : "hover:bg-gray-200"}`}
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
           Googleでログイン
