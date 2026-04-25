@@ -20,6 +20,7 @@ import {
 } from "@/lib/database";
 import { pickBroadcastResolution } from "@/lib/user-agent";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
+import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
 
 const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
 
@@ -238,6 +239,14 @@ function BroadcastPageInner() {
     sport,
     pointLabel,
   };
+
+  // 配信中ステージの全画面化（Safari URL バー・タブバーを隠して画面を最大化）
+  const {
+    stageRef: liveStageRef,
+    isFullscreen: isLiveFullscreen,
+    isFakeFullscreen: isLiveFakeFullscreen,
+    toggleFullscreen: toggleLiveFullscreen,
+  } = useStageFullscreen<HTMLDivElement>();
 
   function getScreen(): Screen {
     if (!user) return "login";
@@ -646,8 +655,18 @@ function BroadcastPageInner() {
   if (screen === "live") {
     const shareUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/watch/${shareCode}`;
     return (
-      <div className="fixed inset-0 z-[60] bg-black" style={{ height: "100dvh" }}>
-        <div className="relative w-full h-full bg-[#0a0a0a] overflow-hidden">
+      <div
+        className={
+          isLiveFakeFullscreen
+            ? "fixed inset-0 z-[9999] bg-black"
+            : "fixed inset-0 z-[60] bg-black"
+        }
+        style={isLiveFakeFullscreen ? undefined : { height: "100dvh" }}
+      >
+        <div
+          ref={liveStageRef}
+          className="relative w-full h-full bg-[#0a0a0a] overflow-hidden"
+        >
           {/* LiveKit映像レイヤー */}
           {livekitToken ? (
             <LiveKitBroadcaster
@@ -822,14 +841,30 @@ function BroadcastPageInner() {
             </div>
           </div>
 
-          {/* 右上: 大会名 + LIVE + お試し表示 */}
+          {/* 右上: 全画面ボタン + 大会名 + LIVE + お試し表示 */}
           <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={toggleLiveFullscreen}
+              aria-label={isLiveFullscreen ? "全画面を解除" : "全画面表示"}
+              className="w-8 h-8 flex items-center justify-center rounded bg-black/70 hover:bg-black/90 backdrop-blur-sm text-white transition"
+            >
+              {isLiveFullscreen ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4M9 9H4M15 9V4M15 9h5M9 15v5M9 15H4M15 15v5M15 15h5" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" />
+                </svg>
+              )}
+            </button>
             {!subscribed && trialRemaining !== null && (
               <div className={`backdrop-blur-sm rounded px-2 py-1 text-[9px] font-medium ${trialRemaining <= 60 ? "bg-red-500/30 text-red-400 animate-pulse" : "bg-yellow-500/20 text-yellow-500"}`}>
                 残り {Math.floor(trialRemaining / 60)}:{String(trialRemaining % 60).padStart(2, "0")}
               </div>
             )}
-            {(tournament || sport) && (
+            {!burnScoreboard && (tournament || sport) && (
               <div className="bg-black/70 backdrop-blur-sm rounded px-2 py-1 text-[9px] sm:text-[10px] text-gray-300">
                 {tournament || sport}
               </div>
