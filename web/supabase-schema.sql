@@ -62,13 +62,43 @@ create table public.team_members (
 
 alter table public.team_members enable row level security;
 
+-- RLS 再帰回避用ヘルパー（SECURITY DEFINER で team_members を直接読む）
+create or replace function public.is_team_member(p_team_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from public.team_members
+    where team_id = p_team_id and user_id = auth.uid()
+  );
+$$;
+
+create or replace function public.is_team_admin(p_team_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from public.team_members
+    where team_id = p_team_id
+      and user_id = auth.uid()
+      and role in ('owner', 'admin')
+  );
+$$;
+
+grant execute on function public.is_team_member(uuid) to authenticated;
+grant execute on function public.is_team_admin(uuid) to authenticated;
+
 create policy "チームメンバーが一覧を閲覧可能"
   on public.team_members for select
   using (
     user_id = auth.uid()
-    or team_id in (
-      select team_id from public.team_members where user_id = auth.uid()
-    )
+    or public.is_team_member(team_id)
   );
 
 create policy "自分自身をメンバーとして追加可能"
@@ -77,21 +107,13 @@ create policy "自分自身をメンバーとして追加可能"
 
 create policy "オーナーまたは管理者がメンバーを更新可能"
   on public.team_members for update
-  using (
-    team_id in (
-      select team_id from public.team_members
-      where user_id = auth.uid() and role in ('owner', 'admin')
-    )
-  );
+  using (public.is_team_admin(team_id));
 
 create policy "オーナー・管理者がメンバー削除可能または自己脱退"
   on public.team_members for delete
   using (
     user_id = auth.uid()
-    or team_id in (
-      select team_id from public.team_members
-      where user_id = auth.uid() and role in ('owner', 'admin')
-    )
+    or public.is_team_admin(team_id)
   );
 
 -- 3. 配信テーブル
