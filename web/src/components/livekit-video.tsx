@@ -296,7 +296,7 @@ export function LiveKitBroadcaster({
             simulcast: true,
             videoCodec: "h264",
             videoEncoding: {
-              maxBitrate: 1_500_000,
+              maxBitrate: 2_500_000,
               maxFramerate: 30,
             },
           },
