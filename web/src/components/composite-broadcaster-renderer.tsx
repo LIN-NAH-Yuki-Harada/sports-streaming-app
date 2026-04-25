@@ -9,7 +9,7 @@ import {
 import { ConnectionState, Track, type LocalTrackPublication } from "livekit-client";
 import { useReconnectDuration } from "@/components/livekit-video";
 import { useCompositeBroadcastTrack } from "@/lib/use-composite-broadcast-track";
-import { useWakeLock } from "@/lib/use-wake-lock";
+import { BroadcastHealthBadges } from "@/components/broadcast-health-badges";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import type { BroadcastResolution } from "@/lib/user-agent";
 
@@ -61,8 +61,7 @@ export function CompositeBroadcasterRenderer({
     prevConn.current = connectionState;
   }, [connectionState, onConnected, onDisconnected]);
 
-  // 画面スリープ防止（visibilitychange で自動再取得）
-  useWakeLock(true);
+  // 画面スリープ防止 + 電池警告は BroadcastHealthBadges 内で取得・保持する。
 
   // Connected + 合成 video トラック準備完了で publish（音声は LiveKit が自動 publish）
   useEffect(() => {
@@ -243,6 +242,9 @@ export function CompositeBroadcasterRenderer({
           </span>
         </div>
       )}
+
+      {/* 配信ヘルスバッジ（Wake Lock 失敗・電池残少の警告。接続中のみ表示） */}
+      {connectionState === ConnectionState.Connected && <BroadcastHealthBadges />}
     </>
   );
 }
