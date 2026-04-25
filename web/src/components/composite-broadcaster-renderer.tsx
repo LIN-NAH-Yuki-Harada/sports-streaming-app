@@ -79,7 +79,7 @@ export function CompositeBroadcasterRenderer({
           simulcast: true,
           videoCodec: "h264",
           videoEncoding: {
-            maxBitrate: 4_000_000,
+            maxBitrate: 2_500_000,
             maxFramerate: 30,
           },
         });
