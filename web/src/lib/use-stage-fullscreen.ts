@@ -43,17 +43,24 @@ export function useStageFullscreen<T extends HTMLElement = HTMLDivElement>(
   const [isFakeFullscreen, setIsFakeFullscreen] = useState(false);
 
   // ネイティブ全画面状態を追従（ESC・iOS のスワイプ離脱に対応）。
-  // 解除直後にステージ内の <video> が一時停止することがあるので resume を仕込む。
+  // 解除直後にステージ内の <video> が一時停止することがあるので resume を複数回 retry する。
   useEffect(() => {
     const doc = document as FullscreenDocument;
     const handler = () => {
       const active = doc.fullscreenElement || doc.webkitFullscreenElement;
       setIsNativeFullscreen(Boolean(active));
       if (!active) {
-        const video = stageRef.current?.querySelector("video") as
-          | HTMLVideoElement
-          | null;
-        video?.play().catch(() => {});
+        // iOS は webkitendfullscreen 後にも一時停止状態が残ることがあるため
+        // 複数のタイミングで play() を試行（即時 / 100ms / 500ms）
+        const tryPlay = () => {
+          const video = stageRef.current?.querySelector("video") as
+            | HTMLVideoElement
+            | null;
+          video?.play().catch(() => {});
+        };
+        tryPlay();
+        setTimeout(tryPlay, 100);
+        setTimeout(tryPlay, 500);
       }
     };
     document.addEventListener("fullscreenchange", handler);
@@ -110,10 +117,15 @@ export function useStageFullscreen<T extends HTMLElement = HTMLDivElement>(
       if (video?.webkitEnterFullscreen && video.readyState >= 2) {
         try {
           // iOS は webkitendfullscreen で video が一時停止状態になる。
-          // 戻った瞬間に play() を呼んでストリーム再生を継続させる。
+          // 戻った瞬間と少し遅らせて複数回 play() を試行
           const onEnd = () => {
             video.removeEventListener("webkitendfullscreen", onEnd);
-            video.play().catch(() => {});
+            const tryPlay = () => {
+              video.play().catch(() => {});
+            };
+            tryPlay();
+            setTimeout(tryPlay, 100);
+            setTimeout(tryPlay, 500);
           };
           video.addEventListener("webkitendfullscreen", onEnd, { once: true });
           video.webkitEnterFullscreen();
