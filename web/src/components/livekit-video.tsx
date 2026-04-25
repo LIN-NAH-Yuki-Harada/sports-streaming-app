@@ -9,7 +9,7 @@ import {
   useConnectionState,
   useParticipants,
 } from "@livekit/components-react";
-import { Track, ConnectionState } from "livekit-client";
+import { Track, ConnectionState, AudioPresets } from "livekit-client";
 import { CompositeBroadcasterRenderer } from "@/components/composite-broadcaster-renderer";
 import { useWakeLock } from "@/lib/use-wake-lock";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
@@ -288,8 +288,18 @@ export function LiveKitBroadcaster({
             adaptiveStream: true,
             dynacast: true,
             audioCaptureDefaults: {
+              // スポーツ配信は歓声・ボール音などの環境音が重要。noiseSuppression は
+              // しばしば「シュッ」「サー」のアーチファクトを生むため off。
+              // autoGainControl も無音時にノイズフロアを増幅するので off。
               echoCancellation: true,
-              noiseSuppression: true,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
+            publishDefaults: {
+              // 64kbps Opus（musicHighQuality 相当）で歓声・ホイッスル等を綺麗に伝送
+              audioPreset: AudioPresets.musicHighQuality,
+              // RED (Redundant Encoding) でパケットロス時の音切れ防止
+              red: true,
             },
           }}
           style={{
@@ -329,7 +339,8 @@ export function LiveKitBroadcaster({
           },
           audioCaptureDefaults: {
             echoCancellation: true,
-            noiseSuppression: true,
+            noiseSuppression: false,
+            autoGainControl: false,
           },
           publishDefaults: {
             simulcast: true,
@@ -338,6 +349,8 @@ export function LiveKitBroadcaster({
               maxBitrate: 4_000_000,
               maxFramerate: 30,
             },
+            audioPreset: AudioPresets.musicHighQuality,
+            red: true,
           },
         }}
         style={{
