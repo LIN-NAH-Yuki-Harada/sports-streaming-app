@@ -26,6 +26,25 @@ type UseCompositeBroadcastTrackResult = {
 
 type RVFCHandle = number;
 
+// オフスクリーン overlay の再描画要否を判定するためのキー。
+// state の同値判定（参照比較ではなく値比較）で、親の再レンダリングで
+// 新オブジェクトが渡されても中身が同じなら再描画をスキップする。
+function scoreboardKey(s: ScoreboardState): string {
+  return [
+    s.home_team,
+    s.away_team,
+    s.home_score,
+    s.away_score,
+    s.home_sets,
+    s.away_sets,
+    s.period,
+    s.tournament ?? "",
+    s.sport,
+    s.pointLabel ?? "",
+    s.elapsedSeconds ?? "",
+  ].join("|");
+}
+
 type VideoElementWithRVFC = HTMLVideoElement & {
   requestVideoFrameCallback?: (callback: () => void) => RVFCHandle;
   cancelVideoFrameCallback?: (handle: RVFCHandle) => void;
@@ -39,6 +58,10 @@ export function useCompositeBroadcastTrack({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const stateRef = useRef<ScoreboardState>(state);
+  // スコアボードのオフスクリーンキャッシュ。state 変化時のみ再描画して
+  // 毎フレームのテキスト計測・描画コストを削減する。
+  const overlayRef = useRef<HTMLCanvasElement | null>(null);
+  const lastOverlayKeyRef = useRef<string>("");
   const [videoTrack, setVideoTrack] = useState<MediaStreamTrack | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<Error | null>(null);
@@ -46,6 +69,37 @@ export function useCompositeBroadcastTrack({
   // state の最新値を ref にミラー（描画ループから参照）
   useEffect(() => {
     stateRef.current = state;
+  }, [state]);
+
+  // オフスクリーン overlay canvas を作成・破棄。解像度変化時にも作り直す。
+  useEffect(() => {
+    if (!enabled) return;
+    const overlay = document.createElement("canvas");
+    overlay.width = targetResolution.width;
+    overlay.height = targetResolution.height;
+    const ctx = overlay.getContext("2d");
+    if (ctx) {
+      drawScoreboard(ctx, stateRef.current, overlay.width, overlay.height);
+      lastOverlayKeyRef.current = scoreboardKey(stateRef.current);
+    }
+    overlayRef.current = overlay;
+    return () => {
+      overlayRef.current = null;
+      lastOverlayKeyRef.current = "";
+    };
+  }, [enabled, targetResolution.width, targetResolution.height]);
+
+  // state 変化時にだけ overlay を再描画（同値 state のスキップ含む）
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+    const key = scoreboardKey(state);
+    if (key === lastOverlayKeyRef.current) return;
+    const ctx = overlay.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    drawScoreboard(ctx, state, overlay.width, overlay.height);
+    lastOverlayKeyRef.current = key;
   }, [state]);
 
   useEffect(() => {
@@ -152,12 +206,20 @@ export function useCompositeBroadcastTrack({
               ctx!.fillStyle = "#000";
               ctx!.fillRect(0, 0, targetResolution.width, targetResolution.height);
             }
-            drawScoreboard(
-              ctx!,
-              stateRef.current,
-              targetResolution.width,
-              targetResolution.height,
-            );
+            // スコアボードはオフスクリーンキャッシュ済み（state 変化時のみ再描画）。
+            // 毎フレームは drawImage によるブリットだけで済むので CPU 負荷が大きく下がる。
+            const overlay = overlayRef.current;
+            if (overlay) {
+              ctx!.drawImage(overlay, 0, 0);
+            } else {
+              // フォールバック: 何らかの理由で overlay 未生成なら直描画
+              drawScoreboard(
+                ctx!,
+                stateRef.current,
+                targetResolution.width,
+                targetResolution.height,
+              );
+            }
           } catch (e) {
             console.error("[composite] 描画エラー:", e);
           }
