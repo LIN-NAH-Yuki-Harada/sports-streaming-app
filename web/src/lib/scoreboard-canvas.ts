@@ -9,6 +9,8 @@ export type ScoreboardState = {
   tournament: string | null;
   sport: string;
   pointLabel: string | null;
+  /** 配信開始からの経過秒数（null/undefined なら描画しない） */
+  elapsedSeconds?: number | null;
 };
 
 const FONT_STACK =
@@ -152,7 +154,32 @@ export function drawScoreboard(
     ctx.fillText(tournamentLabel, rx + pad, topY + h / 2);
   }
 
+  // ===== 左下: 配信経過時間 =====
+  if (typeof state.elapsedSeconds === "number" && state.elapsedSeconds >= 0) {
+    const elapsedText = formatElapsed(state.elapsedSeconds);
+    ctx.font = fontPill;
+    const textW = ctx.measureText(elapsedText).width;
+    const w = Math.round(textW + pad * 2);
+    const bx = margin;
+    const by = targetH - margin - h;
+    drawRoundedRect(ctx, bx, by, w, h, radius);
+    ctx.fillStyle = COLORS.bgDark;
+    ctx.fill();
+    ctx.fillStyle = COLORS.white;
+    ctx.fillText(elapsedText, bx + pad, by + h / 2);
+  }
+
   ctx.restore();
+}
+
+function formatElapsed(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  if (h > 0) return `${h}:${mm}:${ss}`;
+  return `${mm}:${ss}`;
 }
 
 function drawRoundedRect(

@@ -115,12 +115,27 @@ export function CompositeBroadcasterRenderer({
 
   return (
     <>
-      {/* 隠し video (camera source) */}
+      {/*
+        隠し video (camera source) — display:none ではなく 1px 透明配置。
+        iOS Safari は display:none の <video> を「再生中」と認識せず、
+        Wake Lock とは別系統で画面ロックを発動させるため、視覚的には不可視のまま
+        レンダリングは維持する（NoSleep.js 系の手法）。
+      */}
       <video
         ref={videoRef}
         muted
         playsInline
-        style={{ display: "none" }}
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "1px",
+          height: "1px",
+          opacity: 0,
+          pointerEvents: "none",
+          zIndex: -1,
+        }}
       />
 
       {/* 可視 canvas (焼き込み済みプレビュー) */}

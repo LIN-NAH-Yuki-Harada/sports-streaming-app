@@ -42,12 +42,19 @@ export function useStageFullscreen<T extends HTMLElement = HTMLDivElement>(
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [isFakeFullscreen, setIsFakeFullscreen] = useState(false);
 
-  // ネイティブ全画面状態を追従（ESC・iOS のスワイプ離脱に対応）
+  // ネイティブ全画面状態を追従（ESC・iOS のスワイプ離脱に対応）。
+  // 解除直後にステージ内の <video> が一時停止することがあるので resume を仕込む。
   useEffect(() => {
     const doc = document as FullscreenDocument;
     const handler = () => {
       const active = doc.fullscreenElement || doc.webkitFullscreenElement;
       setIsNativeFullscreen(Boolean(active));
+      if (!active) {
+        const video = stageRef.current?.querySelector("video") as
+          | HTMLVideoElement
+          | null;
+        video?.play().catch(() => {});
+      }
     };
     document.addEventListener("fullscreenchange", handler);
     document.addEventListener("webkitfullscreenchange", handler);

@@ -227,6 +227,25 @@ function BroadcastPageInner() {
   }
   const broadcastResolution = broadcastResolutionRef.current;
 
+  // 配信経過時間（焼き込み用）
+  const [broadcastElapsed, setBroadcastElapsed] = useState<number | null>(null);
+  useEffect(() => {
+    if (!shareCode) {
+      setBroadcastElapsed(null);
+      return;
+    }
+    const startedAt = broadcastRef.current?.started_at;
+    if (!startedAt) return;
+    const startedAtMs = new Date(startedAt).getTime();
+    if (Number.isNaN(startedAtMs)) return;
+    function compute() {
+      setBroadcastElapsed(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
+    }
+    compute();
+    const interval = setInterval(compute, 1000);
+    return () => clearInterval(interval);
+  }, [shareCode]);
+
   const scoreboardState: ScoreboardState = {
     home_team: home || "HOME",
     away_team: away || "AWAY",
@@ -238,6 +257,7 @@ function BroadcastPageInner() {
     tournament: tournament || null,
     sport,
     pointLabel,
+    elapsedSeconds: broadcastElapsed,
   };
 
   // 配信中ステージの全画面化（Safari URL バー・タブバーを隠して画面を最大化）。

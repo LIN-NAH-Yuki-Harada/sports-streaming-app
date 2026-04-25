@@ -18,9 +18,58 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [notFound, setNotFound] = useState(false);
   const [viewerToken, setViewerToken] = useState<string | null>(null);
   const [isWatching, setIsWatching] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
+  const [videoPaused, setVideoPaused] = useState(false);
   const { stageRef, isFullscreen, isFakeFullscreen, toggleFullscreen } =
     useStageFullscreen<HTMLDivElement>();
+
+  // ステージ内の <video> 要素の一時停止状態を追従
+  useEffect(() => {
+    if (!isWatching || !viewerToken) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    let video: HTMLVideoElement | null = null;
+    const onPause = () => setVideoPaused(true);
+    const onPlay = () => setVideoPaused(false);
+
+    function attach() {
+      video = stage!.querySelector("video");
+      if (!video) return false;
+      video.addEventListener("pause", onPause);
+      video.addEventListener("play", onPlay);
+      setVideoPaused(video.paused);
+      return true;
+    }
+
+    if (!attach()) {
+      // LiveKit が <video> を生成するまで少し待ってから再試行
+      const observer = new MutationObserver(() => {
+        if (attach()) observer.disconnect();
+      });
+      observer.observe(stage, { childList: true, subtree: true });
+      return () => {
+        observer.disconnect();
+        if (video) {
+          video.removeEventListener("pause", onPause);
+          video.removeEventListener("play", onPlay);
+        }
+      };
+    }
+
+    return () => {
+      if (video) {
+        video.removeEventListener("pause", onPause);
+        video.removeEventListener("play", onPlay);
+      }
+    };
+  }, [isWatching, viewerToken, stageRef]);
+
+  function handleResumeVideo() {
+    const video = stageRef.current?.querySelector("video") as
+      | HTMLVideoElement
+      | null;
+    video?.play().catch(() => {});
+  }
 
   // 初回: DBから配信データを取得
   useEffect(() => {
@@ -36,31 +85,9 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     fetchBroadcast();
   }, [code]);
 
-  // 配信時間（経過秒数）を 1 秒ごとに更新
-  useEffect(() => {
-    if (!broadcast?.started_at) {
-      setElapsedSeconds(null);
-      return;
-    }
-    const startedAtMs = new Date(broadcast.started_at).getTime();
-    if (Number.isNaN(startedAtMs)) {
-      setElapsedSeconds(null);
-      return;
-    }
-    const isLiveBroadcast = broadcast.status === "live";
-    const endedAtMs = broadcast.ended_at
-      ? new Date(broadcast.ended_at).getTime()
-      : null;
-
-    function compute() {
-      const reference = isLiveBroadcast ? Date.now() : (endedAtMs ?? Date.now());
-      setElapsedSeconds(Math.max(0, Math.floor((reference - startedAtMs) / 1000)));
-    }
-    compute();
-    if (!isLiveBroadcast) return;
-    const interval = setInterval(compute, 1000);
-    return () => clearInterval(interval);
-  }, [broadcast?.started_at, broadcast?.ended_at, broadcast?.status]);
+  // 配信経過時間は配信者側で映像に焼き込み済み（scoreboard-canvas.ts）。
+  // 視聴者側 CSS オーバーレイは廃止したのでここでの計算は不要。
+  // （履歴: 2026-04-25 一度 CSS 表示したが、iOS 純正全画面で見えないため焼き込みに統一）
 
   // リアルタイム更新: Supabase Realtime でスコア変更を受信
   useEffect(() => {
@@ -321,19 +348,22 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
           )}
         </div>
 
-        {/* 左下: 配信時間 */}
-        {elapsedSeconds !== null && (
-          <div
-            className="absolute left-3 z-[2] flex items-center gap-1 bg-black/70 backdrop-blur-sm rounded px-2 py-1 text-[10px] sm:text-xs tabular-nums font-medium text-white"
-            style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}
+        {/* 中央: 再生ボタン（video が一時停止状態の救済 — iOS 全画面解除後など） */}
+        {isWatching && viewerToken && videoPaused && (
+          <button
+            onClick={handleResumeVideo}
+            aria-label="再生"
+            className="absolute inset-0 z-[3] flex items-center justify-center bg-black/40 backdrop-blur-[2px] transition"
           >
-            <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="9" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2" />
-            </svg>
-            {formatElapsed(elapsedSeconds)}
-          </div>
+            <span className="w-20 h-20 rounded-full bg-[#e63946]/90 flex items-center justify-center shadow-2xl">
+              <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </span>
+          </button>
         )}
+
+        {/* 配信時間は映像に焼き込み済み（scoreboard-canvas.ts）。CSS オーバーレイは廃止 */}
 
         {/* 右下: 全画面ボタン（視聴中のみ表示） */}
         {isWatching && viewerToken && (
@@ -399,14 +429,4 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
 
     </div>
   );
-}
-
-function formatElapsed(totalSeconds: number): string {
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  if (h > 0) return `${h}:${mm}:${ss}`;
-  return `${mm}:${ss}`;
 }
