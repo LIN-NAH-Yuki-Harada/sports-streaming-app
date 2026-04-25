@@ -37,18 +37,18 @@ export function drawScoreboard(
   ctx.textBaseline = "middle";
 
   const scale = Math.max(targetH / 1080, 0.5);
-  const margin = Math.round(24 * scale);
-  const h = Math.round(46 * scale);
-  const pad = Math.round(12 * scale);
-  const gap = Math.round(6 * scale);
-  const radius = Math.round(4 * scale);
+  const margin = Math.round(28 * scale);
+  const h = Math.round(64 * scale);
+  const pad = Math.round(16 * scale);
+  const gap = Math.round(8 * scale);
+  const radius = Math.round(6 * scale);
 
-  const fontTeam = `bold ${Math.round(22 * scale)}px ${FONT_STACK}`;
-  const fontScore = `900 ${Math.round(32 * scale)}px ${FONT_STACK}`;
-  const fontSet = `bold ${Math.round(14 * scale)}px ${FONT_STACK}`;
-  const fontPeriod = `500 ${Math.round(18 * scale)}px ${FONT_STACK}`;
-  const fontPill = `500 ${Math.round(18 * scale)}px ${FONT_STACK}`;
-  const fontPoint = `700 ${Math.round(16 * scale)}px ${FONT_STACK}`;
+  const fontTeam = `bold ${Math.round(30 * scale)}px ${FONT_STACK}`;
+  const fontScore = `900 ${Math.round(44 * scale)}px ${FONT_STACK}`;
+  const fontSet = `bold ${Math.round(20 * scale)}px ${FONT_STACK}`;
+  const fontPeriod = `600 ${Math.round(24 * scale)}px ${FONT_STACK}`;
+  const fontPill = `600 ${Math.round(24 * scale)}px ${FONT_STACK}`;
+  const fontPoint = `700 ${Math.round(22 * scale)}px ${FONT_STACK}`;
 
   const showSets = state.home_sets > 0 || state.away_sets > 0;
 
@@ -132,8 +132,8 @@ export function drawScoreboard(
   if (state.pointLabel) {
     ctx.font = fontPoint;
     const labelW = Math.round(ctx.measureText(state.pointLabel).width + pad * 2);
-    const labelH = Math.round(28 * scale);
-    const labelY = topY + h + Math.round(6 * scale);
+    const labelH = Math.round(40 * scale);
+    const labelY = topY + h + Math.round(8 * scale);
     drawRoundedRect(ctx, leftX, labelY, labelW, labelH, radius);
     ctx.fillStyle = "rgba(234, 179, 8, 0.92)";
     ctx.fill();
