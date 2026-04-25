@@ -335,7 +335,7 @@ export function LiveKitBroadcaster({
           dynacast: true,
           videoCaptureDefaults: {
             facingMode: "environment",
-            resolution: { width: 1920, height: 1080, frameRate: 30 },
+            resolution: { width: 1280, height: 720, frameRate: 30 },
           },
           audioCaptureDefaults: {
             echoCancellation: true,
@@ -346,7 +346,7 @@ export function LiveKitBroadcaster({
             simulcast: true,
             videoCodec: "h264",
             videoEncoding: {
-              maxBitrate: 4_000_000,
+              maxBitrate: 2_500_000,
               maxFramerate: 30,
             },
             audioPreset: AudioPresets.musicHighQuality,
