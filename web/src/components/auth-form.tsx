@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase";
-import { detectInAppBrowser, type InAppBrowserInfo } from "@/lib/user-agent";
+import {
+  buildExternalBrowserUrl,
+  detectInAppBrowser,
+  type InAppBrowserInfo,
+} from "@/lib/user-agent";
 
 type Mode = "login" | "signup" | "reset";
 
@@ -36,6 +40,12 @@ export function AuthForm({ redirectTo }: AuthFormProps = {}) {
   useEffect(() => {
     setInApp(detectInAppBrowser());
   }, []);
+
+  function handleOpenInExternalBrowser() {
+    if (typeof window === "undefined" || !inApp) return;
+    const target = buildExternalBrowserUrl(window.location.href, inApp.platform);
+    window.location.href = target;
+  }
 
   async function handleCopyUrl() {
     if (typeof window === "undefined") return;
@@ -182,28 +192,35 @@ export function AuthForm({ redirectTo }: AuthFormProps = {}) {
           </p>
           <button
             type="button"
-            onClick={handleCopyUrl}
+            onClick={handleOpenInExternalBrowser}
             className="mt-3 w-full bg-white text-black text-xs font-semibold py-2.5 rounded-md hover:bg-gray-100 transition flex items-center justify-center gap-2"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+            </svg>
+            {recommendedBrowser} で開く
+          </button>
+          <button
+            type="button"
+            onClick={handleCopyUrl}
+            className="mt-2 w-full bg-transparent text-amber-100/80 text-[11px] py-1.5 rounded-md hover:text-amber-100 transition flex items-center justify-center gap-1.5"
           >
             {urlCopied ? (
               <>
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
                 URL をコピーしました
               </>
             ) : (
               <>
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
-                URL をコピーして {recommendedBrowser} で開く
+                ボタンが効かない場合は URL をコピー
               </>
             )}
           </button>
-          <p className="text-[10px] text-amber-100/60 mt-2 leading-relaxed">
-            またはメニュー（{inApp?.platform === "ios" ? "右上の「…」→「Safariで開く」" : "右上の「⋮」→「ブラウザで開く」"}）からも開けます。
-          </p>
         </div>
       )}
 

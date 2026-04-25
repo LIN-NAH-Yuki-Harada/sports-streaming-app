@@ -47,6 +47,24 @@ export type BroadcastResolution = {
   frameRate: number;
 };
 
+// アプリ内ブラウザから外部ブラウザを直接開くための URL を生成。
+// iOS は x-safari-https スキーム、Android は intent URI で Chrome を起動する。
+export function buildExternalBrowserUrl(currentUrl: string, platform: Platform): string {
+  if (platform === "ios") {
+    return currentUrl.replace(/^https:\/\//, "x-safari-https://");
+  }
+  if (platform === "android") {
+    try {
+      const url = new URL(currentUrl);
+      const hostPath = `${url.host}${url.pathname}${url.search}${url.hash}`;
+      return `intent://${hostPath}#Intent;scheme=https;package=com.android.chrome;end`;
+    } catch {
+      return currentUrl;
+    }
+  }
+  return currentUrl;
+}
+
 // Canvas 合成配信の解像度を、端末性能に応じて選ぶ。
 // 旧 iOS（13 以下）や低コア数端末では 720p にフォールバックして CPU 負荷を抑える。
 export function pickBroadcastResolution(): BroadcastResolution {
