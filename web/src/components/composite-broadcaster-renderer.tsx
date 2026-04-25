@@ -38,12 +38,11 @@ export function CompositeBroadcasterRenderer({
     targetResolution,
     enabled: true,
   });
-  const { canvasRef, videoRef, videoTrack, audioTrack, status, error } = composite;
+  const { canvasRef, videoRef, videoTrack, status, error } = composite;
 
-  const publishedRef = useRef<{
-    video: LocalTrackPublication | null;
-    audio: LocalTrackPublication | null;
-  }>({ video: null, audio: null });
+  // 音声は LiveKitRoom の audio={true} 経由で auto-publish される（livekit-video.tsx 側で設定済み）。
+  // ここで手動 publish するのは Canvas 合成 video のみ。
+  const publishedVideoRef = useRef<LocalTrackPublication | null>(null);
 
   // 接続状態の変化を通知
   useEffect(() => {
@@ -65,12 +64,12 @@ export function CompositeBroadcasterRenderer({
   // 画面スリープ防止（visibilitychange で自動再取得）
   useWakeLock(true);
 
-  // Connected + 合成トラック準備完了で publish
+  // Connected + 合成 video トラック準備完了で publish（音声は LiveKit が自動 publish）
   useEffect(() => {
     if (connectionState !== ConnectionState.Connected) return;
     if (!localParticipant) return;
-    if (!videoTrack || !audioTrack) return;
-    if (publishedRef.current.video || publishedRef.current.audio) return;
+    if (!videoTrack) return;
+    if (publishedVideoRef.current) return;
 
     let cancelled = false;
     (async () => {
@@ -88,16 +87,7 @@ export function CompositeBroadcasterRenderer({
           await localParticipant.unpublishTrack(videoTrack, true);
           return;
         }
-        publishedRef.current.video = videoPub;
-
-        const audioPub = await localParticipant.publishTrack(audioTrack, {
-          source: Track.Source.Microphone,
-        });
-        if (cancelled) {
-          await localParticipant.unpublishTrack(audioTrack, true);
-          return;
-        }
-        publishedRef.current.audio = audioPub;
+        publishedVideoRef.current = videoPub;
       } catch (e) {
         console.error("[composite] publishTrack エラー:", e);
       }
@@ -106,21 +96,18 @@ export function CompositeBroadcasterRenderer({
     return () => {
       cancelled = true;
     };
-  }, [connectionState, localParticipant, videoTrack, audioTrack]);
+  }, [connectionState, localParticipant, videoTrack]);
 
   // アンマウント時に unpublish
   useEffect(() => {
     return () => {
       const lp = localParticipant;
-      const { video, audio } = publishedRef.current;
+      const video = publishedVideoRef.current;
       if (!lp) return;
       if (video?.track) {
         lp.unpublishTrack(video.track, true).catch(() => {});
       }
-      if (audio?.track) {
-        lp.unpublishTrack(audio.track, true).catch(() => {});
-      }
-      publishedRef.current = { video: null, audio: null };
+      publishedVideoRef.current = null;
     };
     // localParticipant が落ちたタイミングでも cleanup させたいので依存にしない
     // eslint-disable-next-line react-hooks/exhaustive-deps
