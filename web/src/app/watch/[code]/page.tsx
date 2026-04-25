@@ -14,9 +14,6 @@ type FullscreenDocument = Document & {
   webkitFullscreenElement?: Element | null;
   webkitExitFullscreen?: () => Promise<void> | void;
 };
-type IOSVideoElement = HTMLVideoElement & {
-  webkitEnterFullscreen?: () => void;
-};
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
@@ -28,15 +25,17 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [notFound, setNotFound] = useState(false);
   const [viewerToken, setViewerToken] = useState<string | null>(null);
   const [isWatching, setIsWatching] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
+  const [isFakeFullscreen, setIsFakeFullscreen] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const isFullscreen = isNativeFullscreen || isFakeFullscreen;
 
-  // 全画面状態を OS のイベントで追従（ESC や iOS のスワイプ離脱に対応）
+  // ネイティブ全画面状態を追従（ESC・iOS のスワイプ離脱に対応）
   useEffect(() => {
     const doc = document as FullscreenDocument;
     const handler = () => {
       const active = doc.fullscreenElement || doc.webkitFullscreenElement;
-      setIsFullscreen(Boolean(active));
+      setIsNativeFullscreen(Boolean(active));
     };
     document.addEventListener("fullscreenchange", handler);
     document.addEventListener("webkitfullscreenchange", handler);
@@ -46,20 +45,35 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     };
   }, []);
 
+  // フェイク全画面中は ESC キーで解除
+  useEffect(() => {
+    if (!isFakeFullscreen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFakeFullscreen(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isFakeFullscreen]);
+
   async function toggleFullscreen() {
     const stage = stageRef.current as FullscreenElement | null;
     if (!stage) return;
     const doc = document as FullscreenDocument;
-    const active = doc.fullscreenElement || doc.webkitFullscreenElement;
+    const activeNative = doc.fullscreenElement || doc.webkitFullscreenElement;
 
-    if (active) {
+    if (activeNative) {
       try {
         if (doc.exitFullscreen) await doc.exitFullscreen();
         else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen();
       } catch {}
       return;
     }
+    if (isFakeFullscreen) {
+      setIsFakeFullscreen(false);
+      return;
+    }
 
+    // ネイティブ全画面を試す（PC Chrome / Android Chrome / iPad 16.4+ 等）
     try {
       if (stage.requestFullscreen) {
         await stage.requestFullscreen();
@@ -71,11 +85,9 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       }
     } catch {}
 
-    // iOS Safari フォールバック: video 要素単独で全画面
-    const video = stage.querySelector("video") as IOSVideoElement | null;
-    if (video?.webkitEnterFullscreen) {
-      video.webkitEnterFullscreen();
-    }
+    // フォールバック: フェイク全画面（iPhone Safari 等、要素単位の Fullscreen API が使えない環境）
+    // 親要素ごと画面全体に拡大するため、スコアボード等のオーバーレイも表示され続ける
+    setIsFakeFullscreen(true);
   }
 
   // 初回: DBから配信データを取得
@@ -255,8 +267,12 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       {/* メイン映像エリア — 画面全体を使用 */}
       <div
         ref={stageRef}
-        className="relative flex-1 bg-black flex items-center justify-center overflow-hidden"
-        style={{ minHeight: "60vh" }}
+        className={
+          isFakeFullscreen
+            ? "fixed inset-0 z-50 bg-black flex items-center justify-center overflow-hidden"
+            : "relative flex-1 bg-black flex items-center justify-center overflow-hidden"
+        }
+        style={isFakeFullscreen ? undefined : { minHeight: "60vh" }}
       >
         {isWatching && viewerToken ? (
           <LiveKitViewer
