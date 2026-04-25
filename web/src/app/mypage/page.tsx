@@ -8,6 +8,7 @@ import { AuthForm } from "@/components/auth-form";
 import { PlanTeaser } from "@/components/plan-teaser";
 import { useToast } from "@/components/toaster";
 import { Logo } from "@/components/logo";
+import { AvatarUploader } from "@/components/avatar-uploader";
 import { createClient } from "@/lib/supabase";
 import { updateProfile } from "@/lib/database";
 
@@ -179,9 +180,13 @@ function MyPageInner() {
         {!loading && user && (
           <>
             <div className="flex items-center gap-3 md:gap-4 mb-8">
-              <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-[#e63946]/20 flex items-center justify-center text-[#e63946] text-sm md:text-lg font-bold shrink-0">
-                {(profile?.display_name || user.email)?.charAt(0).toUpperCase() || "U"}
-              </div>
+              <AvatarUploader
+                userId={user.id}
+                avatarUrl={profile?.avatar_url ?? null}
+                fallbackChar={(profile?.display_name || user.email)?.charAt(0).toUpperCase() || "U"}
+                onUpdated={refreshProfile}
+                size="md"
+              />
               <div className="flex-1 min-w-0">
                 {/* 表示名 */}
                 {editingName ? (
