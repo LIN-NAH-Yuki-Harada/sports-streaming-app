@@ -63,29 +63,20 @@ export async function validatePromoCode(
 /**
  * プロモコードの使用回数をアトミックにインクリメントする。
  * checkout.session.completed 受信時に呼ぶ。
+ *
+ * Postgres 側の RPC 関数 increment_promo_usage が単一 UPDATE で実行されるため、
+ * 同時 checkout が走っても lost update は発生しない（旧: SELECT→+1→UPDATE の
+ * 3 段階で race condition があり、uses_count が正しく加算されないことがあった）。
  */
 export async function incrementPromoUsage(code: string): Promise<void> {
   const normalized = code.trim().toUpperCase();
   if (!normalized) return;
 
   const supabase = getAdminClient();
-
-  // 現在値を取得してから +1 する（Supabase は RPC なしの atomic increment が不得意なので2段階で妥協）
-  const { data: current, error: selectErr } = await supabase
-    .from("promo_codes")
-    .select("uses_count")
-    .eq("code", normalized)
-    .single();
-  if (selectErr || !current) {
-    console.error("[promo/increment] select failed:", selectErr?.message);
-    return;
-  }
-
-  const { error: updateErr } = await supabase
-    .from("promo_codes")
-    .update({ uses_count: (current.uses_count ?? 0) + 1 })
-    .eq("code", normalized);
-  if (updateErr) {
-    console.error("[promo/increment] update failed:", updateErr.message);
+  const { error } = await supabase.rpc("increment_promo_usage", {
+    promo_code: normalized,
+  });
+  if (error) {
+    console.error("[promo/increment] rpc failed:", error.message);
   }
 }
