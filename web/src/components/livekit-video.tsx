@@ -296,10 +296,15 @@ export function LiveKitBroadcaster({
               echoCancellation: true,
               noiseSuppression: false,
               autoGainControl: false,
+              // ステレオマイク対応端末（iPhone XS+, Pixel/Galaxy 上位機種等）で
+              // 観客席の左右の声援・ボール音の方向感を伝送可能にする
+              channelCount: 2,
             },
             publishDefaults: {
-              // 64kbps Opus（musicHighQuality 相当）で歓声・ホイッスル等を綺麗に伝送
-              audioPreset: AudioPresets.musicHighQuality,
+              // 128kbps Opus stereo（musicHighQualityStereo）で歓声・ホイッスル・
+              // スパイク音等を立体的に伝送。映像 720p+2.5Mbps と組み合わせて発熱
+              // 影響微小（音声 +32kbps ≒ +1% 帯域）。
+              audioPreset: AudioPresets.musicHighQualityStereo,
               // RED (Redundant Encoding) でパケットロス時の音切れ防止
               red: true,
             },
@@ -343,6 +348,8 @@ export function LiveKitBroadcaster({
             echoCancellation: true,
             noiseSuppression: false,
             autoGainControl: false,
+            // ステレオマイク対応端末で観客席の左右の声援・ボール音の方向感を伝送
+            channelCount: 2,
           },
           publishDefaults: {
             simulcast: true,
@@ -351,7 +358,8 @@ export function LiveKitBroadcaster({
               maxBitrate: 2_500_000,
               maxFramerate: 30,
             },
-            audioPreset: AudioPresets.musicHighQuality,
+            // 128kbps Opus stereo で歓声・ホイッスル・スパイク音を立体的に伝送
+            audioPreset: AudioPresets.musicHighQualityStereo,
             red: true,
           },
         }}
