@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
 import { PlanTeaser } from "@/components/plan-teaser";
@@ -23,6 +23,16 @@ import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
 
 const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
+
+// 配信時間を「X時間Y分Z秒」形式に整形（配信終了サマリモーダル表示用）
+function formatBroadcastDuration(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}時間${m}分${s}秒`;
+  if (m > 0) return `${m}分${s}秒`;
+  return `${s}秒`;
+}
 
 // バレーボールのルール設定
 const VOLLEYBALL_RULES: Record<string, {
@@ -80,6 +90,7 @@ export default function BroadcastPage() {
 
 function BroadcastPageInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { user, profile, loading, refreshProfile } = useAuth();
   const toast = useToast();
   const subscribed = profile?.plan === "broadcaster" || profile?.plan === "team";
@@ -137,6 +148,8 @@ function BroadcastPageInner() {
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
+  // 配信終了後に表示するサマリモーダル用の state（次のアクションへの導線として使う）
+  const [endedSummary, setEndedSummary] = useState<{ durationSec: number } | null>(null);
 
   // スケジュールから遷移してきた場合、フォームを事前入力
   useEffect(() => {
@@ -482,6 +495,12 @@ function BroadcastPageInner() {
   async function handleEnd(options?: { skipConfirm?: boolean }) {
     if (!options?.skipConfirm && !confirm("配信を終了しますか？")) return;
 
+    // 配信終了モーダル用に経過時間を確保（state リセット前に計算する必要あり）
+    const startedAtMs = broadcastStartedAt ? new Date(broadcastStartedAt).getTime() : null;
+    const durationSec = startedAtMs
+      ? Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000))
+      : 0;
+
     // 実際の配信秒数をサーバーに加算（LiveKit 切断より前に呼ぶ）
     const supabase = createClient();
     const { data: sessionData } = await supabase.auth.getSession();
@@ -513,6 +532,9 @@ function BroadcastPageInner() {
 
     // profile を最新化（残秒表示を更新するため）
     refreshProfile();
+
+    // 配信終了サマリモーダルを表示（次の導線を提示）
+    setEndedSummary({ durationSec });
   }
 
   // 無料お試しカウントダウンタイマー（累積秒数ベース）
@@ -1256,6 +1278,60 @@ function BroadcastPageInner() {
         )}
       </div>
       </div>
+
+      {/* 配信終了サマリモーダル: 配信終了直後に「次に何をするか」を明示する導線 */}
+      {endedSummary && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={() => setEndedSummary(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="broadcast-ended-title"
+        >
+          <div
+            className="bg-[#0a0a0a] rounded-2xl ring-1 ring-white/10 max-w-sm w-full p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-center">
+              <div className="text-4xl mb-2" aria-hidden="true">🎉</div>
+              <h2 id="broadcast-ended-title" className="text-lg font-bold text-white">
+                配信を終了しました
+              </h2>
+              <p className="text-sm text-gray-400 mt-1">お疲れさまでした！</p>
+            </div>
+
+            {endedSummary.durationSec > 0 && (
+              <div className="mt-5 bg-white/5 rounded-lg p-3 text-center">
+                <p className="text-[10px] text-gray-500 uppercase tracking-widest">配信時間</p>
+                <p className="text-2xl font-bold text-white tabular-nums mt-1">
+                  {formatBroadcastDuration(endedSummary.durationSec)}
+                </p>
+              </div>
+            )}
+
+            <div className="mt-6 space-y-2">
+              <button
+                onClick={() => router.push("/mypage")}
+                className="w-full bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold py-3 rounded-md transition"
+              >
+                マイページに戻る
+              </button>
+              <button
+                onClick={() => setEndedSummary(null)}
+                className="w-full bg-white/10 hover:bg-white/15 text-white text-sm font-medium py-3 rounded-md transition"
+              >
+                もう一度配信する
+              </button>
+              <button
+                onClick={() => router.push("/")}
+                className="w-full text-xs text-gray-500 hover:text-gray-300 py-2 transition"
+              >
+                ホームに戻る
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
