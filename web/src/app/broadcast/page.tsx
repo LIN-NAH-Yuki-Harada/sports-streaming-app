@@ -483,7 +483,12 @@ function BroadcastPageInner() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ seconds: elapsedSec }),
+        // broadcastId をサーバーに渡し、サーバー側で started_at と比較して
+        // 改ざんされた seconds を実経過時間でクランプ可能にする
+        body: JSON.stringify({
+          seconds: elapsedSec,
+          broadcastId: broadcastRef.current?.id ?? null,
+        }),
         keepalive,
       });
     } catch {
@@ -582,6 +587,10 @@ function BroadcastPageInner() {
     const handlePageHide = () => {
       if (!accessToken) return;
 
+      // broadcastRef.current は配信終了処理で null 化されるため、
+      // 後段の trial-consume が broadcastId を渡せるよう先にスナップショットを取る
+      const broadcastIdSnapshot = broadcastRef.current?.id ?? null;
+
       // 1. 配信を ended にする（既存ロジック）
       const bc = broadcastRef.current;
       if (bc) {
@@ -613,7 +622,11 @@ function BroadcastPageInner() {
               "Content-Type": "application/json",
               Authorization: `Bearer ${accessToken}`,
             },
-            body: JSON.stringify({ seconds: elapsedSec }),
+            // broadcastId をサーバーに渡してサーバー側 started_at とのクロスチェックを有効化
+            body: JSON.stringify({
+              seconds: elapsedSec,
+              broadcastId: broadcastIdSnapshot,
+            }),
             keepalive: true,
           });
         }

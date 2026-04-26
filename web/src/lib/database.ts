@@ -342,9 +342,11 @@ export async function updateMemberRole(
 // ===== 配信 =====
 
 function generateShareCode(): string {
+  // 8 文字 × 32 文字種 ≒ 40 bit エントロピー（旧 6 文字 30 bit からの強化）。
+  // 推測攻撃と Birthday Paradox による衝突を実用上ほぼ無視できる範囲に下げる。
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let code = "";
-  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
   return code;
 }
 
