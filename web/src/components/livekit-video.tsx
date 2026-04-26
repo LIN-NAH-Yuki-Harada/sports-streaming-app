@@ -207,7 +207,11 @@ function ViewerRenderer() {
           </div>
         </div>
       )}
-      {connectionState === ConnectionState.Disconnected && prevState.current === ConnectionState.Connected && (
+      {/* 切断時のオーバーレイ。
+          以前は prevState===Connected の前提で出していたため、状態遷移の取りこぼしや
+          初回接続失敗時にオーバーレイが表示されず「終了画面で固まってホームに戻れない」
+          クレームの原因になっていた（2026-04-26）。Disconnected なら常に表示する。 */}
+      {connectionState === ConnectionState.Disconnected && (
         <div className="absolute inset-0 z-[3] flex items-center justify-center bg-black/80">
           <div className="flex flex-col items-center gap-2 px-6 py-5 bg-[#111] border border-white/10 rounded-xl max-w-xs text-center" role="status">
             <p className="text-sm font-semibold text-gray-200">配信が終了しました</p>
