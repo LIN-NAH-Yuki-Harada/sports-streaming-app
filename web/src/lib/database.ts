@@ -49,9 +49,17 @@ export type Broadcast = {
 
 export async function getProfile(userId: string): Promise<Profile | null> {
   const supabase = createClient();
+  // 機密カラム（youtube_access_token / youtube_refresh_token /
+  // stripe_customer_id / stripe_subscription_id）はクライアントから column-level
+  // GRANT で遮断されているため、明示的なカラムリストで取得する。
+  // これらの値が必要な処理は API ルート（service_role）経由で行う。
   const { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select(
+      "id, display_name, avatar_url, plan, trial_used, trial_seconds_used, " +
+      "youtube_channel_id, youtube_channel_name, youtube_linked_at, " +
+      "subscription_status, current_period_end, created_at, updated_at"
+    )
     .eq("id", userId)
     .single();
 
@@ -59,7 +67,14 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     console.error("プロフィール取得エラー:", error.message);
     return null;
   }
-  return data;
+  // クライアント取得不可な機密カラムは null で埋めて Profile 型互換にする
+  return {
+    ...data,
+    youtube_access_token: null,
+    youtube_refresh_token: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+  } as Profile;
 }
 
 export async function updateProfile(

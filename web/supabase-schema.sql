@@ -15,6 +15,7 @@ create table public.profiles (
 -- RLS ポリシー
 alter table public.profiles enable row level security;
 
+-- 行レベル: 誰でも閲覧可（機密カラムは下の column-level GRANT で別途遮断）
 create policy "誰でもプロフィールを閲覧可能"
   on public.profiles for select using (true);
 
@@ -23,6 +24,17 @@ create policy "自分のプロフィールのみ更新可能"
 
 create policy "自分のプロフィールを作成可能"
   on public.profiles for insert with check (auth.uid() = id);
+
+-- カラムレベル: 機密カラム（youtube_access_token / youtube_refresh_token /
+-- stripe_customer_id / stripe_subscription_id）はクライアントから完全遮断する。
+-- ※ 詳細は supabase-migration-profiles-rls-tighten.sql を参照。
+revoke select on public.profiles from authenticated, anon;
+grant select (
+  id, display_name, avatar_url, plan, trial_used, trial_seconds_used,
+  youtube_channel_id, youtube_channel_name, youtube_linked_at,
+  subscription_status, current_period_end, created_at, updated_at
+) on public.profiles to authenticated;
+grant select (id, display_name, avatar_url) on public.profiles to anon;
 
 -- 2. チームテーブル
 create table public.teams (
