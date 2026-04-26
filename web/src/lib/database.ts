@@ -63,18 +63,19 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     .eq("id", userId)
     .single();
 
-  if (error) {
-    console.error("プロフィール取得エラー:", error.message);
+  if (error || !data) {
+    if (error) console.error("プロフィール取得エラー:", error.message);
     return null;
   }
   // クライアント取得不可な機密カラムは null で埋めて Profile 型互換にする
+  // .select(列リスト) の戻り値型が複雑なため Record<string, unknown> 経由でキャスト
   return {
-    ...data,
+    ...(data as unknown as Record<string, unknown>),
     youtube_access_token: null,
     youtube_refresh_token: null,
     stripe_customer_id: null,
     stripe_subscription_id: null,
-  } as Profile;
+  } as unknown as Profile;
 }
 
 export async function updateProfile(
