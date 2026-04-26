@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   LiveKitRoom,
   VideoTrack,
@@ -209,12 +210,12 @@ function ViewerRenderer() {
             <p className="text-[11px] text-gray-400">
               配信者がストリームを停止したか、回線が切断されました
             </p>
-            <a
+            <Link
               href="/"
               className="mt-2 inline-block px-4 py-2 rounded-md bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold"
             >
               ホームへ戻る
-            </a>
+            </Link>
           </div>
         </div>
       )}
