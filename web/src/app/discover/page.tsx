@@ -4,7 +4,7 @@ import { Logo } from "@/components/logo";
 import { ShareCodeInput, InstallGuide } from "@/components/home-extras";
 import { getAdminClient } from "@/lib/supabase-admin";
 import { getServerUser } from "@/lib/supabase-server";
-import type { Broadcast } from "@/lib/database";
+import { BROADCAST_PUBLIC_COLUMNS, type Broadcast } from "@/lib/database";
 
 export const metadata: Metadata = {
   title: "ホーム",
@@ -70,7 +70,7 @@ async function fetchMyRelatedBroadcasts(
   const supabase = getAdminClient();
   let query = supabase
     .from("broadcasts")
-    .select("*")
+    .select(BROADCAST_PUBLIC_COLUMNS)
     .eq("status", status)
     .order("started_at", { ascending: false })
     .limit(opts.limit);
@@ -85,7 +85,7 @@ async function fetchMyRelatedBroadcasts(
   query = query.or(orClauses.join(","));
   const { data, error } = await query;
   if (error) return [];
-  return (data as Broadcast[]) ?? [];
+  return (data ?? []) as unknown as Broadcast[];
 }
 
 function formatTime(iso: string): string {

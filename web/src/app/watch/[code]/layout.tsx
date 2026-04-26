@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
 import { getAdminClient } from "@/lib/supabase-admin";
-import type { Broadcast } from "@/lib/database";
+import { BROADCAST_PUBLIC_COLUMNS, type Broadcast } from "@/lib/database";
 
 async function fetchBroadcast(code: string): Promise<Broadcast | null> {
   try {
     const supabase = getAdminClient();
     const { data, error } = await supabase
       .from("broadcasts")
-      .select("*")
+      .select(BROADCAST_PUBLIC_COLUMNS)
       .eq("share_code", code.toUpperCase())
       .single();
     if (error) return null;
-    return data as Broadcast;
+    return data as unknown as Broadcast;
   } catch {
     return null;
   }
