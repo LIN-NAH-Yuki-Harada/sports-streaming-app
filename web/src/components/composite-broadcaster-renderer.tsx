@@ -9,6 +9,7 @@ import {
 import { ConnectionState, Track, type LocalTrackPublication } from "livekit-client";
 import { useReconnectDuration } from "@/components/livekit-video";
 import { useCompositeBroadcastTrack } from "@/lib/use-composite-broadcast-track";
+import { useAudioCompressor } from "@/lib/use-audio-compressor";
 import { BroadcastHealthBadges } from "@/components/broadcast-health-badges";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import type { BroadcastResolution } from "@/lib/user-agent";
@@ -39,6 +40,9 @@ export function CompositeBroadcasterRenderer({
     enabled: true,
   });
   const { canvasRef, videoRef, videoTrack, status, error } = composite;
+
+  // 配信者マイクに音割れ防止コンプレッサーをアタッチ（応援の歓声でクリッピングする問題対策）
+  useAudioCompressor();
 
   // 音声は LiveKitRoom の audio={true} 経由で auto-publish される（livekit-video.tsx 側で設定済み）。
   // ここで手動 publish するのは Canvas 合成 video のみ。
