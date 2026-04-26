@@ -371,8 +371,11 @@ export async function createBroadcast(params: {
 }): Promise<Broadcast | null> {
   const supabase = createClient();
 
-  // 共有コードの衝突時は最大3回リトライ
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // 共有コードの衝突時は最大5回まで exponential backoff でリトライ。
+  // 8 文字 × 32 種 ≒ 40bit でも、ユーザー数増加 + 同時生成タイミング次第で
+  // Birthday Paradox により連続衝突しうるため、固定 3 回ではなく待機付き 5 回に強化。
+  const MAX_ATTEMPTS = 5;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const shareCode = generateShareCode();
     const { data, error } = await supabase
       .from("broadcasts")
@@ -395,9 +398,15 @@ export async function createBroadcast(params: {
 
     if (!error) return data;
 
-    // UNIQUE制約違反（コード衝突）ならリトライ
+    // UNIQUE制約違反（コード衝突）なら exponential backoff してリトライ
     if (error.code === "23505") {
-      console.warn(`共有コード ${shareCode} が重複。リトライ ${attempt + 1}/3`);
+      console.warn(
+        `共有コード ${shareCode} が重複。リトライ ${attempt + 1}/${MAX_ATTEMPTS}`,
+      );
+      if (attempt < MAX_ATTEMPTS - 1) {
+        const delayMs = 10 * 2 ** attempt; // 10ms → 20 → 40 → 80ms
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
       continue;
     }
 
@@ -406,7 +415,7 @@ export async function createBroadcast(params: {
     return null;
   }
 
-  console.error("共有コード生成に3回失敗しました");
+  console.error(`共有コード生成に ${MAX_ATTEMPTS} 回失敗しました`);
   return null;
 }
 
