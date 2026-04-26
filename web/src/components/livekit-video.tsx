@@ -13,6 +13,7 @@ import {
 import { Track, ConnectionState, AudioPresets } from "livekit-client";
 import { CompositeBroadcasterRenderer } from "@/components/composite-broadcaster-renderer";
 import { BroadcastHealthBadges } from "@/components/broadcast-health-badges";
+import { useAudioCompressor } from "@/lib/use-audio-compressor";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import type { BroadcastResolution } from "@/lib/user-agent";
 
@@ -54,6 +55,9 @@ function BroadcasterRenderer({
   const viewerCount = Math.max(0, participants.length - 1); // 自分を除く
   const prevState = useRef(connectionState);
   const reconnectSeconds = useReconnectDuration(connectionState);
+
+  // 配信者マイクに音割れ防止コンプレッサーをアタッチ（応援の歓声でクリッピングする問題対策）
+  useAudioCompressor();
 
   useEffect(() => {
     if (
