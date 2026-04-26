@@ -96,18 +96,33 @@ export async function POST(request: Request) {
         if (!userId) break;
 
         const priceId = sub.items.data[0]?.price.id;
-        const plan = priceIdToPlan(priceId) || "free";
+        const plan = priceIdToPlan(priceId);
+
+        // subscription_status / current_period_end / subscription_id は常に最新化する。
+        // ただし plan は priceId が判定できたときだけ更新する。
+        // 旧実装では `priceIdToPlan(priceId) || "free"` としていたため、
+        // priceId が undefined（タイミング遅延）や登録された PRICE_IDS と一致しないケースで
+        // 課金中の team/broadcaster ユーザーが意図せず free に強制ダウングレードされる事故が発生していた。
+        // plan を据え置けば、未知の priceId が来ても現状の権限が剥奪されない。
+        const baseUpdate: Record<string, string | null> = {
+          stripe_subscription_id: sub.id,
+          subscription_status: sub.status,
+          current_period_end: sub.items.data[0]?.current_period_end
+            ? new Date(sub.items.data[0].current_period_end * 1000).toISOString()
+            : null,
+        };
+        if (plan) {
+          baseUpdate.plan = plan;
+        } else {
+          console.warn(
+            "[stripe-webhook] customer.subscription.updated: unknown priceId, plan kept as-is",
+            { priceId, userId, subscriptionId: sub.id, status: sub.status }
+          );
+        }
 
         const { error: updateErr } = await supabaseAdmin
           .from("profiles")
-          .update({
-            plan,
-            stripe_subscription_id: sub.id,
-            subscription_status: sub.status,
-            current_period_end: sub.items.data[0]?.current_period_end
-              ? new Date(sub.items.data[0].current_period_end * 1000).toISOString()
-              : null,
-          })
+          .update(baseUpdate)
           .eq("id", userId);
         if (updateErr) {
           console.error("[stripe-webhook] customer.subscription.updated update failed:", updateErr.message, { userId });
