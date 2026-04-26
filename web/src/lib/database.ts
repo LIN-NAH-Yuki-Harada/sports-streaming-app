@@ -475,12 +475,20 @@ export async function getTeamNames(): Promise<{ name: string; sport: string }[]>
   return result;
 }
 
-// 過去の配信履歴を取得（終了済みのみ、新しい順）
+// 過去の配信履歴を取得（自分が配信したものに限る、終了済みのみ、新しい順）
 export async function getBroadcastHistory(limit = 50): Promise<Broadcast[]> {
   const supabase = createClient();
+
+  // broadcaster_id で必ず絞る。これがないと他ユーザーの終了済み配信が
+  // 履歴タブに混入してしまう（broadcasts は share_code 視聴のため SELECT が広く許可されているテーブル）
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) return [];
+
   const { data, error } = await supabase
     .from("broadcasts")
     .select("*")
+    .eq("broadcaster_id", userId)
     .eq("status", "ended")
     .order("started_at", { ascending: false })
     .limit(limit);
