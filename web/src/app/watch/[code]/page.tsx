@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, use } from "react";
+import Link from "next/link";
 import { getBroadcastByCode, type Broadcast } from "@/lib/database";
 import { createClient } from "@/lib/supabase";
 import { LiveKitViewer } from "@/components/livekit-video";
@@ -285,7 +286,15 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         ) : (
           <div className="text-center px-6 max-w-md">
             <p className="text-sm text-gray-400">この配信は終了しました</p>
-            <p className="text-[10px] text-gray-600 mt-1 mb-6">ご視聴ありがとうございました</p>
+            <p className="text-[10px] text-gray-600 mt-1 mb-5">ご視聴ありがとうございました</p>
+
+            {/* 明示的な「ホームへ戻る」ボタン（LP 宣伝の前に配置して戻り導線を分かりやすく） */}
+            <Link
+              href="/"
+              className="block w-full bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold py-3 rounded-md text-center transition mb-6"
+            >
+              ← ホームへ戻る
+            </Link>
 
             {/* LIVE SPOtCH 宣伝 */}
             <div className="bg-[#111] border border-white/10 rounded-xl p-5 text-left">
@@ -348,9 +357,15 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               LIVE
             </div>
           ) : (
-            <div className="bg-gray-600 px-1.5 py-1 rounded text-[8px] sm:text-[9px] font-bold">
+            // 配信終了状態のバッジはタップ可能にしてホームへ戻れるようにする。
+            // ただの表示ラベルだとユーザーが押して反応がないことに困惑するため。
+            <Link
+              href="/"
+              aria-label="ホームへ戻る"
+              className="bg-gray-600 hover:bg-gray-500 active:bg-gray-700 px-1.5 py-1 rounded text-[8px] sm:text-[9px] font-bold transition"
+            >
               終了
-            </div>
+            </Link>
           )}
         </div>
 
