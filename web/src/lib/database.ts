@@ -91,18 +91,31 @@ export async function updateProfile(
   updates: Partial<Pick<Profile, "display_name" | "avatar_url">>
 ): Promise<Profile | null> {
   const supabase = createClient();
+  // profiles は機密列（youtube_*_token / stripe_*）が列レベル GRANT で遮断されているため、
+  // RETURNING * 相当の .select() (引数なし) は 42501 insufficient_privilege でエラーになる。
+  // getProfile と同じ明示列リストで取得し、機密列は呼び出し元では null で埋める。
   const { data, error } = await supabase
     .from("profiles")
     .update(updates)
     .eq("id", userId)
-    .select()
+    .select(
+      "id, display_name, avatar_url, plan, trial_used, trial_seconds_used, " +
+      "youtube_channel_id, youtube_channel_name, youtube_linked_at, " +
+      "subscription_status, current_period_end, created_at, updated_at"
+    )
     .single();
 
   if (error) {
     console.error("プロフィール更新エラー:", error.message);
     return null;
   }
-  return data;
+  return {
+    ...(data as unknown as Record<string, unknown>),
+    youtube_access_token: null,
+    youtube_refresh_token: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+  } as unknown as Profile;
 }
 
 // ===== チーム =====
@@ -393,10 +406,10 @@ export async function createBroadcast(params: {
         status: "live",
         team_id: params.teamId || null,
       })
-      .select()
+      .select(BROADCAST_PUBLIC_COLUMNS)
       .single();
 
-    if (!error) return data;
+    if (!error) return data as unknown as Broadcast;
 
     // UNIQUE制約違反（コード衝突）なら exponential backoff してリトライ
     if (error.code === "23505") {
