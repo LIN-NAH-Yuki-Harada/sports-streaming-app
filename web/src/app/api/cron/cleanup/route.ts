@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { isArchiveEnabled } from "@/lib/archive-flag";
 import { getEgressClient } from "@/lib/livekit-egress";
 import { getAdminClient } from "@/lib/supabase-admin";
+import { deleteRecording } from "@/lib/youtube-upload";
 
 export const runtime = "nodejs";
 
@@ -94,9 +95,43 @@ export async function GET(request: Request) {
     }
   }
 
+  // 4. 配信者が「YouTubeに保存しない」を選択した broadcast の MP4 を Storage から削除
+  // (archive-decision API で youtube_upload_status='cancelled' に書き換えられたもの。
+  //  webhook が後で recording_key をセットしてくる場合もあるため、ここでまとめて拾う)
+  let cancelledMp4Removed = 0;
+  if (isArchiveEnabled()) {
+    const { data: cancelled } = await admin
+      .from("broadcasts")
+      .select("id, recording_key")
+      .eq("youtube_upload_status", "cancelled")
+      .not("recording_key", "is", null)
+      .limit(50);
+
+    if (cancelled && cancelled.length > 0) {
+      for (const bc of cancelled) {
+        if (!bc.recording_key) continue;
+        try {
+          await deleteRecording(bc.recording_key);
+          await admin
+            .from("broadcasts")
+            .update({ recording_key: null, recording_file_path: null })
+            .eq("id", bc.id);
+          cancelledMp4Removed++;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "delete failed";
+          console.warn(
+            `[cron/cleanup] cancelled MP4 delete failed for ${bc.id}:`,
+            msg,
+          );
+        }
+      }
+    }
+  }
+
   return Response.json({
     cleaned: data?.length || 0,
     stuckStopped,
     staleUploadersReverted,
+    cancelledMp4Removed,
   });
 }

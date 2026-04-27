@@ -94,13 +94,31 @@ export async function POST(request: Request) {
     ? null
     : info.error || `egress ended with status ${info.status}`;
 
-  // 既に 'failed' にマークされている場合は上書きしない（start API での失敗マーク等を保護）
-  if (broadcast.youtube_upload_status === "failed" && isComplete) {
+  // 既存の最終状態（'failed' / 'cancelled'）は上書きしない。
+  // - 'failed': start API での失敗マーク等を保護
+  // - 'cancelled': 配信者が「YouTubeに保存しない」を選択した意思決定を保護
+  //   （webhook が後で完了通知してきても pending に戻さない）
+  if (
+    (broadcast.youtube_upload_status === "failed" ||
+      broadcast.youtube_upload_status === "cancelled") &&
+    isComplete
+  ) {
+    const kept = broadcast.youtube_upload_status;
     console.warn(
-      "[egress-webhook] keeping existing 'failed' status, not overwriting to pending",
+      `[egress-webhook] keeping existing '${kept}' status, not overwriting to pending`,
       { broadcastId: broadcast.id, egressId: info.egressId },
     );
-    return Response.json({ received: true, kept: "failed" });
+    // recording_key/file_path だけは保存（cleanup cron が cancelled の MP4 削除に使う）
+    if (kept === "cancelled" && recordingKey) {
+      await admin
+        .from("broadcasts")
+        .update({
+          recording_key: recordingKey,
+          recording_file_path: recordingFilePath,
+        })
+        .eq("id", broadcast.id);
+    }
+    return Response.json({ received: true, kept });
   }
 
   const updatePayload: Record<string, unknown> = {
