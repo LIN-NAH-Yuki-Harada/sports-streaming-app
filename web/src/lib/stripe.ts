@@ -4,7 +4,7 @@ import Stripe from "stripe";
 // シークレットキー（sk_test_... / sk_live_...）を使うため、必ずサーバー側でのみ利用
 export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   // TypeScriptで型が安定するように API バージョンを固定
-  apiVersion: "2026-03-25.dahlia",
+  apiVersion: "2026-04-22.dahlia",
   typescript: true,
 });
 
