@@ -52,7 +52,7 @@ export async function GET(request: Request) {
   // pending 1 件を取得。retry_count 少ない順 → completed_at 古い順で公平に処理。
   // youtube_upload_completed_at は失敗時にも更新する設計のため、リトライ対象を
   // 古い順に拾える（null は新規 = 最古扱い）。
-  const { data: pending, error: selectErr } = await admin
+  const { data: pendingRaw, error: selectErr } = await admin
     .from("broadcasts")
     .select(
       "id, recording_key, recording_file_path, broadcaster_id, " +
@@ -75,9 +75,27 @@ export async function GET(request: Request) {
     return Response.json({ error: "DB select failed" }, { status: 500 });
   }
 
-  if (!pending) {
+  if (!pendingRaw) {
     return Response.json({ processed: 0, message: "no pending uploads" });
   }
+
+  // Supabase の .select(列リスト文字列) は戻り値型が GenericStringError 寄りに
+  // ドリフトすることがあるため、ここで明示型キャストする
+  // (feedback_pr_local_build_required.md の確立パターン)。
+  const pending = pendingRaw as unknown as {
+    id: string;
+    recording_key: string | null;
+    recording_file_path: string | null;
+    broadcaster_id: string;
+    youtube_retry_count: number | null;
+    home_team: string;
+    away_team: string;
+    sport: string;
+    tournament: string | null;
+    venue: string | null;
+    started_at: string | null;
+    share_code: string;
+  };
 
   // 楽観排他で 'uploading' にマーク。他 tick が先取り済みなら 0 行更新で諦める。
   // started_at は uploading 突入時刻として記録（cleanup cron が stale 検出に使う）。
