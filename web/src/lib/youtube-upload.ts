@@ -267,3 +267,77 @@ export async function deleteRecording(recordingKey: string): Promise<void> {
     );
   }
 }
+
+// ===== broadcasts ステータス遷移ヘルパー =====
+
+/**
+ * アップロード成功 → status を 'completed' にして youtube_video_id 等を保存。
+ * Sprint C のリアルタイム視聴 UI がこの遷移を Realtime 購読で受信して
+ * iframe 埋め込みに切り替える。
+ */
+export async function markCompleted(params: {
+  broadcastId: string;
+  videoId: string;
+}): Promise<void> {
+  const admin = getAdminClient();
+  const { error } = await admin
+    .from("broadcasts")
+    .update({
+      youtube_upload_status: "completed",
+      youtube_video_id: params.videoId,
+      youtube_upload_completed_at: new Date().toISOString(),
+      youtube_upload_error: null,
+    })
+    .eq("id", params.broadcastId);
+  if (error) {
+    throw new Error(`markCompleted DB error: ${error.message}`);
+  }
+}
+
+/**
+ * 致命的失敗 → status を 'failed' に確定。再試行されない。
+ * UI 側はこの行のみ「アップロード失敗。再連携してください」等の文言を出す想定。
+ */
+export async function markFailed(params: {
+  broadcastId: string;
+  errorMessage: string;
+  retryCount: number;
+}): Promise<void> {
+  const admin = getAdminClient();
+  const { error } = await admin
+    .from("broadcasts")
+    .update({
+      youtube_upload_status: "failed",
+      youtube_upload_error: params.errorMessage.slice(0, 500),
+      youtube_upload_completed_at: new Date().toISOString(),
+      youtube_retry_count: params.retryCount,
+    })
+    .eq("id", params.broadcastId);
+  if (error) {
+    throw new Error(`markFailed DB error: ${error.message}`);
+  }
+}
+
+/**
+ * 一時的失敗 → status を 'pending' に戻して retry_count++、次回 cron tick で
+ * 再試行される。max_retry に達した場合は呼び出し側が markFailed に切り替える。
+ */
+export async function markPendingForRetry(params: {
+  broadcastId: string;
+  currentRetryCount: number;
+  errorMessage: string;
+}): Promise<void> {
+  const admin = getAdminClient();
+  const { error } = await admin
+    .from("broadcasts")
+    .update({
+      youtube_upload_status: "pending",
+      youtube_retry_count: params.currentRetryCount + 1,
+      youtube_upload_error: params.errorMessage.slice(0, 500),
+      youtube_upload_completed_at: new Date().toISOString(),
+    })
+    .eq("id", params.broadcastId);
+  if (error) {
+    throw new Error(`markPendingForRetry DB error: ${error.message}`);
+  }
+}

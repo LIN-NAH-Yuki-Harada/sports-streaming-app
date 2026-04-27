@@ -1,6 +1,17 @@
 import { timingSafeEqual } from "node:crypto";
 import { isArchiveEnabled } from "@/lib/archive-flag";
 import { getAdminClient } from "@/lib/supabase-admin";
+import {
+  classifyError,
+  deleteRecording,
+  downloadRecording,
+  getOAuthClientForProfile,
+  markCompleted,
+  markFailed,
+  markPendingForRetry,
+  uploadToYouTube,
+  type YoutubeProfile,
+} from "@/lib/youtube-upload";
 
 // googleapis / Supabase Storage SDK が Edge runtime で動かないため Node.js 強制
 export const runtime = "nodejs";
@@ -132,12 +143,130 @@ export async function GET(request: Request) {
     retryCount: pending.youtube_retry_count,
   });
 
-  // TODO B2-B6: Storage download → token refresh → YouTube upload → mark completed/failed
-  // 本コミット (B1) では claim までで一旦 200 返却。後続コミットで実処理を追加。
-  return Response.json({
-    processed: 1,
-    broadcastId: pending.id,
-    status: "uploading",
-    todo: "B2-B6 not yet implemented",
-  });
+  const retryCount = pending.youtube_retry_count ?? 0;
+
+  // recording_key が null の場合は致命的 (Sprint A の webhook がうまく動かなかった)。
+  // pending 取得時に not null フィルタしているので通常はここには来ないが防衛的に確認。
+  if (!pending.recording_key) {
+    await markFailed({
+      broadcastId: pending.id,
+      errorMessage: "recording_key is null (Egress webhook may have failed)",
+      retryCount,
+    });
+    return Response.json({
+      processed: 1,
+      broadcastId: pending.id,
+      status: "failed",
+      reason: "no_recording_key",
+    });
+  }
+
+  // 配信者の YouTube OAuth トークンを profile から取得 (service_role 経由なので
+  // 機密列も読める)。
+  const { data: profileRaw, error: profileErr } = await admin
+    .from("profiles")
+    .select("id, youtube_access_token, youtube_refresh_token")
+    .eq("id", pending.broadcaster_id)
+    .single();
+
+  if (profileErr || !profileRaw) {
+    await markFailed({
+      broadcastId: pending.id,
+      errorMessage: `broadcaster profile lookup failed: ${profileErr?.message ?? "no row"}`,
+      retryCount,
+    });
+    return Response.json({
+      processed: 1,
+      broadcastId: pending.id,
+      status: "failed",
+      reason: "profile_not_found",
+    });
+  }
+
+  const profile = profileRaw as unknown as YoutubeProfile;
+
+  try {
+    // 1. Storage から MP4 ダウンロード
+    const buffer = await downloadRecording(pending.recording_key);
+
+    // 2. OAuth client 準備 (期限切れなら refresh + DB 書き戻し)
+    const oauth2Client = await getOAuthClientForProfile(profile);
+
+    // 3. YouTube に unlisted アップロード
+    const videoId = await uploadToYouTube(
+      buffer,
+      {
+        homeTeam: pending.home_team,
+        awayTeam: pending.away_team,
+        sport: pending.sport,
+        tournament: pending.tournament,
+        venue: pending.venue,
+        startedAt: pending.started_at,
+        shareCode: pending.share_code,
+      },
+      oauth2Client,
+    );
+
+    // 4. completed をマーク (Realtime で UI に通知される)
+    await markCompleted({ broadcastId: pending.id, videoId });
+
+    // 5. Storage MP4 削除 (best-effort、失敗しても warn のみ)
+    await deleteRecording(pending.recording_key);
+
+    console.info("[cron/youtube-upload] upload completed", {
+      broadcastId: pending.id,
+      youtubeVideoId: videoId,
+    });
+
+    return Response.json({
+      processed: 1,
+      broadcastId: pending.id,
+      status: "completed",
+      youtubeVideoId: videoId,
+    });
+  } catch (err) {
+    const classified = classifyError(err);
+    console.error("[cron/youtube-upload] upload failed", {
+      broadcastId: pending.id,
+      type: classified.type,
+      status: classified.status,
+      message: classified.message,
+    });
+
+    // retry / auth-refresh は max に達していなければ pending に戻す
+    // (auth-refresh は次回 tick で getOAuthClientForProfile が refresh するので
+    //  その時点で通る可能性あり)
+    const isRetryable =
+      classified.type === "retry" || classified.type === "auth-refresh";
+    if (isRetryable && retryCount < MAX_RETRY - 1) {
+      await markPendingForRetry({
+        broadcastId: pending.id,
+        currentRetryCount: retryCount,
+        errorMessage: classified.message,
+      });
+      return Response.json({
+        processed: 1,
+        broadcastId: pending.id,
+        status: "pending_retry",
+        retryCount: retryCount + 1,
+        type: classified.type,
+      });
+    }
+
+    // fatal / token-revoked / max retry over → failed 確定
+    await markFailed({
+      broadcastId: pending.id,
+      errorMessage:
+        classified.type === "token-revoked"
+          ? `${classified.message} (再連携が必要です)`
+          : classified.message,
+      retryCount,
+    });
+    return Response.json({
+      processed: 1,
+      broadcastId: pending.id,
+      status: "failed",
+      type: classified.type,
+    });
+  }
 }
