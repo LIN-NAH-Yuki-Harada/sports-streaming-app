@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import { getAdminClient } from "@/lib/supabase-admin";
@@ -96,6 +97,90 @@ export async function getOAuthClientForProfile(
   }
 
   return oauth2Client;
+}
+
+/**
+ * YouTube アップロード時に動画タイトル / 説明 / タグを組み立てるための
+ * 試合メタデータ。broadcasts 行から必要な情報だけ抜粋する。
+ */
+export interface VideoMetadata {
+  homeTeam: string;
+  awayTeam: string;
+  sport: string;
+  tournament: string | null;
+  venue: string | null;
+  startedAt: string | null;
+  shareCode: string;
+}
+
+/**
+ * MP4 Buffer を配信者の YouTube チャンネルに unlisted でアップロードする。
+ *
+ * カテゴリは "17" (Sports) 固定。selfDeclaredMadeForKids=false でコメント
+ * 制限等を回避（本サービスでは大人 / 保護者世代がメイン視聴者のため）。
+ *
+ * @returns YouTube が割り当てた動画 ID (youtube_video_id に保存する値)
+ * @throws アップロード失敗時 (network / quota / auth) は例外を投げる
+ *   呼び出し側で classifyError して retry / failed を判定する
+ */
+export async function uploadToYouTube(
+  buffer: Buffer,
+  metadata: VideoMetadata,
+  oauth2Client: OAuth2Client,
+): Promise<string> {
+  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+
+  // タイトル: "home vs away - YYYY/MM/DD - tournament"
+  // YouTube タイトル上限 100 字に収まるよう slice する
+  const dateLabel = metadata.startedAt
+    ? new Date(metadata.startedAt).toLocaleDateString("ja-JP")
+    : "";
+  const titleParts = [
+    `${metadata.homeTeam} vs ${metadata.awayTeam}`,
+    dateLabel,
+    metadata.tournament ?? "",
+  ].filter((s) => s.length > 0);
+  const title = titleParts.join(" - ").slice(0, 100);
+
+  // 説明文: 試合情報 + サービス紹介。YouTube 説明上限 5000 字
+  const descriptionParts = [
+    metadata.sport,
+    metadata.tournament ? `大会: ${metadata.tournament}` : "",
+    metadata.venue ? `会場: ${metadata.venue}` : "",
+    "",
+    "LIVE SPOtCH (https://live-spotch.com) で配信された試合のアーカイブです。",
+  ].filter((s) => s.length > 0);
+  const description = descriptionParts.join("\n").slice(0, 5000);
+
+  const tags = ["LIVE SPOtCH", metadata.sport, "スポーツ", "アーカイブ"].filter(
+    (s) => s.length > 0,
+  );
+
+  const res = await youtube.videos.insert({
+    part: ["snippet", "status"],
+    requestBody: {
+      snippet: {
+        title,
+        description,
+        categoryId: "17",
+        tags,
+      },
+      status: {
+        privacyStatus: "unlisted",
+        selfDeclaredMadeForKids: false,
+      },
+    },
+    media: {
+      mimeType: "video/mp4",
+      body: Readable.from(buffer),
+    },
+  });
+
+  const videoId = res.data.id;
+  if (!videoId) {
+    throw new Error("YouTube upload returned no video id");
+  }
+  return videoId;
 }
 
 /**
