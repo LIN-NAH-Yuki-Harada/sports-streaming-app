@@ -184,6 +184,71 @@ export async function uploadToYouTube(
 }
 
 /**
+ * googleapis / Supabase Storage SDK / network 等が投げる err を 4 種類に分類。
+ * cron handler はこの結果に応じてリトライ戦略を選ぶ。
+ *
+ * - **auth-refresh**: 401/403 → refresh_token で再認証してから 1 回だけ再試行
+ * - **token-revoked**: refresh_token 自体が無効 (ユーザーが連携解除) →
+ *   failed 確定 (UI で再連携を促す)
+ * - **retry**: 429 / 5xx / network → pending に戻して youtube_retry_count++
+ *   (max_retry=5 で failed)
+ * - **fatal**: その他 4xx → コード or データの問題なので failed 確定
+ */
+export type ErrorClass = "retry" | "auth-refresh" | "fatal" | "token-revoked";
+
+export interface ClassifiedError {
+  type: ErrorClass;
+  status?: number;
+  message: string;
+}
+
+export function classifyError(err: unknown): ClassifiedError {
+  if (typeof err !== "object" || err === null) {
+    return { type: "retry", message: String(err) };
+  }
+
+  const e = err as {
+    code?: number | string;
+    message?: string;
+    response?: { status?: number };
+  };
+
+  const statusFromCode =
+    typeof e.code === "number" ? e.code : Number(e.code);
+  const statusFromResponse = e.response?.status;
+  const status = !Number.isNaN(statusFromCode)
+    ? statusFromCode
+    : statusFromResponse;
+  const message = e.message ?? String(err);
+
+  // refresh_token 無効 (ユーザーが Google 側で連携解除した等)
+  // Google OAuth の標準エラーメッセージで判定
+  if (
+    message.includes("invalid_grant") ||
+    message.includes("Token has been expired or revoked") ||
+    message.includes("re-link required")
+  ) {
+    return { type: "token-revoked", status, message };
+  }
+
+  if (status === 401 || status === 403) {
+    return { type: "auth-refresh", status, message };
+  }
+  if (
+    status === 429 ||
+    (typeof status === "number" && status >= 500 && status < 600)
+  ) {
+    return { type: "retry", status, message };
+  }
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    return { type: "fatal", status, message };
+  }
+
+  // status が取れないネットワークエラー等は retry 扱い
+  return { type: "retry", status, message };
+}
+
+/**
  * 成功時に Storage から MP4 を削除する。YouTube unlisted が真の正本になり、
  * Storage に残し続けるとコストが累積するため (≈ 月 $0.11 / GB)。
  *
