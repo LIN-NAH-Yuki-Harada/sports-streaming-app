@@ -43,15 +43,26 @@ export type Broadcast = {
   status: "live" | "ended";
   started_at: string;
   ended_at: string | null;
+  // YouTube アーカイブ（Sprint A〜C）
+  youtube_video_id: string | null;
+  youtube_upload_status:
+    | "pending"
+    | "recording"
+    | "uploading"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | null;
 };
 
 // broadcasts テーブルからクライアント（anon/authenticated）でも取得できる公開列リスト。
 // youtube_upload_error は配信者向け内部ログのため列レベル GRANT で遮断しており、
 // クライアント側ではこのリストに従って明示列指定で SELECT する。
+// youtube_video_id / youtube_upload_status は視聴 UI の YouTube iframe 切替判定に使う。
 export const BROADCAST_PUBLIC_COLUMNS =
   "id, share_code, broadcaster_id, team_id, sport, home_team, away_team, " +
   "tournament, venue, home_score, away_score, home_sets, away_sets, period, " +
-  "status, started_at, ended_at";
+  "status, started_at, ended_at, youtube_video_id, youtube_upload_status";
 
 // ===== プロフィール =====
 
