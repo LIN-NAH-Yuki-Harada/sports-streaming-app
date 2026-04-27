@@ -6,3 +6,8 @@
 # LP・ブランド素材（素材は残すがGit管理外）
 docs/assets/lp-sources/
 docs/assets/brand-sources/
+
+# Office (Excel/Word) 一時ファイル
+~$*.xlsx
+~$*.docx
+~$*.pptx
