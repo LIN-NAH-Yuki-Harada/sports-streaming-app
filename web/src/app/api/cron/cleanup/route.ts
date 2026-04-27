@@ -68,5 +68,35 @@ export async function GET(request: Request) {
     }
   }
 
-  return Response.json({ cleaned: data?.length || 0, stuckStopped });
+  // 3. アップロード中のまま 30 分以上経過した stale uploader を pending に戻す
+  // (Sprint B のワーカーがクラッシュ / Vercel Function timeout 等で uploading
+  //  のまま放置された row を自己回復させる。次の youtube-upload cron tick で
+  //  通常通り再取得 → 再アップロードが走る)
+  let staleUploadersReverted = 0;
+  if (isArchiveEnabled()) {
+    const thirtyMinutesAgo = new Date(
+      Date.now() - 30 * 60 * 1000,
+    ).toISOString();
+    const { data: stale } = await admin
+      .from("broadcasts")
+      .update({
+        youtube_upload_status: "pending",
+      })
+      .eq("youtube_upload_status", "uploading")
+      .lt("youtube_upload_started_at", thirtyMinutesAgo)
+      .select("id");
+    staleUploadersReverted = stale?.length ?? 0;
+    if (staleUploadersReverted > 0) {
+      console.info(
+        "[cron/cleanup] reverted stale uploaders to pending:",
+        staleUploadersReverted,
+      );
+    }
+  }
+
+  return Response.json({
+    cleaned: data?.length || 0,
+    stuckStopped,
+    staleUploadersReverted,
+  });
 }
