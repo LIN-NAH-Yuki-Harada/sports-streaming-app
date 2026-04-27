@@ -23,7 +23,13 @@ const MAX_RETRY = 5;
 /**
  * YouTube アップロードワーカー（Sprint B）
  *
- * Vercel Cron から 5 分間隔で叩かれる。
+ * Vercel Cron から 1 日 1 回叩かれる。
+ *
+ * NOTE: Vercel Hobby プラン制限により、現状は schedule="0 0 * * *" (daily)。
+ * 本番フラグ ON のタイミングで Vercel Pro ($20/月) に昇格し、vercel.json の
+ * schedule を "*\/5 * * * *" (5 分間隔) に戻す予定（feedback_vercel_hobby_cron.md）。
+ * フラグ OFF 期間中はそもそも cron が走っても skipped 返却なので daily で問題ない。
+ *
  * 1 tick = 1 broadcast の処理（quota 1 日 6 件制限を考えると並列化不要）。
  *
  * 処理フロー:
