@@ -150,7 +150,13 @@ function BroadcastPageInner() {
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
   // 配信終了後に表示するサマリモーダル用の state（次のアクションへの導線として使う）
-  const [endedSummary, setEndedSummary] = useState<{ durationSec: number } | null>(null);
+  const [endedSummary, setEndedSummary] = useState<{
+    durationSec: number;
+    broadcastId: string | null;
+    archiveEligible: boolean;
+  } | null>(null);
+  const [archiveDiscarded, setArchiveDiscarded] = useState(false);
+  const [discardingArchive, setDiscardingArchive] = useState(false);
 
   // スケジュールから遷移してきた場合、フォームを事前入力
   useEffect(() => {
@@ -527,11 +533,12 @@ function BroadcastPageInner() {
   async function handleEnd(options?: { skipConfirm?: boolean }) {
     if (!options?.skipConfirm && !confirm("配信を終了しますか？")) return;
 
-    // 配信終了モーダル用に経過時間を確保（state リセット前に計算する必要あり）
+    // 配信終了モーダル用に経過時間と broadcastId を確保（state リセット前に取り出す必要あり）
     const startedAtMs = broadcastStartedAt ? new Date(broadcastStartedAt).getTime() : null;
     const durationSec = startedAtMs
       ? Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000))
       : 0;
+    const endedBroadcastId = broadcastRef.current?.id ?? null;
 
     // 実際の配信秒数をサーバーに加算（LiveKit 切断より前に呼ぶ）
     const supabase = createClient();
@@ -582,7 +589,49 @@ function BroadcastPageInner() {
     refreshProfile();
 
     // 配信終了サマリモーダルを表示（次の導線を提示）
-    setEndedSummary({ durationSec });
+    // archiveEligible: フラグ ON かつ team プランの場合のみ「YouTubeに保存しない」を表示
+    setEndedSummary({
+      durationSec,
+      broadcastId: endedBroadcastId,
+      archiveEligible: isArchiveEnabled() && profile?.plan === "team",
+    });
+    setArchiveDiscarded(false);
+  }
+
+  // 配信終了モーダルで「YouTubeに保存しない」を選択したときの処理
+  async function handleDiscardArchive() {
+    if (!endedSummary?.broadcastId || archiveDiscarded || discardingArchive) return;
+    setDiscardingArchive(true);
+    try {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) {
+        toast.error("セッションが無効です");
+        return;
+      }
+      const res = await fetch("/api/broadcasts/archive-decision", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          broadcastId: endedSummary.broadcastId,
+          decision: "discard",
+        }),
+      });
+      if (res.ok) {
+        setArchiveDiscarded(true);
+        toast.success("YouTubeに保存しないように設定しました");
+      } else {
+        toast.error("設定の更新に失敗しました");
+      }
+    } catch {
+      toast.error("エラーが発生しました");
+    } finally {
+      setDiscardingArchive(false);
+    }
   }
 
   // 無料お試しカウントダウンタイマー（累積秒数ベース）
@@ -1375,6 +1424,30 @@ function BroadcastPageInner() {
                 <p className="text-2xl font-bold text-white tabular-nums mt-1">
                   {formatBroadcastDuration(endedSummary.durationSec)}
                 </p>
+              </div>
+            )}
+
+            {/* YouTube アーカイブ可否（チームプランかつフラグONのとき） */}
+            {endedSummary.archiveEligible && (
+              <div className="mt-4 bg-[#e63946]/5 ring-1 ring-[#e63946]/20 rounded-lg p-3">
+                {!archiveDiscarded ? (
+                  <>
+                    <p className="text-[11px] text-gray-300 leading-relaxed">
+                      📹 この配信は YouTube に限定公開で自動保存されます
+                    </p>
+                    <button
+                      onClick={handleDiscardArchive}
+                      disabled={discardingArchive}
+                      className="mt-2 text-[11px] text-gray-500 hover:text-red-400 transition disabled:opacity-50 underline"
+                    >
+                      {discardingArchive ? "設定中..." : "今回は YouTube に保存しない"}
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-gray-400">
+                    ✓ YouTube に保存しないことを記録しました
+                  </p>
+                )}
               </div>
             )}
 
