@@ -266,7 +266,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         }
         style={isFakeFullscreen ? undefined : { minHeight: "60vh" }}
       >
-        {isWatching && viewerToken ? (
+        {isWatching && viewerToken && isLive ? (
           <LiveKitViewer
             token={viewerToken}
             serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
