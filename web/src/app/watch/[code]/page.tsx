@@ -283,6 +283,16 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             </div>
             <span className="text-xs text-gray-400">タップして視聴</span>
           </button>
+        ) : broadcast.youtube_video_id ? (
+          // 配信終了 + YouTube アーカイブあり → iframe 埋め込み
+          <iframe
+            className="absolute inset-0 w-full h-full"
+            src={`https://www.youtube.com/embed/${broadcast.youtube_video_id}?rel=0`}
+            title={`${broadcast.home_team} vs ${broadcast.away_team} アーカイブ`}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allowFullScreen
+          />
         ) : (
           <div className="text-center px-6 max-w-md">
             <p className="text-sm text-gray-400">この配信は終了しました</p>

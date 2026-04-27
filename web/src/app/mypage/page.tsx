@@ -11,6 +11,7 @@ import { Logo } from "@/components/logo";
 import { AvatarUploader } from "@/components/avatar-uploader";
 import { createClient } from "@/lib/supabase";
 import { updateProfile } from "@/lib/database";
+import { isArchiveEnabled } from "@/lib/archive-flag";
 
 const PLAN_LABELS: Record<string, string> = {
   free: "無料プラン",
@@ -38,6 +39,8 @@ function MyPageInner() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [unlinkingYoutube, setUnlinkingYoutube] = useState(false);
+  const [linkingYoutube, setLinkingYoutube] = useState(false);
+  const archiveFeatureLive = isArchiveEnabled();
 
   // YouTube連携後・決済後のリダイレクト処理
   const handledCheckoutRef = useRef<string | null>(null);
@@ -105,6 +108,35 @@ function MyPageInner() {
     }
     setDeleting(false);
     setShowDeleteConfirm(false);
+  };
+
+  const handleYoutubeLink = async () => {
+    setLinkingYoutube(true);
+    try {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) {
+        toast.error("セッションが無効です。再ログインしてください。");
+        setLinkingYoutube(false);
+        return;
+      }
+      const res = await fetch("/api/youtube/auth", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body?.error || "YouTube連携の準備に失敗しました");
+        setLinkingYoutube(false);
+        return;
+      }
+      const { authUrl } = await res.json();
+      window.location.href = authUrl;
+    } catch {
+      toast.error("YouTube連携でエラーが発生しました");
+      setLinkingYoutube(false);
+    }
   };
 
   const handleYoutubeUnlink = async () => {
@@ -282,14 +314,16 @@ function MyPageInner() {
               </Link>
             </div>
 
-            {/* YouTube連携（近日公開） */}
+            {/* YouTube連携 */}
             <div className="mt-6 md:mt-8 rounded-lg border border-[#e63946]/20 bg-gradient-to-br from-[#e63946]/5 to-transparent p-4 md:p-5">
               <div className="flex items-center gap-2 mb-3">
                 <svg className="w-5 h-5 text-[#e63946]" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
                 </svg>
                 <h3 className="text-sm font-semibold text-white">YouTube自動アーカイブ</h3>
-                <span className="text-[10px] text-[#e63946] bg-[#e63946]/10 border border-[#e63946]/30 rounded px-1.5 py-0.5 font-semibold">近日公開</span>
+                {!archiveFeatureLive && (
+                  <span className="text-[10px] text-[#e63946] bg-[#e63946]/10 border border-[#e63946]/30 rounded px-1.5 py-0.5 font-semibold">近日公開</span>
+                )}
               </div>
               <p className="text-xs text-gray-400 leading-relaxed">
                 <span className="text-white font-medium">チームプラン特典</span> — 配信終了後、試合映像をあなたのYouTubeチャンネルに限定公開で自動保存します。
@@ -299,10 +333,10 @@ function MyPageInner() {
                 <li>・チャンネルが育ち、チームの記録が資産に</li>
                 <li>・限定公開のため、URLを知る人のみ視聴可能</li>
               </ul>
-              {profile?.youtube_channel_id && (
+              {profile?.youtube_channel_id ? (
                 <div className="mt-3 pt-3 border-t border-white/5">
                   <p className="text-[11px] text-gray-500">
-                    以前に連携した YouTube アカウント:{" "}
+                    連携中の YouTube アカウント:{" "}
                     <span className="text-gray-400">{profile.youtube_channel_name}</span>
                   </p>
                   <button
@@ -313,7 +347,21 @@ function MyPageInner() {
                     {unlinkingYoutube ? "解除中..." : "連携を解除する"}
                   </button>
                 </div>
-              )}
+              ) : archiveFeatureLive ? (
+                <div className="mt-3 pt-3 border-t border-white/5">
+                  <button
+                    onClick={handleYoutubeLink}
+                    disabled={linkingYoutube || profile?.plan !== "team"}
+                    className="w-full bg-[#e63946] hover:bg-[#c92a3a] text-white text-xs font-semibold py-2 rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {linkingYoutube
+                      ? "Google認証画面へ移動中..."
+                      : profile?.plan === "team"
+                        ? "YouTubeアカウントと連携する"
+                        : "チームプランで利用できます"}
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             {/* ログアウトボタン */}
