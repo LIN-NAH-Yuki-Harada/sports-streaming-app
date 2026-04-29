@@ -748,6 +748,36 @@ function HistoryTab() {
                       )}
                     </div>
                   </div>
+                  {bc.youtube_upload_status && (
+                    <div className="mt-2.5 pt-2.5 border-t border-white/5">
+                      {bc.youtube_upload_status === "completed" && bc.youtube_video_id ? (
+                        <a
+                          href={`https://youtu.be/${bc.youtube_video_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[11px] text-[#e63946] hover:underline font-medium"
+                        >
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                          </svg>
+                          YouTube で見る（限定公開）
+                        </a>
+                      ) : bc.youtube_upload_status === "pending" ||
+                        bc.youtube_upload_status === "recording" ||
+                        bc.youtube_upload_status === "uploading" ? (
+                        <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500">
+                          <span className="inline-block w-1.5 h-1.5 bg-yellow-500 rounded-full animate-pulse" />
+                          YouTube にアップロード中…
+                        </span>
+                      ) : bc.youtube_upload_status === "cancelled" ? (
+                        <span className="text-[11px] text-gray-600">YouTube 保存なし</span>
+                      ) : bc.youtube_upload_status === "failed" ? (
+                        <span className="inline-flex items-center gap-1.5 text-[11px] text-yellow-500">
+                          ⚠️ アップロード失敗
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               );
             })}
