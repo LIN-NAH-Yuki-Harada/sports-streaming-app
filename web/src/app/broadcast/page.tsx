@@ -35,6 +35,17 @@ function formatBroadcastDuration(sec: number): string {
   return `${s}秒`;
 }
 
+// 配信中のオーバーレイ用に MM:SS / H:MM:SS のコンパクト時計形式へ整形
+function formatElapsedClock(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  if (h > 0) return `${h}:${mm}:${ss}`;
+  return `${mm}:${ss}`;
+}
+
 // バレーボールのルール設定
 const VOLLEYBALL_RULES: Record<string, {
   setsToWin: number;
@@ -1074,6 +1085,14 @@ function BroadcastPageInner() {
                 </svg>
               )}
             </button>
+            {broadcastElapsed !== null && (
+              <div
+                className="bg-black/70 backdrop-blur-sm rounded px-2 py-1 text-[10px] sm:text-[11px] font-semibold text-white tabular-nums"
+                aria-label="配信経過時間"
+              >
+                {formatElapsedClock(broadcastElapsed)}
+              </div>
+            )}
             {!subscribed && trialRemaining !== null && (
               <div className={`backdrop-blur-sm rounded px-2 py-1 text-[9px] font-medium ${trialRemaining <= 60 ? "bg-red-500/30 text-red-400 animate-pulse" : "bg-yellow-500/20 text-yellow-500"}`}>
                 残り {Math.floor(trialRemaining / 60)}:{String(trialRemaining % 60).padStart(2, "0")}
