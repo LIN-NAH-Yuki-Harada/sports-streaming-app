@@ -104,7 +104,12 @@ export async function POST(request: Request) {
       output,
       {
         layout: "speaker",
-        encodingOptions: EncodingOptionsPreset.H264_720P_30,
+        // 1080p / 30fps / videoBitrate ~4.5Mbps。
+        // 配信者は 720p で publish しているが、Egress は RoomComposite で
+        // 仮想 Chrome を介した再エンコードのため、ソースより高い preset で
+        // ビットレートヘッドルームを確保すると YouTube 再エンコード後の品質が
+        // 改善する。LIVE 配信側（配信者デバイス・LIVE 視聴者）には影響なし。
+        encodingOptions: EncodingOptionsPreset.H264_1080P_30,
         audioOnly: false,
         videoOnly: false,
       },
