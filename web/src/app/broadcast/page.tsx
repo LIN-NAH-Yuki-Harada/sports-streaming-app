@@ -625,6 +625,15 @@ function BroadcastPageInner() {
   // 配信終了モーダルで「YouTubeに保存しない」を選択したときの処理
   async function handleDiscardArchive() {
     if (!endedSummary?.broadcastId || archiveDiscarded || discardingArchive) return;
+    // グレー下線リンクは反射的に踏まれやすいため、ネイティブ confirm でワンクッション挟む。
+    // 4/29 本番 E2E で誤タップによる意図せぬ cancelled 事故が発生したための対策。
+    if (
+      !confirm(
+        "YouTube に保存しません。よろしいですか？\n（この配信のアーカイブは作成されません）",
+      )
+    ) {
+      return;
+    }
     setDiscardingArchive(true);
     try {
       const supabase = createClient();
