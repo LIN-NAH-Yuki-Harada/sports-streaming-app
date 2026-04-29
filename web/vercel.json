@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/youtube-upload",
-      "schedule": "0 0 * * *"
+      "schedule": "*/5 * * * *"
     }
   ]
 }
