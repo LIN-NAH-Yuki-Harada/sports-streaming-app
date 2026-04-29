@@ -51,11 +51,7 @@ export async function downloadRecording(recordingKey: string): Promise<Buffer> {
 
 /**
  * profiles に保存された YouTube アクセストークンから OAuth2Client を準備する。
- * access_token は約 1 時間で失効するため、必要なら refresh_token で更新する。
- *
- * googleapis の OAuth2Client は getAccessToken() を呼ぶと内部で期限を判定して
- * 自動 refresh する。新トークンが取れた場合は profiles.youtube_access_token に
- * 書き戻して、次回呼び出し時のレイテンシ削減 + refresh の頻度低下を図る。
+ * access_token は約 1 時間で失効するため、refresh_token から都度取り直す。
  *
  * @throws refresh_token が無い / refresh が失敗した (token revoked 等) 場合
  *   呼び出し側で classifyError して 'token_revoked' / 'auth-refresh' に分岐
@@ -72,12 +68,22 @@ export async function getOAuthClientForProfile(
     process.env.YOUTUBE_CLIENT_SECRET,
   );
 
+  // access_token をあえて渡さない:
+  // googleapis の getAccessToken() は credentials.expiry_date を見て期限切れ
+  // 判定するが、callback 側で expiry_date を保存していないため undefined 扱いで
+  // 「まだ有効」と誤判定されて古い access_token がそのまま返ってしまう
+  // (2026-04-29 本番 E2E で発覚: 連携から 1 時間経過後に YouTube API が
+  // 401 "Request had invalid authentication credentials" を返し続けた)。
+  //
+  // setCredentials({ access_token: undefined, refresh_token }) にすると
+  // getAccessToken の shouldRefresh 判定が `!access_token` で true になり、
+  // 必ず refresh_token から新規取得する経路を通る。refresh API 呼び出しが
+  // 1 cron tick につき 1 回追加されるが軽量 (数十 ms) でコスト無視できる。
   oauth2Client.setCredentials({
-    access_token: profile.youtube_access_token ?? undefined,
     refresh_token: profile.youtube_refresh_token,
   });
 
-  // 期限切れなら自動 refresh される
+  // 必ず refresh が走って新しい access_token が返る
   const { token } = await oauth2Client.getAccessToken();
 
   // refresh された (= 新トークンが返ってきた) なら DB に書き戻し
