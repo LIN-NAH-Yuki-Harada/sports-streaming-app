@@ -391,6 +391,13 @@ function BroadcastPageInner() {
     if (!canStart || needsSubscription || !user) return;
     setStarting(true);
 
+    // 同じページセッションで 2 本目以降の配信を始めるとき、前回の broadcast 由来の
+    // ref が残っていると handleLiveKitConnected が早期リターンして Egress が起動しない。
+    // consumeTrialElapsed は subscribed ユーザーで早期リターンするためここでリセットしない
+    // と一生 null に戻らない。明示的に冒頭でリセットする。
+    streamStartedAtRef.current = null;
+    trialSnapshotRef.current = 0;
+
     try {
       // DBに保存（共有コードは自動生成・衝突時リトライ付き）
       const broadcast = await createBroadcast({
@@ -539,41 +546,30 @@ function BroadcastPageInner() {
       ? Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000))
       : 0;
     const endedBroadcastId = broadcastRef.current?.id ?? null;
+    const archiveEligible = isArchiveEnabled() && profile?.plan === "team";
 
-    // 実際の配信秒数をサーバーに加算（LiveKit 切断より前に呼ぶ）
-    const supabase = createClient();
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData.session?.access_token ?? null;
-    await consumeTrialElapsed(accessToken, false);
+    // 配信終了サマリモーダルを最初に表示する。
+    // ここで先に出さないと、後続の await（getSession / endBroadcast 等）が
+    // ネットワーク不調でハングしたときにモーダルが永遠に出ず UI が固まったように見える
+    // （6 本目 E2E で再現した症状）。サーバー側 cleanup は cleanup cron が拾うので
+    // クライアント awaits を投機的に走らせて握りつぶせる。
+    setEndedSummary({
+      durationSec,
+      broadcastId: endedBroadcastId,
+      archiveEligible,
+    });
+    setArchiveDiscarded(false);
 
-    // LiveKit Egress 停止を fire-and-forget で投げる（フラグ off なら API 側で noop）。
-    // LiveKit 切断より前に投げて、サーバー側で正常に finalize させる。
-    if (isArchiveEnabled() && accessToken && broadcastRef.current) {
-      const broadcastId = broadcastRef.current.id;
-      fetch("/api/livekit/egress/stop", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ broadcastId }),
-      }).catch(() => {
-        /* ignore */
-      });
-    }
+    // broadcastRef を先に null 化しておく（onDisconnected が二重発火しないように）。
+    // LiveKitRoom がアンマウント直前に Disconnected 状態を一瞬通過すると
+    // BroadcasterRenderer の onDisconnected が発火する可能性があるため。
+    broadcastRef.current = null;
 
     // LiveKit切断（トークンをnull化 → LiveKitRoom自動アンマウント）
     setLivekitToken(null);
     setLivekitError(null);
 
-    if (broadcastRef.current) {
-      const success = await endBroadcast(broadcastRef.current.id);
-      if (!success) {
-        toast.error("配信の終了に失敗しました。もう一度お試しください。");
-        return;
-      }
-      broadcastRef.current = null;
-    }
+    // フォーム表示用 state を初期化（次の配信開始に備える）
     setShareCode("");
     setBroadcastStartedAt(null);
     setHomeScore(0);
@@ -585,17 +581,45 @@ function BroadcastPageInner() {
     setHistoryLength(0);
     setPeriodIndex(0);
 
-    // profile を最新化（残秒表示を更新するため）
-    refreshProfile();
+    // 残りのサーバー側 cleanup はバックグラウンドで実行（UI ブロックしない）。
+    // どれか失敗しても DB は cleanup cron で 2 時間後に補正される。
+    void (async () => {
+      try {
+        const supabase = createClient();
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token ?? null;
 
-    // 配信終了サマリモーダルを表示（次の導線を提示）
-    // archiveEligible: フラグ ON かつ team プランの場合のみ「YouTubeに保存しない」を表示
-    setEndedSummary({
-      durationSec,
-      broadcastId: endedBroadcastId,
-      archiveEligible: isArchiveEnabled() && profile?.plan === "team",
-    });
-    setArchiveDiscarded(false);
+        // 実際の配信秒数をサーバーに加算（subscribed ユーザーは consumeTrialElapsed 内で no-op）
+        await consumeTrialElapsed(accessToken, false);
+
+        // LiveKit Egress 停止を fire-and-forget で投げる（フラグ off なら API 側で noop）
+        if (isArchiveEnabled() && accessToken && endedBroadcastId) {
+          fetch("/api/livekit/egress/stop", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ broadcastId: endedBroadcastId }),
+          }).catch(() => {
+            /* ignore */
+          });
+        }
+
+        if (endedBroadcastId) {
+          const success = await endBroadcast(endedBroadcastId);
+          if (!success) {
+            // モーダルは既に出ているので toast でだけ通知。DB は cleanup cron で補正。
+            toast.error("配信終了の保存に失敗しました（後ほど自動補正されます）");
+          }
+        }
+
+        // profile を最新化（残秒表示を更新するため）
+        refreshProfile();
+      } catch (e) {
+        console.error("[handleEnd] background cleanup error:", e);
+      }
+    })();
   }
 
   // 配信終了モーダルで「YouTubeに保存しない」を選択したときの処理
@@ -847,6 +871,23 @@ function BroadcastPageInner() {
               token={livekitToken}
               serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
               onConnected={handleLiveKitConnected}
+              onDisconnected={() => {
+                // 配信中の予期しない WebRTC 切断（Safari メモリ圧迫等）。
+                // ユーザー起点 handleEnd は事前に setLivekitToken(null) でアンマウントするため、
+                // ここに到達するのは「配信中に意図せず切れた」場合のみ。
+                // broadcasts.status='live' が永遠に残らないように DB を ended に補正する。
+                const stranded = broadcastRef.current;
+                if (!stranded) return;
+                broadcastRef.current = null;
+                void endBroadcast(stranded.id);
+                toast.error("配信が中断されました（自動で終了処理を行いました）");
+                setShareCode("");
+                setBroadcastStartedAt(null);
+                setLivekitToken(null);
+                setLivekitError(null);
+                streamStartedAtRef.current = null;
+                trialSnapshotRef.current = 0;
+              }}
               onError={(e) => {
                 console.error("LiveKitエラー:", e);
                 if (isCameraPermissionError(e)) {
