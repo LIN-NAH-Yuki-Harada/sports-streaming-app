@@ -94,33 +94,6 @@ export async function POST(request: Request) {
     ? null
     : info.error || `egress ended with status ${info.status}`;
 
-  // 既存の最終状態（'failed' / 'cancelled'）は上書きしない。
-  // - 'failed': start API での失敗マーク等を保護
-  // - 'cancelled': 配信者が「YouTubeに保存しない」を選択した意思決定を保護
-  //   （webhook が後で完了通知してきても pending に戻さない）
-  if (
-    (broadcast.youtube_upload_status === "failed" ||
-      broadcast.youtube_upload_status === "cancelled") &&
-    isComplete
-  ) {
-    const kept = broadcast.youtube_upload_status;
-    console.warn(
-      `[egress-webhook] keeping existing '${kept}' status, not overwriting to pending`,
-      { broadcastId: broadcast.id, egressId: info.egressId },
-    );
-    // recording_key/file_path だけは保存（cleanup cron が cancelled の MP4 削除に使う）
-    if (kept === "cancelled" && recordingKey) {
-      await admin
-        .from("broadcasts")
-        .update({
-          recording_key: recordingKey,
-          recording_file_path: recordingFilePath,
-        })
-        .eq("id", broadcast.id);
-    }
-    return Response.json({ received: true, kept });
-  }
-
   const updatePayload: Record<string, unknown> = {
     recording_key: recordingKey,
     recording_file_path: recordingFilePath,
@@ -131,14 +104,49 @@ export async function POST(request: Request) {
     updatePayload.youtube_upload_error = errorMessage.slice(0, 500);
   }
 
-  const { error: uErr } = await admin
+  // CAS ガード: 既に終端 / 進行中の status は上書きしない。
+  // - 'cancelled': 配信者が「YouTubeに保存しない」を選んだ意思決定。
+  // - 'failed':    start API 等が立てたエラーマーク。
+  // - 'uploading': cron が掴んでアップロード中。
+  // - 'completed': 既にアップロード完了。
+  //
+  // 4/29 実機 E2E で、archive-decision API が 'cancelled' を書いた直後に
+  // この webhook が古い 'pending' 値を読んで上書きするレース（TOCTOU）が再現。
+  // 読み時点でなく書き時点のチェックにすることでアトミックに防ぐ。
+  const { error: uErr, count } = await admin
     .from("broadcasts")
-    .update(updatePayload)
-    .eq("id", broadcast.id);
+    .update(updatePayload, { count: "exact" })
+    .eq("id", broadcast.id)
+    .not(
+      "youtube_upload_status",
+      "in",
+      "(cancelled,failed,uploading,completed)",
+    );
 
   if (uErr) {
     console.error("[egress-webhook] DB update failed:", uErr.message);
     return Response.json({ error: "DB update failed" }, { status: 500 });
+  }
+
+  // CAS で UPDATE が skip された場合（書き時点で既に終端 status）。
+  // recording_key/file_path だけは保存して、cleanup cron が
+  // cancelled MP4 を削除できるようにする。
+  if (count === 0) {
+    const kept = broadcast.youtube_upload_status;
+    console.warn(
+      `[egress-webhook] CAS guard skipped overwrite (kept=${kept})`,
+      { broadcastId: broadcast.id, egressId: info.egressId },
+    );
+    if (recordingKey) {
+      await admin
+        .from("broadcasts")
+        .update({
+          recording_key: recordingKey,
+          recording_file_path: recordingFilePath,
+        })
+        .eq("id", broadcast.id);
+    }
+    return Response.json({ received: true, kept });
   }
 
   console.info(
