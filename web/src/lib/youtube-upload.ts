@@ -138,8 +138,11 @@ export async function uploadToYouTube(
 
   // タイトル: "home vs away - YYYY/MM/DD - tournament"
   // YouTube タイトル上限 100 字に収まるよう slice する
+  // Vercel 実行環境は UTC のため timeZone を明示しないと JST 早朝の配信が前日付になる
   const dateLabel = metadata.startedAt
-    ? new Date(metadata.startedAt).toLocaleDateString("ja-JP")
+    ? new Date(metadata.startedAt).toLocaleDateString("ja-JP", {
+        timeZone: "Asia/Tokyo",
+      })
     : "";
   const titleParts = [
     `${metadata.homeTeam} vs ${metadata.awayTeam}`,
