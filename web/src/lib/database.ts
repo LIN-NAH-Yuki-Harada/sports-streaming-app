@@ -15,6 +15,9 @@ export type Profile = {
   youtube_access_token: string | null;
   youtube_refresh_token: string | null;
   youtube_linked_at: string | null;
+  // Live 中継移行（PR-1 以降）。NEXT_PUBLIC_LIVE_ARCHIVE が false の間は使われない。
+  youtube_live_enabled: boolean;
+  youtube_live_privacy: "unlisted" | "private" | "public";
   // Stripe 連携（2026-04-14追加）
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
@@ -53,6 +56,20 @@ export type Broadcast = {
     | "failed"
     | "cancelled"
     | null;
+  // Live 中継移行（PR-1 以降）。NEXT_PUBLIC_LIVE_ARCHIVE が false の間は全て null。
+  live_egress_id: string | null;
+  live_youtube_broadcast_id: string | null;
+  live_youtube_stream_id: string | null;
+  live_status:
+    | "pending"
+    | "creating"
+    | "live"
+    | "ended"
+    | "failed"
+    | null;
+  live_started_at: string | null;
+  live_ended_at: string | null;
+  live_error: string | null;
 };
 
 // broadcasts テーブルからクライアント（anon/authenticated）でも取得できる公開列リスト。
@@ -94,6 +111,9 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     youtube_refresh_token: null,
     stripe_customer_id: null,
     stripe_subscription_id: null,
+    // Live 中継カラムは PR-5 で SELECT に追加。それまでは default 値で埋める。
+    youtube_live_enabled: false,
+    youtube_live_privacy: "unlisted",
   } as unknown as Profile;
 }
 
@@ -126,6 +146,9 @@ export async function updateProfile(
     youtube_refresh_token: null,
     stripe_customer_id: null,
     stripe_subscription_id: null,
+    // Live 中継カラムは PR-5 で SELECT に追加。それまでは default 値で埋める。
+    youtube_live_enabled: false,
+    youtube_live_privacy: "unlisted",
   } as unknown as Profile;
 }
 
