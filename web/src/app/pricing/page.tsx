@@ -430,9 +430,9 @@ function PricingPageInner() {
               <li>✓ チーム作成・メンバー招待</li>
               <li>✓ 試合スケジュール管理</li>
               <li>✓ 共有コードのチーム自動配布</li>
+              <li className="text-gray-500">🔜 YouTube Live 同時配信（自社プレイヤーと並行で YouTube にもリアルタイム push）</li>
+              <li className="text-gray-500">🔜 YouTube に自動アーカイブ（配信者ご自身のチャンネルに長期保存）</li>
               <li className="text-gray-500">🔜 リモコンでスコア操作（別端末から）</li>
-              <li className="text-gray-500">🔜 アーカイブ自動保存（1ヶ月視聴可）</li>
-              <li className="text-gray-500">🔜 YouTube 自動アーカイブ（長期保存）</li>
               <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
             </ul>
             {currentPlan === "team" ? (
