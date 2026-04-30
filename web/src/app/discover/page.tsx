@@ -333,7 +333,7 @@ export default async function DiscoverPage() {
             </section>
           )}
 
-          {/* CTA: 既に有料プラン契約者には新規勧誘は不要なので非表示 */}
+          {/* CTA: free → 配信開始勧誘 / broadcaster → team プラン昇格 / team → 非表示 */}
           {userPlan === "free" && (
             <section className="px-5 md:px-8 lg:px-10 pb-24">
               <div className="rounded-xl bg-gradient-to-br from-[#e63946]/20 via-[#111] to-[#111] border border-[#e63946]/30 p-6 text-center">
@@ -355,6 +355,47 @@ export default async function DiscoverPage() {
                     className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition"
                   >
                     サービス詳細
+                  </Link>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {userPlan === "broadcaster" && (
+            <section className="px-5 md:px-8 lg:px-10 pb-24">
+              <div className="rounded-xl bg-gradient-to-br from-[#e63946]/15 via-[#111] to-[#111] border border-[#e63946]/30 p-6">
+                <div className="text-center">
+                  <p className="text-[10px] font-bold tracking-[0.2em] text-[#e63946] mb-1.5">
+                    UPGRADE
+                  </p>
+                  <p className="text-base md:text-lg font-bold mb-1">
+                    +¥200/月で、もっと使いやすく
+                  </p>
+                  <p className="text-xs text-gray-400 leading-relaxed max-w-md mx-auto">
+                    チームプラン（¥500/月）にアップグレードすると、チーム運営機能と YouTube 連携が解放されます。
+                  </p>
+                </div>
+                <ul className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-xs text-gray-300 max-w-md mx-auto">
+                  <li>✓ チーム作成・メンバー招待</li>
+                  <li>✓ 試合スケジュール管理</li>
+                  <li>✓ 共有コードのチーム自動配布</li>
+                  <li className="text-gray-500">🔜 YouTube Live 同時配信</li>
+                  <li className="text-gray-500">🔜 YouTube 自動アーカイブ</li>
+                  <li className="text-gray-500">🔜 リモコンでスコア操作</li>
+                  <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
+                </ul>
+                <div className="mt-5 flex flex-col sm:flex-row gap-2 justify-center">
+                  <Link
+                    href="/pricing"
+                    className="inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-6 py-2.5 rounded-md transition text-center"
+                  >
+                    チームプランに変更
+                  </Link>
+                  <Link
+                    href="/pricing"
+                    className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition text-center"
+                  >
+                    詳細を見る
                   </Link>
                 </div>
               </div>
