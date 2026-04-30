@@ -57,6 +57,21 @@ async function fetchMyTeams(
   return data as { id: string; name: string; sport: string }[];
 }
 
+// 配信 CTA を出すかの判定に使う。failure / 該当行なしは "free" 扱い。
+async function fetchUserPlan(
+  userId: string,
+): Promise<"free" | "broadcaster" | "team"> {
+  const supabase = getAdminClient();
+  const { data } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", userId)
+    .single();
+  const plan = data?.plan as string | undefined;
+  if (plan === "broadcaster" || plan === "team") return plan;
+  return "free";
+}
+
 /**
  * 自分が配信した + 所属チームの配信 を取得（status で絞り込み）。
  * 他人の配信は意図的に除外する（プライバシー保護）。
@@ -103,14 +118,16 @@ export default async function DiscoverPage() {
   let live: Broadcast[] = [];
   let ended: Broadcast[] = [];
   let myTeams: { id: string; name: string; sport: string }[] = [];
+  let userPlan: "free" | "broadcaster" | "team" = "free";
 
   if (user) {
     const teamIds = await fetchMyTeamIds(user.id);
     const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
-    [live, ended, myTeams] = await Promise.all([
+    [live, ended, myTeams, userPlan] = await Promise.all([
       fetchMyRelatedBroadcasts(user.id, teamIds, "live", { limit: 20 }),
       fetchMyRelatedBroadcasts(user.id, teamIds, "ended", { limit: 12, since }),
       fetchMyTeams(teamIds),
+      fetchUserPlan(user.id),
     ]);
   }
 
@@ -316,31 +333,33 @@ export default async function DiscoverPage() {
             </section>
           )}
 
-          {/* CTA */}
-          <section className="px-5 md:px-8 lg:px-10 pb-24">
-            <div className="rounded-xl bg-gradient-to-br from-[#e63946]/20 via-[#111] to-[#111] border border-[#e63946]/30 p-6 text-center">
-              <p className="text-base font-bold mb-1">
-                あなたのチームも配信しませんか？
-              </p>
-              <p className="text-xs text-gray-400 leading-relaxed max-w-md mx-auto">
-                保護者のスマホ1台で TV 中継品質のライブ配信。初回10分間は無料でお試しいただけます。
-              </p>
-              <div className="mt-4 flex flex-col sm:flex-row gap-2 justify-center">
-                <Link
-                  href="/broadcast"
-                  className="inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-6 py-2.5 rounded-md transition"
-                >
-                  配信を始める
-                </Link>
-                <Link
-                  href="/"
-                  className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition"
-                >
-                  サービス詳細
-                </Link>
+          {/* CTA: 既に有料プラン契約者には新規勧誘は不要なので非表示 */}
+          {userPlan === "free" && (
+            <section className="px-5 md:px-8 lg:px-10 pb-24">
+              <div className="rounded-xl bg-gradient-to-br from-[#e63946]/20 via-[#111] to-[#111] border border-[#e63946]/30 p-6 text-center">
+                <p className="text-base font-bold mb-1">
+                  あなたのチームも配信しませんか？
+                </p>
+                <p className="text-xs text-gray-400 leading-relaxed max-w-md mx-auto">
+                  保護者のスマホ1台で TV 中継品質のライブ配信。初回10分間は無料でお試しいただけます。
+                </p>
+                <div className="mt-4 flex flex-col sm:flex-row gap-2 justify-center">
+                  <Link
+                    href="/broadcast"
+                    className="inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-6 py-2.5 rounded-md transition"
+                  >
+                    配信を始める
+                  </Link>
+                  <Link
+                    href="/"
+                    className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition"
+                  >
+                    サービス詳細
+                  </Link>
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          )}
         </>
       )}
     </div>
