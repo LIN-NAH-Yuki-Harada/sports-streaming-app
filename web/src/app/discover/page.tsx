@@ -57,6 +57,21 @@ async function fetchMyTeams(
   return data as { id: string; name: string; sport: string }[];
 }
 
+// 配信 CTA を出すかの判定に使う。failure / 該当行なしは "free" 扱い。
+async function fetchUserPlan(
+  userId: string,
+): Promise<"free" | "broadcaster" | "team"> {
+  const supabase = getAdminClient();
+  const { data } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", userId)
+    .single();
+  const plan = data?.plan as string | undefined;
+  if (plan === "broadcaster" || plan === "team") return plan;
+  return "free";
+}
+
 /**
  * 自分が配信した + 所属チームの配信 を取得（status で絞り込み）。
  * 他人の配信は意図的に除外する（プライバシー保護）。
@@ -103,14 +118,16 @@ export default async function DiscoverPage() {
   let live: Broadcast[] = [];
   let ended: Broadcast[] = [];
   let myTeams: { id: string; name: string; sport: string }[] = [];
+  let userPlan: "free" | "broadcaster" | "team" = "free";
 
   if (user) {
     const teamIds = await fetchMyTeamIds(user.id);
     const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
-    [live, ended, myTeams] = await Promise.all([
+    [live, ended, myTeams, userPlan] = await Promise.all([
       fetchMyRelatedBroadcasts(user.id, teamIds, "live", { limit: 20 }),
       fetchMyRelatedBroadcasts(user.id, teamIds, "ended", { limit: 12, since }),
       fetchMyTeams(teamIds),
+      fetchUserPlan(user.id),
     ]);
   }
 
@@ -316,31 +333,74 @@ export default async function DiscoverPage() {
             </section>
           )}
 
-          {/* CTA */}
-          <section className="px-5 md:px-8 lg:px-10 pb-24">
-            <div className="rounded-xl bg-gradient-to-br from-[#e63946]/20 via-[#111] to-[#111] border border-[#e63946]/30 p-6 text-center">
-              <p className="text-base font-bold mb-1">
-                あなたのチームも配信しませんか？
-              </p>
-              <p className="text-xs text-gray-400 leading-relaxed max-w-md mx-auto">
-                保護者のスマホ1台で TV 中継品質のライブ配信。初回10分間は無料でお試しいただけます。
-              </p>
-              <div className="mt-4 flex flex-col sm:flex-row gap-2 justify-center">
-                <Link
-                  href="/broadcast"
-                  className="inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-6 py-2.5 rounded-md transition"
-                >
-                  配信を始める
-                </Link>
-                <Link
-                  href="/"
-                  className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition"
-                >
-                  サービス詳細
-                </Link>
+          {/* CTA: free → 配信開始勧誘 / broadcaster → team プラン昇格 / team → 非表示 */}
+          {userPlan === "free" && (
+            <section className="px-5 md:px-8 lg:px-10 pb-24">
+              <div className="rounded-xl bg-gradient-to-br from-[#e63946]/20 via-[#111] to-[#111] border border-[#e63946]/30 p-6 text-center">
+                <p className="text-base font-bold mb-1">
+                  あなたのチームも配信しませんか？
+                </p>
+                <p className="text-xs text-gray-400 leading-relaxed max-w-md mx-auto">
+                  保護者のスマホ1台で TV 中継品質のライブ配信。初回10分間は無料でお試しいただけます。
+                </p>
+                <div className="mt-4 flex flex-col sm:flex-row gap-2 justify-center">
+                  <Link
+                    href="/broadcast"
+                    className="inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-6 py-2.5 rounded-md transition"
+                  >
+                    配信を始める
+                  </Link>
+                  <Link
+                    href="/"
+                    className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition"
+                  >
+                    サービス詳細
+                  </Link>
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          )}
+
+          {userPlan === "broadcaster" && (
+            <section className="px-5 md:px-8 lg:px-10 pb-24">
+              <div className="rounded-xl bg-gradient-to-br from-[#e63946]/15 via-[#111] to-[#111] border border-[#e63946]/30 p-6">
+                <div className="text-center">
+                  <p className="text-[10px] font-bold tracking-[0.2em] text-[#e63946] mb-1.5">
+                    UPGRADE
+                  </p>
+                  <p className="text-base md:text-lg font-bold mb-1">
+                    +¥200/月で、もっと使いやすく
+                  </p>
+                  <p className="text-xs text-gray-400 leading-relaxed max-w-md mx-auto">
+                    チームプラン（¥500/月）にアップグレードすると、チーム運営機能と YouTube 連携が解放されます。
+                  </p>
+                </div>
+                <ul className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-xs text-gray-300 max-w-md mx-auto">
+                  <li>✓ チーム作成・メンバー招待</li>
+                  <li>✓ 試合スケジュール管理</li>
+                  <li>✓ 共有コードのチーム自動配布</li>
+                  <li className="text-gray-500">🔜 YouTube Live 同時配信</li>
+                  <li className="text-gray-500">🔜 YouTube 自動アーカイブ</li>
+                  <li className="text-gray-500">🔜 リモコンでスコア操作</li>
+                  <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
+                </ul>
+                <div className="mt-5 flex flex-col sm:flex-row gap-2 justify-center">
+                  <Link
+                    href="/pricing"
+                    className="inline-block bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold px-6 py-2.5 rounded-md transition text-center"
+                  >
+                    チームプランに変更
+                  </Link>
+                  <Link
+                    href="/pricing"
+                    className="inline-block border border-white/15 text-gray-300 hover:text-white hover:bg-white/5 text-sm font-semibold px-6 py-2.5 rounded-md transition text-center"
+                  >
+                    詳細を見る
+                  </Link>
+                </div>
+              </div>
+            </section>
+          )}
         </>
       )}
     </div>
