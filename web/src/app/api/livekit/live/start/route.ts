@@ -7,7 +7,7 @@ import {
 } from "@/lib/youtube-live";
 import { getOAuthClientForProfile } from "@/lib/youtube-upload";
 import { startRtmpEgress } from "@/lib/livekit-rtmp-egress";
-import { assertEgressEnv } from "@/lib/livekit-egress";
+import { assertRtmpEgressEnv } from "@/lib/livekit-egress";
 import { getAdminClient, getUser } from "@/lib/supabase-admin";
 
 // livekit-server-sdk / googleapis の crypto 系が Edge runtime で動かないため Node.js 強制
@@ -46,8 +46,9 @@ export async function POST(request: Request) {
   }
 
   // 3. LiveKit env チェック（YouTube 系 env は getOAuthClientForProfile 内部で検証）
+  // RTMP push は Supabase Storage を経由しないため SUPABASE_S3_* は要求しない。
   try {
-    assertEgressEnv();
+    assertRtmpEgressEnv();
   } catch (err) {
     const message = err instanceof Error ? err.message : "env error";
     console.error("[live/start]", message);
