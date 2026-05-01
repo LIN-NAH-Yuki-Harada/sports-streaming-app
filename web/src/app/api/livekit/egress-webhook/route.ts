@@ -66,7 +66,7 @@ export async function POST(request: Request) {
   const info = event.egressInfo;
   const admin = getAdminClient();
 
-  // recording_egress_id で broadcasts を引く
+  // recording_egress_id で broadcasts を引く（旧パイプライン: S3 録画）
   const { data: broadcast } = await admin
     .from("broadcasts")
     .select("id, youtube_upload_status")
@@ -74,6 +74,11 @@ export async function POST(request: Request) {
     .single();
 
   if (!broadcast) {
+    // 旧パイプラインで該当しない場合、新パイプライン（Live 中継 RTMP push）を試す
+    const liveResult = await handleLiveEgressEnded(info, admin);
+    if (liveResult.handled) {
+      return Response.json(liveResult.body);
+    }
     // フラグ off 期間にテスト起動した残骸 / 別環境の Egress 等。素通り。
     console.info(
       "[egress-webhook] broadcast not found for egressId=",
@@ -165,4 +170,103 @@ export async function POST(request: Request) {
     broadcastId: broadcast.id,
     status: newStatus,
   });
+}
+
+/**
+ * 新パイプライン（Live 中継 RTMP push）の egress_ended ハンドリング（PR-3）。
+ *
+ * live_egress_id でマッチした broadcasts に live_status='ended' / 'failed' と
+ * live_ended_at を書き込む。YouTube 側は createLiveBroadcast の
+ * enableAutoStop=true により自動で complete に遷移済の想定。
+ *
+ * 旧パイプラインの recording_egress_id ロジックでマッチしなかった場合のみ
+ * 呼ばれる。両パイプラインの egress_id は別カラムに分かれているため衝突しない。
+ */
+async function handleLiveEgressEnded(
+  info: NonNullable<
+    Awaited<ReturnType<WebhookReceiver["receive"]>>["egressInfo"]
+  >,
+  admin: ReturnType<typeof getAdminClient>,
+): Promise<{ handled: boolean; body: Record<string, unknown> }> {
+  const { data: liveBroadcast } = await admin
+    .from("broadcasts")
+    .select(
+      "id, live_status, live_youtube_broadcast_id, youtube_video_id",
+    )
+    .eq("live_egress_id", info.egressId)
+    .single();
+
+  if (!liveBroadcast) {
+    return { handled: false, body: {} };
+  }
+
+  const isComplete = info.status === EgressStatus.EGRESS_COMPLETE;
+  const newLiveStatus = isComplete ? "ended" : "failed";
+  const errorMessage = isComplete
+    ? null
+    : info.error || `egress ended with status ${info.status}`;
+
+  // YouTube Live broadcast ID を youtube_video_id にコピー（視聴 UI の埋め込み再生用）。
+  // YouTube の仕様で broadcast.id = アーカイブ動画の video ID なのでそのまま使える。
+  // 旧パイプラインで先に youtube_video_id が入っているケースは並行運用想定外なので上書きせず温存。
+  const updatePayload: Record<string, unknown> = {
+    live_status: newLiveStatus,
+    live_ended_at: new Date().toISOString(),
+  };
+  if (errorMessage) {
+    updatePayload.live_error = errorMessage.slice(0, 500);
+  }
+  if (
+    isComplete &&
+    !liveBroadcast.youtube_video_id &&
+    liveBroadcast.live_youtube_broadcast_id
+  ) {
+    updatePayload.youtube_video_id = liveBroadcast.live_youtube_broadcast_id;
+  }
+
+  // live/stop API がベストエフォート先回り更新で 'ended' を入れている可能性あり。
+  // 二重書き防止のため終端 status は上書きしない CAS ガード。
+  const { error: uErr, count } = await admin
+    .from("broadcasts")
+    .update(updatePayload, { count: "exact" })
+    .eq("id", liveBroadcast.id)
+    .not("live_status", "in", "(ended,failed)");
+
+  if (uErr) {
+    console.error("[egress-webhook] live DB update failed:", uErr.message);
+    return {
+      handled: true,
+      body: { error: "live DB update failed" },
+    };
+  }
+
+  if (count === 0) {
+    console.info(
+      `[egress-webhook] live CAS skipped (kept=${liveBroadcast.live_status})`,
+      { broadcastId: liveBroadcast.id, egressId: info.egressId },
+    );
+    return {
+      handled: true,
+      body: { received: true, kept: liveBroadcast.live_status },
+    };
+  }
+
+  console.info(
+    "[egress-webhook] live processed",
+    JSON.stringify({
+      broadcastId: liveBroadcast.id,
+      egressId: info.egressId,
+      liveStatus: newLiveStatus,
+      youtubeVideoId: liveBroadcast.live_youtube_broadcast_id,
+    }),
+  );
+
+  return {
+    handled: true,
+    body: {
+      received: true,
+      broadcastId: liveBroadcast.id,
+      liveStatus: newLiveStatus,
+    },
+  };
 }
