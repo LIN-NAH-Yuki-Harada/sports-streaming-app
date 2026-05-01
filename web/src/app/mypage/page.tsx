@@ -12,6 +12,7 @@ import { AvatarUploader } from "@/components/avatar-uploader";
 import { createClient } from "@/lib/supabase";
 import { updateProfile } from "@/lib/database";
 import { isArchiveEnabled } from "@/lib/archive-flag";
+import { isLiveArchiveEnabled } from "@/lib/live-archive-flag";
 
 const PLAN_LABELS: Record<string, string> = {
   free: "無料プラン",
@@ -40,7 +41,9 @@ function MyPageInner() {
   const [deleting, setDeleting] = useState(false);
   const [unlinkingYoutube, setUnlinkingYoutube] = useState(false);
   const [linkingYoutube, setLinkingYoutube] = useState(false);
+  const [togglingLive, setTogglingLive] = useState(false);
   const archiveFeatureLive = isArchiveEnabled();
+  const liveArchiveLive = isLiveArchiveEnabled();
 
   // YouTube連携後・決済後のリダイレクト処理
   const handledCheckoutRef = useRef<string | null>(null);
@@ -157,6 +160,19 @@ function MyPageInner() {
       toast.error("連携解除に失敗しました");
     }
     setUnlinkingYoutube(false);
+  };
+
+  const handleToggleLive = async (next: boolean) => {
+    if (!user) return;
+    setTogglingLive(true);
+    const result = await updateProfile(user.id, { youtube_live_enabled: next });
+    if (result) {
+      await refreshProfile();
+      toast.success(next ? "YouTube 同時配信を有効にしました" : "YouTube 同時配信を無効にしました");
+    } else {
+      toast.error("設定の更新に失敗しました");
+    }
+    setTogglingLive(false);
   };
 
   const handleSaveName = async () => {
@@ -363,6 +379,56 @@ function MyPageInner() {
                 </div>
               ) : null}
             </div>
+
+            {/* Live 中継機能（YouTube 同時配信）— PR-5 */}
+            {liveArchiveLive && (
+              <div className="mt-4 md:mt-5 rounded-lg border border-[#e63946]/20 bg-gradient-to-br from-[#e63946]/5 to-transparent p-4 md:p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <svg className="w-5 h-5 text-[#e63946]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <circle cx="12" cy="12" r="2" fill="currentColor" />
+                    <path d="M5.6 9a8 8 0 0 0 0 6M18.4 9a8 8 0 0 1 0 6" />
+                  </svg>
+                  <h3 className="text-sm font-semibold text-white">YouTube 同時配信（Live 中継）</h3>
+                  <span className="text-[10px] text-amber-400 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5 font-semibold">ベータ</span>
+                </div>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  <span className="text-white font-medium">チームプラン特典</span> — 配信中、自社プレイヤー（リアルタイム配信）と並行で YouTube Live にもリアルタイム push します。配信終了後、自動的に YouTube アーカイブが残ります。
+                </p>
+                <ul className="mt-3 space-y-1 text-[11px] text-gray-500">
+                  <li>・自社プレイヤー: 0.25 秒遅延（リアルタイム性重視）</li>
+                  <li>・YouTube Live: 5-15 秒遅延（拡散性 + アーカイブ性重視）</li>
+                  <li>・限定公開（unlisted）— URL を知る人のみ視聴可能</li>
+                </ul>
+                {profile?.plan !== "team" ? (
+                  <p className="mt-3 pt-3 border-t border-white/5 text-[11px] text-gray-500">
+                    🔒 チームプランで利用できます
+                  </p>
+                ) : !profile?.youtube_channel_id ? (
+                  <p className="mt-3 pt-3 border-t border-white/5 text-[11px] text-gray-500">
+                    🔗 先に上の YouTube アカウント連携を行ってください
+                  </p>
+                ) : (
+                  <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
+                    <span className="text-xs text-gray-300">配信時に YouTube Live を同時起動する</span>
+                    <button
+                      onClick={() => handleToggleLive(!profile.youtube_live_enabled)}
+                      disabled={togglingLive}
+                      role="switch"
+                      aria-checked={profile.youtube_live_enabled}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition disabled:opacity-50 ${
+                        profile.youtube_live_enabled ? "bg-[#e63946]" : "bg-gray-700"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                          profile.youtube_live_enabled ? "translate-x-6" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ログアウトボタン */}
             <div className="md:max-w-sm md:mx-auto">
