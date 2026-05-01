@@ -87,8 +87,8 @@ export function buildRecordingOutput(
 }
 
 /**
- * Egress 開始/停止 API の冒頭で呼ぶ事前検証。env 1 つでも欠けたら
- * ここで早期に分かりやすいエラーにして 500 を返す。
+ * 旧フロー（録画→Storage S3 アップロード）用 Egress の事前検証。
+ * SUPABASE_S3_* に S3 互換ストレージ出力するため、それらの env も必須。
  */
 export function assertEgressEnv(): void {
   const required = [
@@ -103,5 +103,22 @@ export function assertEgressEnv(): void {
   const missing = required.filter((name) => !process.env[name]);
   if (missing.length > 0) {
     throw new Error(`Egress env missing: ${missing.join(", ")}`);
+  }
+}
+
+/**
+ * 新フロー（YouTube Live RTMP push）用 Egress の事前検証。
+ * RTMP 出力は Supabase Storage を経由しないため SUPABASE_S3_* は不要。
+ * YouTube OAuth は呼び出し側で getOAuthClientForProfile による別検証あり。
+ */
+export function assertRtmpEgressEnv(): void {
+  const required = [
+    "NEXT_PUBLIC_LIVEKIT_URL",
+    "LIVEKIT_API_KEY",
+    "LIVEKIT_API_SECRET",
+  ];
+  const missing = required.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    throw new Error(`RTMP Egress env missing: ${missing.join(", ")}`);
   }
 }
