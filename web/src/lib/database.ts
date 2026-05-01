@@ -94,6 +94,7 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     .select(
       "id, display_name, avatar_url, plan, trial_used, trial_seconds_used, " +
       "youtube_channel_id, youtube_channel_name, youtube_linked_at, " +
+      "youtube_live_enabled, youtube_live_privacy, " +
       "subscription_status, current_period_end, created_at, updated_at"
     )
     .eq("id", userId)
@@ -111,15 +112,15 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     youtube_refresh_token: null,
     stripe_customer_id: null,
     stripe_subscription_id: null,
-    // Live 中継カラムは PR-5 で SELECT に追加。それまでは default 値で埋める。
-    youtube_live_enabled: false,
-    youtube_live_privacy: "unlisted",
   } as unknown as Profile;
 }
 
 export async function updateProfile(
   userId: string,
-  updates: Partial<Pick<Profile, "display_name" | "avatar_url">>
+  updates: Partial<Pick<Profile,
+    "display_name" | "avatar_url" |
+    "youtube_live_enabled" | "youtube_live_privacy"
+  >>
 ): Promise<Profile | null> {
   const supabase = createClient();
   // profiles は機密列（youtube_*_token / stripe_*）が列レベル GRANT で遮断されているため、
@@ -132,6 +133,7 @@ export async function updateProfile(
     .select(
       "id, display_name, avatar_url, plan, trial_used, trial_seconds_used, " +
       "youtube_channel_id, youtube_channel_name, youtube_linked_at, " +
+      "youtube_live_enabled, youtube_live_privacy, " +
       "subscription_status, current_period_end, created_at, updated_at"
     )
     .single();
@@ -146,9 +148,6 @@ export async function updateProfile(
     youtube_refresh_token: null,
     stripe_customer_id: null,
     stripe_subscription_id: null,
-    // Live 中継カラムは PR-5 で SELECT に追加。それまでは default 値で埋める。
-    youtube_live_enabled: false,
-    youtube_live_privacy: "unlisted",
   } as unknown as Profile;
 }
 
