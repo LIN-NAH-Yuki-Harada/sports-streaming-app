@@ -22,6 +22,7 @@ import { pickBroadcastResolution } from "@/lib/user-agent";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
 import { isArchiveEnabled } from "@/lib/archive-flag";
+import { isLiveArchiveEnabled } from "@/lib/live-archive-flag";
 
 const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
 
@@ -489,9 +490,20 @@ function BroadcastPageInner() {
 
     // YouTube アーカイブ機能 ON 時は LiveKit Egress 起動を fire-and-forget で投げる。
     // 失敗しても配信本体は止めたくないため catch は握りつぶす（API 内部で
-    // youtube_upload_status='failed' に書き込まれるので後追い可能）。
+    // failure status を DB に書き込むので後追い可能）。
     // 焼き込みパスのみ録画する（旧経路 ?burn=0 は録画対象外）。
-    if (isArchiveEnabled() && burnScoreboard && broadcastRef.current) {
+    //
+    // 新パイプライン（Live 中継）と旧パイプライン（録画→アップロード）は **排他**:
+    //   - NEXT_PUBLIC_LIVE_ARCHIVE=true → /api/livekit/live/start のみ呼ぶ
+    //   - 上記 false かつ NEXT_PUBLIC_ARCHIVE_ENABLED=true → /api/livekit/egress/start
+    //   - 両方 false → 何も呼ばない
+    // 二重起動すると transcode minutes の重複消費 + DB 状態管理の混乱が起きる。
+    const archiveStartPath = isLiveArchiveEnabled()
+      ? "/api/livekit/live/start"
+      : isArchiveEnabled()
+        ? "/api/livekit/egress/start"
+        : null;
+    if (archiveStartPath && burnScoreboard && broadcastRef.current) {
       const broadcastId = broadcastRef.current.id;
       (async () => {
         try {
@@ -499,7 +511,7 @@ function BroadcastPageInner() {
           const { data: sessionData } = await supabase.auth.getSession();
           const accessToken = sessionData.session?.access_token;
           if (!accessToken) return;
-          await fetch("/api/livekit/egress/start", {
+          await fetch(archiveStartPath, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -508,7 +520,7 @@ function BroadcastPageInner() {
             body: JSON.stringify({ broadcastId }),
           });
         } catch {
-          /* ignore: 録画失敗で配信を止めない */
+          /* ignore: 録画/Live 失敗で配信を止めない */
         }
       })();
     }
@@ -604,8 +616,14 @@ function BroadcastPageInner() {
         await consumeTrialElapsed(accessToken, false);
 
         // LiveKit Egress 停止を fire-and-forget で投げる（フラグ off なら API 側で noop）
-        if (isArchiveEnabled() && accessToken && endedBroadcastId) {
-          fetch("/api/livekit/egress/stop", {
+        // 新旧パイプラインは排他。開始側と同じ判定で stop API を切り替える。
+        const archiveStopPath = isLiveArchiveEnabled()
+          ? "/api/livekit/live/stop"
+          : isArchiveEnabled()
+            ? "/api/livekit/egress/stop"
+            : null;
+        if (archiveStopPath && accessToken && endedBroadcastId) {
+          fetch(archiveStopPath, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -745,8 +763,14 @@ function BroadcastPageInner() {
         );
         // YouTube アーカイブ機能 ON 時、Egress も合わせて停止依頼。
         // keepalive: true でタブ閉じ後でも投げ切る。
-        if (isArchiveEnabled()) {
-          fetch("/api/livekit/egress/stop", {
+        // 新旧パイプラインは排他。開始側と同じ判定で stop API を切り替える。
+        const pagehideStopPath = isLiveArchiveEnabled()
+          ? "/api/livekit/live/stop"
+          : isArchiveEnabled()
+            ? "/api/livekit/egress/stop"
+            : null;
+        if (pagehideStopPath) {
+          fetch(pagehideStopPath, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
