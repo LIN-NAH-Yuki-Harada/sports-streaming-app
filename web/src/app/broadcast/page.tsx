@@ -1212,8 +1212,9 @@ function BroadcastPageInner() {
 
           {/* 右下: コントロールボタン群 */}
           <div className="absolute bottom-[calc(8px+env(safe-area-inset-bottom))] right-3 sm:bottom-4 sm:right-4 flex items-center gap-2">
-            <a
-              href={(() => {
+            <button
+              type="button"
+              onClick={async () => {
                 const youtubeWatchUrl = liveYoutubeBroadcastId
                   ? `https://youtu.be/${liveYoutubeBroadcastId}`
                   : null;
@@ -1222,15 +1223,43 @@ function BroadcastPageInner() {
                   ? `\n\n📺 YouTube版\n${youtubeWatchUrl}`
                   : "";
                 const text = `【試合配信中】\n${home} vs ${away}\n${tournamentLine}\n📱 より高画質・リアルタイム視聴（推奨）\n${shareUrl}${youtubeBlock}`;
-                return `https://line.me/R/share?text=${encodeURIComponent(text)}`;
-              })()}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 bg-[#06C755] hover:bg-[#05b34c] rounded px-2 sm:px-3 py-1.5 transition"
+
+                // iOS Safari の Native Share API を最優先。
+                // ネイティブシェアシートは Safari のオーバーレイ UI として開くため、
+                // Safari 自体がバックグラウンドにならず WebRTC publish が切断されない。
+                // 配信中の LINE アプリ起動は WebRTC を確実に切るため必ず避ける。
+                if (typeof navigator !== "undefined" && "share" in navigator) {
+                  try {
+                    await (
+                      navigator as Navigator & {
+                        share: (data: ShareData) => Promise<void>;
+                      }
+                    ).share({
+                      title: home && away ? `${home} vs ${away}` : "LIVE SPOtCH 試合配信中",
+                      text,
+                    });
+                    return;
+                  } catch {
+                    // ユーザーがキャンセル or share API 失敗 → フォールバック
+                  }
+                }
+
+                // フォールバック: Native Share 非対応端末 (PC ブラウザ等) 向けに
+                // LINE 共有 URL を開く。配信中 iOS Safari ではここに到達しない想定。
+                window.open(
+                  `https://line.me/R/share?text=${encodeURIComponent(text)}`,
+                  "_blank",
+                  "noopener,noreferrer",
+                );
+              }}
+              className="flex items-center gap-1.5 bg-[#06C755] hover:bg-[#05b34c] active:bg-[#04a043] rounded px-2 sm:px-3 py-1.5 transition"
+              aria-label="配信を共有する"
             >
-              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 5.82 2 10.5c0 2.67 1.35 5.04 3.46 6.62-.05.46-.31 1.72-.35 1.99-.06.36.13.36.27.26.1-.07 1.62-1.07 2.28-1.51.72.2 1.49.32 2.29.35L12 18.2c.08 0 .16 0 .24-.01 5.38-.18 9.76-3.93 9.76-8.49C22 5.82 17.52 2 12 2z"/></svg>
-              <span className="text-[10px] font-semibold">LINEで共有</span>
-            </a>
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>
+              </svg>
+              <span className="text-[10px] font-semibold">共有</span>
+            </button>
 
             {!subscribed && (
               <a
