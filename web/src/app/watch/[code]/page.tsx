@@ -396,23 +396,38 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
 
         {/* 配信時間は映像に焼き込み済み（scoreboard-canvas.ts）。CSS オーバーレイは廃止 */}
 
-        {/* 右下: 全画面ボタン（視聴中のみ表示） */}
+        {/* 右下: コントロール群（視聴中のみ表示） */}
         {isWatching && viewerToken && (
-          <button
-            onClick={toggleFullscreen}
-            aria-label={isFullscreen ? "全画面を解除" : "全画面表示"}
-            className="absolute bottom-3 right-3 z-[2] w-9 h-9 flex items-center justify-center rounded-md bg-black/70 hover:bg-black/85 backdrop-blur-sm text-white transition"
-          >
-            {isFullscreen ? (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4M9 9H4M15 9V4M15 9h5M9 15v5M9 15H4M15 15v5M15 15h5" />
+          <div className="absolute bottom-3 right-3 z-[2] flex items-center gap-2">
+            {/* 視聴を終了する: setIsWatching(false) で LiveKitViewer をアンマウント
+                → リスナー接続が自動切断 → 「タップして視聴」状態に戻り、再開可能 */}
+            <button
+              onClick={() => setIsWatching(false)}
+              aria-label="視聴を終了する"
+              className="flex items-center gap-1.5 h-9 px-3 rounded-md bg-black/70 hover:bg-black/85 backdrop-blur-sm text-white transition"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
               </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" />
-              </svg>
-            )}
-          </button>
+              <span className="text-[11px] font-semibold">視聴を終了</span>
+            </button>
+            {/* 全画面表示 */}
+            <button
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? "全画面を解除" : "全画面表示"}
+              className="w-9 h-9 flex items-center justify-center rounded-md bg-black/70 hover:bg-black/85 backdrop-blur-sm text-white transition"
+            >
+              {isFullscreen ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4M9 9H4M15 9V4M15 9h5M9 15v5M9 15H4M15 15v5M15 15h5" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" />
+                </svg>
+              )}
+            </button>
+          </div>
         )}
       </div>
 
