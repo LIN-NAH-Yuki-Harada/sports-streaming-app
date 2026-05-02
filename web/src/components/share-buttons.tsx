@@ -8,20 +8,23 @@ type ShareButtonsProps = {
   url: string;
   title: string;
   description?: string;
+  /** YouTube Live / アーカイブの URL（あれば LINE 共有メッセージに「📺 YouTube版」として併記） */
+  youtubeUrl?: string | null;
 };
 
 const BTN_BASE =
   "inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-[10px] sm:text-[11px] font-semibold transition";
 
-export function ShareButtons({ url, title, description }: ShareButtonsProps) {
+export function ShareButtons({ url, title, description, youtubeUrl }: ShareButtonsProps) {
   const toast = useToast();
   const [qrOpen, setQrOpen] = useState(false);
 
   const shareText = description ? `${title}\n${description}` : title;
 
-  const lineUrl = `https://line.me/R/share?text=${encodeURIComponent(
-    `${shareText}\n視聴はこちら → ${url}`
-  )}`;
+  const lineMessage = youtubeUrl
+    ? `${shareText}\n\n📱 より高画質・リアルタイム視聴（推奨）\n${url}\n\n📺 YouTube版\n${youtubeUrl}`
+    : `${shareText}\n視聴はこちら → ${url}`;
+  const lineUrl = `https://line.me/R/share?text=${encodeURIComponent(lineMessage)}`;
   const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
     `${shareText}`
   )}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(

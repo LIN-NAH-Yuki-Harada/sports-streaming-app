@@ -79,7 +79,8 @@ export type Broadcast = {
 export const BROADCAST_PUBLIC_COLUMNS =
   "id, share_code, broadcaster_id, team_id, sport, home_team, away_team, " +
   "tournament, venue, home_score, away_score, home_sets, away_sets, period, " +
-  "status, started_at, ended_at, youtube_video_id, youtube_upload_status";
+  "status, started_at, ended_at, youtube_video_id, youtube_upload_status, " +
+  "live_youtube_broadcast_id";
 
 // ===== プロフィール =====
 
