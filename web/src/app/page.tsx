@@ -131,7 +131,7 @@ const SOFTWARE_APP_JSONLD = {
       price: "500",
       priceCurrency: "JPY",
       description:
-        "配信者プランの全機能 + YouTube Live 同時配信（開発中） + YouTube 自動アーカイブ（開発中） + チーム・スケジュール管理（月額¥500）",
+        "配信者プランの全機能 + YouTube Live 同時配信（ベータ公開中） + YouTube 自動アーカイブ（ベータ公開中） + チーム・スケジュール管理（月額¥500）",
     },
   ],
   featureList: [
@@ -181,6 +181,18 @@ export default function LandingPage() {
         </nav>
       </header>
 
+      {/* NEW リリースバナー: YouTube Live 同時配信機能（5/03 公開） */}
+      <a
+        href="#pricing"
+        className="block bg-gradient-to-r from-[#e63946]/90 via-[#d62836] to-[#e63946]/90 text-white text-center text-[11px] sm:text-xs py-2 px-4 hover:from-[#e63946] hover:to-[#e63946] transition group"
+      >
+        <span className="inline-flex items-center gap-2 font-semibold">
+          <span className="bg-white text-[#e63946] text-[9px] font-black px-1.5 py-0.5 rounded">NEW</span>
+          <span>📺 YouTube Live 同時配信に対応！スマートテレビでも家族で応援できます（チームプラン・ベータ）</span>
+          <span className="hidden sm:inline opacity-70 group-hover:opacity-100 transition">→ 料金プランを見る</span>
+        </span>
+      </a>
+
       {/* Hero */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.02)_1px,transparent_1px)] bg-[size:60px_60px]" />
@@ -216,6 +228,10 @@ export default function LandingPage() {
                 </span>
                 <span className="inline-flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-full px-3 py-1 text-[11px] text-gray-300">
                   <span aria-hidden="true">📺</span> TV中継品質のスコアボード
+                </span>
+                <span className="inline-flex items-center gap-1.5 bg-[#e63946]/10 border border-[#e63946]/30 rounded-full px-3 py-1 text-[11px] text-white">
+                  <span aria-hidden="true">📡</span> YouTube Live 同時配信
+                  <span className="bg-[#e63946] text-white text-[8px] font-black px-1 py-0.5 rounded ml-0.5">NEW</span>
                 </span>
               </div>
 
@@ -479,8 +495,14 @@ export default function LandingPage() {
               <li>✓ チーム作成・メンバー招待</li>
               <li>✓ 試合スケジュール管理</li>
               <li>✓ 共有コードのチーム自動配布</li>
-              <li className="text-gray-600">🔜 YouTube Live 同時配信（リアルタイム拡散）</li>
-              <li className="text-gray-600">🔜 YouTube に自動アーカイブ（長期保存）</li>
+              <li className="text-white flex items-center gap-1.5 flex-wrap">
+                <span>✓ YouTube Live 同時配信（リアルタイム拡散）</span>
+                <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
+              </li>
+              <li className="text-white flex items-center gap-1.5 flex-wrap">
+                <span>✓ YouTube に自動アーカイブ（長期保存）</span>
+                <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
+              </li>
               <li className="text-gray-600">🔜 リモコンでスコア操作（別端末から）</li>
               <li className="text-gray-600">🔜 AI ハイライト自動生成</li>
             </ul>
