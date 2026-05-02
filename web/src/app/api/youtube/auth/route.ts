@@ -36,6 +36,7 @@ export async function GET(request: Request) {
       scope: [
         "https://www.googleapis.com/auth/youtube.upload",
         "https://www.googleapis.com/auth/youtube.readonly",
+        "https://www.googleapis.com/auth/youtube",
       ],
       state: user.id, // コールバックでユーザーを特定
     });
