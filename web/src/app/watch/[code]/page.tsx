@@ -454,6 +454,15 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
                 .filter(Boolean)
                 .join(" / ")
             }
+            youtubeUrl={
+              // 配信中: live_youtube_broadcast_id（同時配信中の YouTube Live URL）
+              // 終了後: youtube_video_id（アーカイブ動画 URL）
+              broadcast.live_youtube_broadcast_id
+                ? `https://youtu.be/${broadcast.live_youtube_broadcast_id}`
+                : broadcast.youtube_video_id
+                  ? `https://youtu.be/${broadcast.youtube_video_id}`
+                  : null
+            }
           />
         </div>
       </div>

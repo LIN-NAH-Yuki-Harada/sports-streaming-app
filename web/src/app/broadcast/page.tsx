@@ -169,6 +169,24 @@ function BroadcastPageInner() {
   } | null>(null);
   const [archiveDiscarded, setArchiveDiscarded] = useState(false);
   const [discardingArchive, setDiscardingArchive] = useState(false);
+  // 今回の配信で YouTube Live 同時配信を使うかどうか（配信ごとの都度判断）。
+  // マイページの youtube_live_enabled が ON のときデフォルト true、ユーザーは
+  // 配信開始前にチェックを外して「今回は YouTube に出さない」を選べる。
+  // ref は handleStart / handleEnd / pagehide で常に最新値を読むため。
+  const [enableYouTubeLiveSession, setEnableYouTubeLiveSession] = useState(true);
+  const enableYouTubeLiveSessionRef = useRef(true);
+  useEffect(() => {
+    enableYouTubeLiveSessionRef.current = enableYouTubeLiveSession;
+  }, [enableYouTubeLiveSession]);
+  // /api/livekit/live/start のレスポンスから受け取る YouTube Live broadcast ID。
+  // 配信中の LINE 共有テキストに「📺 YouTube版」リンクを差し込むために使う。
+  // 配信終了時に null リセット。
+  const [liveYoutubeBroadcastId, setLiveYoutubeBroadcastId] = useState<string | null>(null);
+  // 配信開始時に決定した「新パイプラインを使ったか」を保持する。
+  // 開始時 enableYouTubeLiveSession の値で start API を分岐したのと整合する
+  // stop API を呼ぶため、フォーム画面に戻ってから enableYouTubeLiveSession が
+  // 変わっても影響を受けないように ref で固定する。
+  const usingLivePipelineRef = useRef(false);
 
   // スケジュールから遷移してきた場合、フォームを事前入力
   useEffect(() => {
@@ -494,11 +512,14 @@ function BroadcastPageInner() {
     // 焼き込みパスのみ録画する（旧経路 ?burn=0 は録画対象外）。
     //
     // 新パイプライン（Live 中継）と旧パイプライン（録画→アップロード）は **排他**:
-    //   - NEXT_PUBLIC_LIVE_ARCHIVE=true → /api/livekit/live/start のみ呼ぶ
-    //   - 上記 false かつ NEXT_PUBLIC_ARCHIVE_ENABLED=true → /api/livekit/egress/start
-    //   - 両方 false → 何も呼ばない
+    //   - NEXT_PUBLIC_LIVE_ARCHIVE=true かつ 当該配信で同時配信 ON → /api/livekit/live/start
+    //   - 上記の同時配信 OFF (=ユーザーが今回は YouTube に出さない選択) で
+    //     NEXT_PUBLIC_ARCHIVE_ENABLED=true → /api/livekit/egress/start (旧アーカイブ)
+    //   - どちらも該当しない → 何も呼ばない
     // 二重起動すると transcode minutes の重複消費 + DB 状態管理の混乱が起きる。
-    const archiveStartPath = isLiveArchiveEnabled()
+    const useLivePipeline = isLiveArchiveEnabled() && enableYouTubeLiveSessionRef.current;
+    usingLivePipelineRef.current = useLivePipeline;
+    const archiveStartPath = useLivePipeline
       ? "/api/livekit/live/start"
       : isArchiveEnabled()
         ? "/api/livekit/egress/start"
@@ -511,7 +532,7 @@ function BroadcastPageInner() {
           const { data: sessionData } = await supabase.auth.getSession();
           const accessToken = sessionData.session?.access_token;
           if (!accessToken) return;
-          await fetch(archiveStartPath, {
+          const res = await fetch(archiveStartPath, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -519,6 +540,16 @@ function BroadcastPageInner() {
             },
             body: JSON.stringify({ broadcastId }),
           });
+          // 新パイプラインの場合は YouTube Live broadcast ID を取得して
+          // LINE 共有テキストの「📺 YouTube版」リンクに反映する
+          if (res.ok && useLivePipeline) {
+            const data = (await res.json().catch(() => null)) as
+              | { liveBroadcastId?: string; reused?: string }
+              | null;
+            if (data?.liveBroadcastId) {
+              setLiveYoutubeBroadcastId(data.liveBroadcastId);
+            }
+          }
         } catch {
           /* ignore: 録画/Live 失敗で配信を止めない */
         }
@@ -603,6 +634,9 @@ function BroadcastPageInner() {
     historyRef.current = [];
     setHistoryLength(0);
     setPeriodIndex(0);
+    // 次の配信に備えて Live 中継関連 state をリセット
+    setLiveYoutubeBroadcastId(null);
+    usingLivePipelineRef.current = false;
 
     // 残りのサーバー側 cleanup はバックグラウンドで実行（UI ブロックしない）。
     // どれか失敗しても DB は cleanup cron で 2 時間後に補正される。
@@ -616,8 +650,8 @@ function BroadcastPageInner() {
         await consumeTrialElapsed(accessToken, false);
 
         // LiveKit Egress 停止を fire-and-forget で投げる（フラグ off なら API 側で noop）
-        // 新旧パイプラインは排他。開始側と同じ判定で stop API を切り替える。
-        const archiveStopPath = isLiveArchiveEnabled()
+        // 新旧パイプラインは排他。開始時に決定したパイプラインの stop を呼ぶ。
+        const archiveStopPath = usingLivePipelineRef.current
           ? "/api/livekit/live/stop"
           : isArchiveEnabled()
             ? "/api/livekit/egress/stop"
@@ -763,8 +797,8 @@ function BroadcastPageInner() {
         );
         // YouTube アーカイブ機能 ON 時、Egress も合わせて停止依頼。
         // keepalive: true でタブ閉じ後でも投げ切る。
-        // 新旧パイプラインは排他。開始側と同じ判定で stop API を切り替える。
-        const pagehideStopPath = isLiveArchiveEnabled()
+        // 新旧パイプラインは排他。開始時に決定したパイプラインの stop を呼ぶ。
+        const pagehideStopPath = usingLivePipelineRef.current
           ? "/api/livekit/live/stop"
           : isArchiveEnabled()
             ? "/api/livekit/egress/stop"
@@ -1151,7 +1185,13 @@ function BroadcastPageInner() {
               onClick={() => {
                 const matchup = home && away ? `${home} vs ${away}` : "試合";
                 const tournamentLine = tournament ? `\n${tournament}` : "";
-                const msg = `【LIVE SPOtCH 試合配信中】${tournamentLine}\n${matchup}\n\n視聴はこちら 👇\n${shareUrl}\n\n共有コード: ${shareCode}`;
+                const youtubeWatchUrl = liveYoutubeBroadcastId
+                  ? `https://youtu.be/${liveYoutubeBroadcastId}`
+                  : null;
+                const youtubeBlock = youtubeWatchUrl
+                  ? `\n\n📺 YouTube版\n${youtubeWatchUrl}`
+                  : "";
+                const msg = `【LIVE SPOtCH 試合配信中】${tournamentLine}\n${matchup}\n\n📱 より高画質・リアルタイム視聴（推奨）\n${shareUrl}${youtubeBlock}\n\n共有コード: ${shareCode}`;
                 copyToClipboard(msg, "code");
               }}
               className="flex items-center gap-2 bg-black/70 backdrop-blur-sm rounded px-2 sm:px-3 py-1.5 transition hover:bg-black/90"
@@ -1173,7 +1213,17 @@ function BroadcastPageInner() {
           {/* 右下: コントロールボタン群 */}
           <div className="absolute bottom-[calc(8px+env(safe-area-inset-bottom))] right-3 sm:bottom-4 sm:right-4 flex items-center gap-2">
             <a
-              href={`https://line.me/R/share?text=${encodeURIComponent(`【試合配信中】\n${home} vs ${away}\n${tournament ? tournament + "\n" : ""}視聴はこちら → ${shareUrl}`)}`}
+              href={(() => {
+                const youtubeWatchUrl = liveYoutubeBroadcastId
+                  ? `https://youtu.be/${liveYoutubeBroadcastId}`
+                  : null;
+                const tournamentLine = tournament ? `${tournament}\n` : "";
+                const youtubeBlock = youtubeWatchUrl
+                  ? `\n\n📺 YouTube版\n${youtubeWatchUrl}`
+                  : "";
+                const text = `【試合配信中】\n${home} vs ${away}\n${tournamentLine}\n📱 より高画質・リアルタイム視聴（推奨）\n${shareUrl}${youtubeBlock}`;
+                return `https://line.me/R/share?text=${encodeURIComponent(text)}`;
+              })()}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 bg-[#06C755] hover:bg-[#05b34c] rounded px-2 sm:px-3 py-1.5 transition"
@@ -1427,6 +1477,33 @@ function BroadcastPageInner() {
             視聴者にはこのようにスコアボードが映像の上にオーバーレイ表示されます
           </p>
         </div>
+
+        {/* YouTube Live 同時配信トグル（チームプラン + マイページ ON のとき表示）。
+            マイページの youtube_live_enabled が機能利用許諾のマスタースイッチ、
+            このチェックは「今回の配信で使うかどうか」の都度判断。 */}
+        {isLiveArchiveEnabled()
+          && profile?.youtube_live_enabled === true
+          && profile?.plan === "team" && (
+          <div className="rounded-md bg-red-500/5 border border-red-500/20 px-3 py-3">
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableYouTubeLiveSession}
+                onChange={(e) => setEnableYouTubeLiveSession(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-white/20 bg-black/40 accent-[#e63946] cursor-pointer"
+              />
+              <div className="flex-1">
+                <p className="text-[11px] font-semibold text-white flex items-center gap-1.5">
+                  📺 YouTube Live で同時配信する
+                  <span className="text-[8px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-medium">ベータ</span>
+                </p>
+                <p className="mt-1 text-[10px] text-gray-400 leading-relaxed">
+                  ON にするとあなたのYouTubeチャンネルにリアルタイム配信され、終了後は自動でアーカイブが残ります（限定公開）。OFF にすると今回の配信は YouTube に保存されません。
+                </p>
+              </div>
+            </label>
+          </div>
+        )}
 
         {/* 配信前チェックリスト（発熱対策） */}
         <details className="rounded-md bg-amber-500/5 border border-amber-500/20 group">
