@@ -2,6 +2,7 @@ import {
   EgressClient,
   EncodedFileOutput,
   EncodedFileType,
+  RoomServiceClient,
   S3Upload,
 } from "livekit-server-sdk";
 
@@ -17,21 +18,20 @@ import {
  */
 
 let cachedClient: EgressClient | null = null;
+let cachedRoomService: RoomServiceClient | null = null;
 
 /**
- * EgressClient のシングルトン取得。
- * wss:// のクライアント URL を https:// に変換して Twirp RPC エンドポイントとして使う。
+ * LiveKit env から HTTP RPC エンドポイント URL を構築する内部ヘルパ。
+ * wss:// のクライアント URL を https:// に変換する。
  */
-export function getEgressClient(): EgressClient {
-  if (cachedClient) return cachedClient;
-
+function buildLiveKitHttpUrl(): { httpUrl: string; apiKey: string; apiSecret: string } {
   const url = process.env.NEXT_PUBLIC_LIVEKIT_URL;
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
 
   if (!url || !apiKey || !apiSecret) {
     throw new Error(
-      "Egress env missing: NEXT_PUBLIC_LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET",
+      "LiveKit env missing: NEXT_PUBLIC_LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET",
     );
   }
 
@@ -39,8 +39,29 @@ export function getEgressClient(): EgressClient {
     .replace(/^wss:\/\//, "https://")
     .replace(/^ws:\/\//, "http://");
 
+  return { httpUrl, apiKey, apiSecret };
+}
+
+/**
+ * EgressClient のシングルトン取得。
+ */
+export function getEgressClient(): EgressClient {
+  if (cachedClient) return cachedClient;
+  const { httpUrl, apiKey, apiSecret } = buildLiveKitHttpUrl();
   cachedClient = new EgressClient(httpUrl, apiKey, apiSecret);
   return cachedClient;
+}
+
+/**
+ * RoomServiceClient のシングルトン取得。
+ * 配信者の publish track 一覧（track ID 含む）を取得して TrackCompositeEgress
+ * に渡すために必要。
+ */
+export function getRoomServiceClient(): RoomServiceClient {
+  if (cachedRoomService) return cachedRoomService;
+  const { httpUrl, apiKey, apiSecret } = buildLiveKitHttpUrl();
+  cachedRoomService = new RoomServiceClient(httpUrl, apiKey, apiSecret);
+  return cachedRoomService;
 }
 
 /**

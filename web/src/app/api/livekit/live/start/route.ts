@@ -223,9 +223,17 @@ export async function POST(request: Request) {
   }
 
   // 12. LiveKit Egress を RTMP push で起動
+  // broadcasterIdentity = Supabase user.id（broadcast page で
+  // /api/livekit/token に渡している identity と同じ）。
+  // TrackCompositeEgress で配信者の publish track を引くために使う。
   let egressId: string;
   try {
-    egressId = await startRtmpEgress(broadcast.share_code, rtmpUrl, streamKey);
+    egressId = await startRtmpEgress(
+      broadcast.share_code,
+      user.id,
+      rtmpUrl,
+      streamKey,
+    );
   } catch (err) {
     await safeTransitionToComplete(liveBroadcastId, oauth2Client);
     const message = err instanceof Error ? err.message : "Unknown error";
