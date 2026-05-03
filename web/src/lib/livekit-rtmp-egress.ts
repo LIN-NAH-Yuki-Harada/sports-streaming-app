@@ -1,9 +1,36 @@
 import {
   StreamOutput,
   StreamProtocol,
-  EncodingOptionsPreset,
+  EncodingOptions,
+  AudioCodec,
+  VideoCodec,
 } from "livekit-server-sdk";
 import { getEgressClient } from "./livekit-egress";
+
+/**
+ * RTMP push 用の EncodingOptions（YouTube Live 受信品質を最大化）。
+ *
+ * - videoBitrate: 8 Mbps（preset デフォルト 4.5 Mbps の約 1.8 倍）
+ *   YouTube 推奨 1080p30 bitrate (4.5-9 Mbps) の上限近く。
+ *   YouTube 受信時の圧縮アーチファクト軽減効果あり。
+ *   → LiveKit Cloud 側の処理なので配信者スマホへの負荷ゼロ。
+ *   → transcode minutes は時間ベースのため bitrate 上げても消費量変化なし。
+ * - keyFrameInterval: 2 秒（YouTube 推奨）。
+ *   preset デフォルト 4 秒だと CDN 側のシークやサムネ生成精度が落ちる。
+ * - audioCodec: AAC（YouTube Live ingest が必須要件）。
+ * - videoCodec: H264_MAIN（preset と同等・互換性最大）。
+ */
+const RTMP_HIGH_QUALITY_ENCODING = new EncodingOptions({
+  width: 1920,
+  height: 1080,
+  framerate: 30,
+  videoCodec: VideoCodec.H264_MAIN,
+  videoBitrate: 8_000,
+  keyFrameInterval: 2,
+  audioCodec: AudioCodec.AAC,
+  audioBitrate: 128,
+  audioFrequency: 44_100,
+});
 
 /**
  * LiveKit Egress を **RTMP push** 出力で起動する（Live 中継移行 PR-3）。
@@ -29,10 +56,11 @@ import { getEgressClient } from "./livekit-egress";
  * `xxxx-xxxx-xxxx-xxxx-xxxx` のような文字列。LiveKit に渡すときは
  * `${url}/${key}` の形式に組み立てる。
  *
- * encodingOptions は録画 (livekit-egress.ts) と同じく 1080p preset。
+ * encodingOptions は preset ではなく明示指定（RTMP_HIGH_QUALITY_ENCODING）。
  * RTMP の場合 LiveKit Cloud → YouTube Live ingest までは LiveKit が直接配信し、
- * その後 YouTube 側で再エンコードされて視聴者に届く。LiveKit 側のソースが
- * 720p なので preset を上げてもアップスケール限界はあるが、頭打ちまでは効く。
+ * その後 YouTube 側で再エンコードされて視聴者に届く。
+ * 配信者は 1080p / 5 Mbps を publish しており、Egress 側 8 Mbps で受け取る
+ * ため YouTube 受信時の追加圧縮アーチファクトを最小化する設計。
  *
  * @param roomName LiveKit ルーム名（broadcasts.share_code と同じ）
  * @param rtmpIngestUrl YouTube Live API が createLiveStream で返す ingestionAddress
@@ -61,7 +89,7 @@ export async function startRtmpEgress(
     streamOutput,
     {
       layout: "speaker",
-      encodingOptions: EncodingOptionsPreset.H264_1080P_30,
+      encodingOptions: RTMP_HIGH_QUALITY_ENCODING,
       audioOnly: false,
       videoOnly: false,
     },
