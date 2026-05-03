@@ -1,9 +1,37 @@
 import {
   StreamOutput,
   StreamProtocol,
-  EncodingOptionsPreset,
+  EncodingOptions,
+  AudioCodec,
+  VideoCodec,
+  TrackType,
 } from "livekit-server-sdk";
-import { getEgressClient } from "./livekit-egress";
+import { getEgressClient, getRoomServiceClient } from "./livekit-egress";
+
+/**
+ * RTMP push 用の EncodingOptions（YouTube Live 受信品質を最大化）。
+ *
+ * - videoBitrate: 8 Mbps（preset デフォルト 4.5 Mbps の約 1.8 倍）
+ *   YouTube 推奨 1080p30 bitrate (4.5-9 Mbps) の上限近く。
+ *   YouTube 受信時の圧縮アーチファクト軽減効果あり。
+ *   → LiveKit Cloud 側の処理なので配信者スマホへの負荷ゼロ。
+ *   → transcode minutes は時間ベースのため bitrate 上げても消費量変化なし。
+ * - keyFrameInterval: 2 秒（YouTube 推奨）。
+ *   preset デフォルト 4 秒だと CDN 側のシークやサムネ生成精度が落ちる。
+ * - audioCodec: AAC（YouTube Live ingest が必須要件）。
+ * - videoCodec: H264_MAIN（preset と同等・互換性最大）。
+ */
+const RTMP_HIGH_QUALITY_ENCODING = new EncodingOptions({
+  width: 1920,
+  height: 1080,
+  framerate: 30,
+  videoCodec: VideoCodec.H264_MAIN,
+  videoBitrate: 8_000,
+  keyFrameInterval: 2,
+  audioCodec: AudioCodec.AAC,
+  audioBitrate: 128,
+  audioFrequency: 44_100,
+});
 
 /**
  * LiveKit Egress を **RTMP push** 出力で起動する（Live 中継移行 PR-3）。
@@ -23,27 +51,83 @@ import { getEgressClient } from "./livekit-egress";
  */
 
 /**
+ * 配信者の publish track ID を取得する。
+ *
+ * LiveKit に publish 済みの participant 一覧から、broadcasterIdentity と
+ * 一致する participant を探し、その audio/video track の sid (track ID) を返す。
+ *
+ * 配信開始直後はまだ publish 完了していない可能性があるため、最大 5 回
+ * 1 秒間隔でリトライする。それでも見つからなければ null を返す
+ * （呼び出し元で RoomCompositeEgress フォールバック）。
+ */
+async function waitForBroadcasterTracks(
+  roomName: string,
+  broadcasterIdentity: string,
+  maxAttempts = 5,
+): Promise<{ audioTrackId: string; videoTrackId: string } | null> {
+  const roomService = getRoomServiceClient();
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const participants = await roomService.listParticipants(roomName);
+      const broadcaster = participants.find(
+        (p) => p.identity === broadcasterIdentity,
+      );
+      if (broadcaster) {
+        const audioTrack = broadcaster.tracks.find(
+          (t) => t.type === TrackType.AUDIO,
+        );
+        const videoTrack = broadcaster.tracks.find(
+          (t) => t.type === TrackType.VIDEO,
+        );
+        if (audioTrack && videoTrack) {
+          return { audioTrackId: audioTrack.sid, videoTrackId: videoTrack.sid };
+        }
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unknown";
+      console.warn(
+        `[rtmp-egress] listParticipants attempt ${attempt + 1} failed: ${message}`,
+      );
+    }
+    if (attempt < maxAttempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  return null;
+}
+
+/**
  * RTMP push を開始する。
  *
  * YouTube Live の場合、url は `rtmp://a.rtmp.youtube.com/live2`、key は
  * `xxxx-xxxx-xxxx-xxxx-xxxx` のような文字列。LiveKit に渡すときは
  * `${url}/${key}` の形式に組み立てる。
  *
- * encodingOptions は録画 (livekit-egress.ts) と同じく 1080p preset。
- * RTMP の場合 LiveKit Cloud → YouTube Live ingest までは LiveKit が直接配信し、
- * その後 YouTube 側で再エンコードされて視聴者に届く。LiveKit 側のソースが
- * 720p なので preset を上げてもアップスケール限界はあるが、頭打ちまでは効く。
+ * **Egress 種別の選択（5/04 改修）**:
+ *   優先: TrackCompositeEgress（配信者の publish track を直接 RTMP push）
+ *   fallback: RoomCompositeEgress（仮想 Chrome で room 全体を再合成して push）
+ *
+ *   TrackComposite は仮想 Chrome 合成を経由しないため再エンコードが 1 段
+ *   減り、YouTube 受信品質が大幅に改善する（配信者は既に Canvas で
+ *   スコアボード焼き込み済みのため再合成は不要）。
+ *
+ *   broadcaster の track が listParticipants で見つからない場合
+ *  （publish 直後のタイミング等）に備えて RoomComposite に自動フォールバック。
+ *
+ * encodingOptions は preset ではなく明示指定（RTMP_HIGH_QUALITY_ENCODING）。
+ * 配信者は 1080p / 5 Mbps を publish しており、Egress 側 8 Mbps で
+ * 受け取るため YouTube 受信時の追加圧縮アーチファクトを最小化する設計。
  *
  * @param roomName LiveKit ルーム名（broadcasts.share_code と同じ）
+ * @param broadcasterIdentity 配信者の identity（= Supabase user.id）。
+ *   TrackCompositeEgress で track ID を引くために必須。
  * @param rtmpIngestUrl YouTube Live API が createLiveStream で返す ingestionAddress
  * @param streamKey 同 createLiveStream の streamName。漏洩厳禁（DB に保存しない）
  * @returns LiveKit Egress ID。停止 API 呼出と webhook 突合に使う。
- *
- * @throws LiveKit Cloud 側エラー（quota 超過 / network 不調 等）。呼出側で
- *   classifyError 相当の分類を行う。
  */
 export async function startRtmpEgress(
   roomName: string,
+  broadcasterIdentity: string,
   rtmpIngestUrl: string,
   streamKey: string,
 ): Promise<string> {
@@ -56,17 +140,52 @@ export async function startRtmpEgress(
     urls: [fullUrl],
   });
 
+  // 案 B: TrackCompositeEgress を優先試行（仮想 Chrome 合成を経由しないため
+  // 抜本的に画質が改善する）
+  const trackIds = await waitForBroadcasterTracks(roomName, broadcasterIdentity);
+  if (trackIds) {
+    try {
+      const info = await getEgressClient().startTrackCompositeEgress(
+        roomName,
+        streamOutput,
+        {
+          audioTrackId: trackIds.audioTrackId,
+          videoTrackId: trackIds.videoTrackId,
+          encodingOptions: RTMP_HIGH_QUALITY_ENCODING,
+        },
+      );
+      console.log(
+        `[rtmp-egress] TrackCompositeEgress 開始 (egressId=${info.egressId}, ` +
+          `audio=${trackIds.audioTrackId}, video=${trackIds.videoTrackId})`,
+      );
+      return info.egressId;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unknown";
+      console.warn(
+        `[rtmp-egress] TrackCompositeEgress 失敗 → RoomCompositeEgress フォールバック: ${message}`,
+      );
+    }
+  } else {
+    console.warn(
+      `[rtmp-egress] broadcaster track が listParticipants で見つからず → ` +
+        "RoomCompositeEgress フォールバック",
+    );
+  }
+
+  // フォールバック: 旧 RoomCompositeEgress（仮想 Chrome で再合成して push）
   const info = await getEgressClient().startRoomCompositeEgress(
     roomName,
     streamOutput,
     {
       layout: "speaker",
-      encodingOptions: EncodingOptionsPreset.H264_1080P_30,
+      encodingOptions: RTMP_HIGH_QUALITY_ENCODING,
       audioOnly: false,
       videoOnly: false,
     },
   );
-
+  console.log(
+    `[rtmp-egress] RoomCompositeEgress (fallback) 開始 (egressId=${info.egressId})`,
+  );
   return info.egressId;
 }
 
