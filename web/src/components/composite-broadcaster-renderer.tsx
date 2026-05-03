@@ -82,7 +82,11 @@ export function CompositeBroadcasterRenderer({
           simulcast: true,
           videoCodec: "h264",
           videoEncoding: {
-            maxBitrate: 2_500_000,
+            // 5/03: 配信チェーン全体を 1080p に引き上げに伴い、
+            // bitrate も 2.5Mbps → 5Mbps に倍化。
+            // YouTube 推奨 1080p30 bitrate (4.5-9 Mbps) の中央値。
+            // 発熱リスクは室内競技なら問題ないが、夏屋外で症状が出たら下げる。
+            maxBitrate: 5_000_000,
             maxFramerate: 30,
           },
         });

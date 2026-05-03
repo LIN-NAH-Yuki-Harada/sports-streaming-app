@@ -147,8 +147,9 @@ export async function createLiveBroadcast(
  * Stream Key は **YouTube アカウントへの配信権限とほぼ等価** なので、
  * 取得後は LiveKit Egress に渡してすぐ破棄する。DB に永続化してはならない。
  *
- * 解像度 720p / 30fps を指定（現状の LiveKit publish 設定と一致させる）。
- * 撮影画質を上げて 1080p に対応させる場合は cdn.resolution を `'1080p'` に変更する。
+ * 解像度 1080p / 30fps を指定（LiveKit publish と Egress preset を 1080p に統一）。
+ * YouTube が「ingest 解像度の宣言」より小さい値を受け取ると追加ダウンスケールが
+ * 入って画質劣化するため、配信側のチェーン全体で 1080p を貫く。
  * isReusable=false で 1 試合 = 1 stream resource を強制（key の漏洩リスク最小化）。
  *
  * 必要 OAuth scope: `https://www.googleapis.com/auth/youtube`
@@ -171,8 +172,11 @@ export async function createLiveStream(
       cdn: {
         frameRate: "30fps",
         ingestionType: "rtmp",
-        // 撮影画質との整合: LiveKit publish は 720p / 2.5Mbps なので 720p 指定
-        resolution: "720p",
+        // 配信チェーン全体で 1080p に統一（LiveKit publish 1080p / 5Mbps,
+        // Egress preset H264_1080P_30, YouTube ingest 1080p）。
+        // 720p 宣言だと Egress 1080p 出力に対して YouTube が追加ダウンスケール
+        // を行い画質劣化が生じるため 1080p で揃える。
+        resolution: "1080p",
       },
       contentDetails: {
         isReusable: false,
