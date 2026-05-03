@@ -178,10 +178,31 @@ function BroadcastPageInner() {
   useEffect(() => {
     enableYouTubeLiveSessionRef.current = enableYouTubeLiveSession;
   }, [enableYouTubeLiveSession]);
+
   // /api/livekit/live/start のレスポンスから受け取る YouTube Live broadcast ID。
   // 配信中の LINE 共有テキストに「📺 YouTube版」リンクを差し込むために使う。
   // 配信終了時に null リセット。
   const [liveYoutubeBroadcastId, setLiveYoutubeBroadcastId] = useState<string | null>(null);
+  // YouTube Live のウォームアップ完了予定時刻 (epoch ms)。
+  // 配信開始 → RTMP 接続 → YouTube CDN 配信開始まで 15-30 秒かかるため、
+  // この時刻まで「YouTube 側準備中」表示にして共有を待つよう促す。
+  const [youtubeReadyAt, setYoutubeReadyAt] = useState<number | null>(null);
+  // 1 秒ごとに更新される現在時刻 (ms)。カウントダウン表示の再描画用。
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  // youtubeReadyAt が設定されている間は 1 秒ごとに nowMs を更新してカウントダウン
+  // 表示を再描画する。準備完了後はインターバルを止めて再描画コストを下げる。
+  useEffect(() => {
+    if (youtubeReadyAt === null) return;
+    const interval = setInterval(() => {
+      const next = Date.now();
+      setNowMs(next);
+      if (next >= youtubeReadyAt) {
+        clearInterval(interval);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [youtubeReadyAt]);
   // 配信開始時に決定した「新パイプラインを使ったか」を保持する。
   // 開始時 enableYouTubeLiveSession の値で start API を分岐したのと整合する
   // stop API を呼ぶため、フォーム画面に戻ってから enableYouTubeLiveSession が
@@ -548,6 +569,12 @@ function BroadcastPageInner() {
               | null;
             if (data?.liveBroadcastId) {
               setLiveYoutubeBroadcastId(data.liveBroadcastId);
+              // YouTube Live は RTMP 接続 → ingest → CDN 配信開始まで 15-30 秒
+              // のウォームアップ期間がある。共有ボタンに「準備中」表示を出して
+              // 配信者が早すぎる共有でブラックアウト視聴体験を視聴者に与える事故を
+              // 防ぐ。20 秒は YouTube Live の典型的なウォームアップ時間に
+              // 安全マージンを乗せた値。
+              setYoutubeReadyAt(Date.now() + 20_000);
             }
           }
         } catch {
@@ -636,6 +663,7 @@ function BroadcastPageInner() {
     setPeriodIndex(0);
     // 次の配信に備えて Live 中継関連 state をリセット
     setLiveYoutubeBroadcastId(null);
+    setYoutubeReadyAt(null);
     usingLivePipelineRef.current = false;
 
     // 残りのサーバー側 cleanup はバックグラウンドで実行（UI ブロックしない）。
@@ -1212,54 +1240,97 @@ function BroadcastPageInner() {
 
           {/* 右下: コントロールボタン群 */}
           <div className="absolute bottom-[calc(8px+env(safe-area-inset-bottom))] right-3 sm:bottom-4 sm:right-4 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={async () => {
-                const youtubeWatchUrl = liveYoutubeBroadcastId
-                  ? `https://youtu.be/${liveYoutubeBroadcastId}`
-                  : null;
-                const tournamentLine = tournament ? `${tournament}\n` : "";
-                const youtubeBlock = youtubeWatchUrl
-                  ? `\n\n📺 YouTube版\n${youtubeWatchUrl}`
-                  : "";
-                const text = `【試合配信中】\n${home} vs ${away}\n${tournamentLine}\n📱 より高画質・リアルタイム視聴（推奨）\n${shareUrl}${youtubeBlock}`;
+            {(() => {
+              // YouTube ウォームアップ残り秒数。0 なら準備完了。
+              const remainingSec = youtubeReadyAt
+                ? Math.max(0, Math.ceil((youtubeReadyAt - nowMs) / 1000))
+                : 0;
+              const isYoutubeWarming = remainingSec > 0;
+              return (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // YouTube 準備中なら確認モーダルで意識喚起。
+                    // 自社プレイヤー URL は即時 OK だが、LINE 共有テキストには
+                    // 両 URL が含まれるため受信者が YouTube 側を選ぶとブラックアウトを
+                    // 見るリスクがある。配信者が「分かってる」場合は共有を許可する。
+                    if (isYoutubeWarming) {
+                      const ok = confirm(
+                        `⚠️ YouTube 側がまだ準備中です（残り約 ${remainingSec} 秒）\n\n` +
+                          "自社プレイヤー URL は今すぐ視聴できますが、\n" +
+                          "YouTube URL は受信者が数秒〜20 秒待つ必要があります。\n\n" +
+                          "それでも今共有しますか？",
+                      );
+                      if (!ok) return;
+                    }
 
-                // iOS Safari の Native Share API を最優先。
-                // ネイティブシェアシートは Safari のオーバーレイ UI として開くため、
-                // Safari 自体がバックグラウンドにならず WebRTC publish が切断されない。
-                // 配信中の LINE アプリ起動は WebRTC を確実に切るため必ず避ける。
-                if (typeof navigator !== "undefined" && "share" in navigator) {
-                  try {
-                    await (
-                      navigator as Navigator & {
-                        share: (data: ShareData) => Promise<void>;
+                    const youtubeWatchUrl = liveYoutubeBroadcastId
+                      ? `https://youtu.be/${liveYoutubeBroadcastId}`
+                      : null;
+                    const tournamentLine = tournament ? `${tournament}\n` : "";
+                    const youtubeBlock = youtubeWatchUrl
+                      ? `\n\n📺 YouTube版\n${youtubeWatchUrl}`
+                      : "";
+                    const text = `【試合配信中】\n${home} vs ${away}\n${tournamentLine}\n📱 より高画質・リアルタイム視聴（推奨）\n${shareUrl}${youtubeBlock}`;
+
+                    // iOS Safari の Native Share API を最優先。
+                    // ネイティブシェアシートは Safari のオーバーレイ UI として開くため、
+                    // Safari 自体がバックグラウンドにならず WebRTC publish が切断されない。
+                    // 配信中の LINE アプリ起動は WebRTC を確実に切るため必ず避ける。
+                    if (typeof navigator !== "undefined" && "share" in navigator) {
+                      try {
+                        await (
+                          navigator as Navigator & {
+                            share: (data: ShareData) => Promise<void>;
+                          }
+                        ).share({
+                          title:
+                            home && away
+                              ? `${home} vs ${away}`
+                              : "LIVE SPOtCH 試合配信中",
+                          text,
+                        });
+                        return;
+                      } catch {
+                        // ユーザーがキャンセル or share API 失敗 → フォールバック
                       }
-                    ).share({
-                      title: home && away ? `${home} vs ${away}` : "LIVE SPOtCH 試合配信中",
-                      text,
-                    });
-                    return;
-                  } catch {
-                    // ユーザーがキャンセル or share API 失敗 → フォールバック
-                  }
-                }
+                    }
 
-                // フォールバック: Native Share 非対応端末 (PC ブラウザ等) 向けに
-                // LINE 共有 URL を開く。配信中 iOS Safari ではここに到達しない想定。
-                window.open(
-                  `https://line.me/R/share?text=${encodeURIComponent(text)}`,
-                  "_blank",
-                  "noopener,noreferrer",
-                );
-              }}
-              className="flex items-center gap-1.5 bg-[#06C755] hover:bg-[#05b34c] active:bg-[#04a043] rounded px-2 sm:px-3 py-1.5 transition"
-              aria-label="配信を共有する"
-            >
-              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>
-              </svg>
-              <span className="text-[10px] font-semibold">共有</span>
-            </button>
+                    // フォールバック: Native Share 非対応端末 (PC ブラウザ等) 向けに
+                    // LINE 共有 URL を開く。配信中 iOS Safari ではここに到達しない想定。
+                    window.open(
+                      `https://line.me/R/share?text=${encodeURIComponent(text)}`,
+                      "_blank",
+                      "noopener,noreferrer",
+                    );
+                  }}
+                  className={
+                    isYoutubeWarming
+                      ? "flex items-center gap-1.5 bg-amber-600/80 hover:bg-amber-600 active:bg-amber-700 rounded px-2 sm:px-3 py-1.5 transition"
+                      : "flex items-center gap-1.5 bg-[#06C755] hover:bg-[#05b34c] active:bg-[#04a043] rounded px-2 sm:px-3 py-1.5 transition"
+                  }
+                  aria-label={
+                    isYoutubeWarming
+                      ? `YouTube 側準備中（残り約 ${remainingSec} 秒）。今共有すると視聴者は数秒待つ必要があります`
+                      : "配信を共有する"
+                  }
+                >
+                  <svg
+                    className="w-3.5 h-3.5"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z" />
+                  </svg>
+                  <span className="text-[10px] font-semibold">
+                    {isYoutubeWarming
+                      ? `共有 ⚠️ YouTube準備中 ${remainingSec}s`
+                      : "共有"}
+                  </span>
+                </button>
+              );
+            })()}
 
             {!subscribed && (
               <a
