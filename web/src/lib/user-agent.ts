@@ -65,8 +65,12 @@ export function buildExternalBrowserUrl(currentUrl: string, platform: Platform):
   return currentUrl;
 }
 
-// Canvas 合成配信の解像度。夏の発熱対策として全端末で 720p / 30fps を採用する。
-// 高画質モード（1080p）への切替は将来「省エネ / 高画質」トグルで対応予定。
+// Canvas 合成配信の解像度。
+// 5/03 配信チェーン全体を 1080p に引き上げ（LiveKit publish / Egress / YouTube ingest を統一）。
+// 撮影画質を上げないと YouTube Live ingest 側で 1080p 宣言しても元素材が 720p のため
+// アップスケール限界に当たる、という 4/30 朝の実測結果を受けての対応。
+// 発熱リスクは：室内体育館（春〜秋の屋内競技）→ 影響小、夏屋外 → 要監視。
+// 端末発熱で配信が止まる事案が出たら端末別に 720p フォールバックを検討する。
 export function pickBroadcastResolution(): BroadcastResolution {
-  return { width: 1280, height: 720, frameRate: 30 };
+  return { width: 1920, height: 1080, frameRate: 30 };
 }
