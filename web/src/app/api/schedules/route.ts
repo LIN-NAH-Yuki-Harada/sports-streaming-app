@@ -1,6 +1,6 @@
 import { getUser, getAdminClient } from "@/lib/supabase-admin";
 
-// POST /api/schedules — 予定作成（オーナー・管理者のみ）
+// POST /api/schedules — 予定作成（チーム所属 + 配信可能プラン）
 export async function POST(request: Request) {
   try {
     const user = await getUser(request);
@@ -27,16 +27,31 @@ export async function POST(request: Request) {
 
     const supabase = getAdminClient();
 
-    // オーナー・管理者チェック
+    // チーム所属チェック（ロール不問）
     const { data: membership } = await supabase
       .from("team_members")
-      .select("role")
+      .select("user_id")
       .eq("team_id", teamId)
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
+    if (!membership) {
+      return Response.json(
+        { error: "このチームのメンバーではありません" },
+        { status: 403 },
+      );
+    }
 
-    if (!membership || !["owner", "admin"].includes(membership.role)) {
-      return Response.json({ error: "権限がありません" }, { status: 403 });
+    // 配信可能な有料プラン (broadcaster / team) チェック
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("plan")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (profile?.plan !== "broadcaster" && profile?.plan !== "team") {
+      return Response.json(
+        { error: "予定の作成には配信可能なプラン（¥300以上）が必要です" },
+        { status: 403 },
+      );
     }
 
     const { data, error } = await supabase

@@ -13,21 +13,39 @@ async function checkScheduleAccess(
 
   if (!schedule) return { ok: false, status: 404, error: "予定が見つかりません" } as const;
 
+  // チーム所属チェック（ロール不問）
   const { data: membership } = await supabase
     .from("team_members")
-    .select("role")
+    .select("user_id")
     .eq("team_id", schedule.team_id)
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
+  if (!membership) {
+    return {
+      ok: false,
+      status: 403,
+      error: "このチームのメンバーではありません",
+    } as const;
+  }
 
-  if (!membership || !["owner", "admin"].includes(membership.role)) {
-    return { ok: false, status: 403, error: "権限がありません" } as const;
+  // 配信可能な有料プラン (broadcaster / team) チェック
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", userId)
+    .maybeSingle();
+  if (profile?.plan !== "broadcaster" && profile?.plan !== "team") {
+    return {
+      ok: false,
+      status: 403,
+      error: "予定の編集には配信可能なプラン（¥300以上）が必要です",
+    } as const;
   }
 
   return { ok: true, teamId: schedule.team_id } as const;
 }
 
-// PATCH /api/schedules/[id] — 予定更新（オーナー・管理者のみ）
+// PATCH /api/schedules/[id] — 予定更新（チーム所属 + 配信可能プラン）
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -77,7 +95,7 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/schedules/[id] — 予定削除（オーナー・管理者のみ）
+// DELETE /api/schedules/[id] — 予定削除（チーム所属 + 配信可能プラン）
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
