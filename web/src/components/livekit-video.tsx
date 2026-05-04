@@ -179,6 +179,22 @@ function ViewerRenderer() {
     (t) => t.source === Track.Source.Camera && t.publication?.track
   );
 
+  // 「Connected だが cameraTrack が無い」状態の経過秒数。
+  // 配信者の再接続中・トラック publish 待ちのまま固まる症状（5/04 オーナー指摘）
+  // を救済するため、一定時間経過したらリロードボタンを目立つ位置に表示する。
+  const [waitingForTrackSeconds, setWaitingForTrackSeconds] = useState(0);
+  useEffect(() => {
+    if (connectionState !== ConnectionState.Connected || cameraTrack) {
+      setWaitingForTrackSeconds(0);
+      return;
+    }
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setWaitingForTrackSeconds(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [connectionState, cameraTrack]);
+
   return (
     <>
       <RoomAudioRenderer />
@@ -204,10 +220,31 @@ function ViewerRenderer() {
               <span className="text-sm font-semibold text-yellow-400">配信が途切れています</span>
             </div>
             <p className="text-xs text-gray-300">再接続中… ({reconnectSeconds}秒)</p>
-            {reconnectSeconds >= 10 && (
+            {reconnectSeconds >= 10 && reconnectSeconds < 30 && (
               <p className="text-[11px] text-yellow-300 leading-relaxed">
                 配信者の電波状況が悪い可能性があります
               </p>
+            )}
+            {/* 30 秒以上再接続できない = LiveKit クライアント側の自動回復が
+                効いていない可能性大。視聴者がリロードで新しい接続を張り直せる
+                ボタンを目立つ場所に提示。 */}
+            {reconnectSeconds >= 30 && (
+              <>
+                <p className="text-[11px] text-yellow-300 leading-relaxed">
+                  自動再接続が効いていないようです。<br />
+                  リロードで新しい接続を試してください。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="mt-1 inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-[#e63946] hover:bg-[#d62836] active:bg-[#c41f2e] text-white text-xs font-semibold transition"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M20 20v-6h-6M5 9a8 8 0 0114-3m1 9a8 8 0 01-14 3" />
+                  </svg>
+                  リロードして再接続
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -247,8 +284,33 @@ function ViewerRenderer() {
           }}
         />
       ) : connectionState === ConnectionState.Connected ? (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <p className="text-xs text-gray-500">配信者の接続を待っています...</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6">
+          <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-gray-500">
+            配信者の接続を待っています...
+            {waitingForTrackSeconds > 0 && ` (${waitingForTrackSeconds}秒)`}
+          </p>
+          {/* 30 秒以上 cameraTrack が来ない = 配信者側の publish が
+              再接続後にうまく届いていない可能性。視聴者がリロードで
+              新しい subscribe を張り直せるボタンを提示。 */}
+          {waitingForTrackSeconds >= 30 && (
+            <>
+              <p className="text-[11px] text-yellow-300 text-center leading-relaxed max-w-xs">
+                映像が届かない状態が続いています。<br />
+                リロードで新しい接続を試してください。
+              </p>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="mt-1 inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-[#e63946] hover:bg-[#d62836] active:bg-[#c41f2e] text-white text-xs font-semibold transition"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M20 20v-6h-6M5 9a8 8 0 0114-3m1 9a8 8 0 01-14 3" />
+                </svg>
+                リロードして再接続
+              </button>
+            </>
+          )}
         </div>
       ) : null}
 
