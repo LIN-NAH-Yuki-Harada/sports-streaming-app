@@ -42,7 +42,12 @@ export function CompositeBroadcasterRenderer({
   const { canvasRef, videoRef, videoTrack, status, error } = composite;
 
   // 配信者マイクに音割れ防止コンプレッサーをアタッチ（応援の歓声でクリッピングする問題対策）
-  useAudioCompressor();
+  // 5/04 BAND 化により無効化:
+  // - リミッターのアタックが速すぎて短いアーティファクト（5 秒に 1 回の「びっ」「ぎゅっ」）
+  //   が発生していたため
+  // - audioCaptureDefaults 側で autoGainControl: true に変更したことで、
+  //   OS / WebRTC 標準の AGC が音割れを抑制してくれる（BAND と同じ仕組み）
+  // useAudioCompressor();
 
   // 音声は LiveKitRoom の audio={true} 経由で auto-publish される（livekit-video.tsx 側で設定済み）。
   // ここで手動 publish するのは Canvas 合成 video のみ。
