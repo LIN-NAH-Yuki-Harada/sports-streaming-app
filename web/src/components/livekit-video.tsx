@@ -57,7 +57,12 @@ function BroadcasterRenderer({
   const reconnectSeconds = useReconnectDuration(connectionState);
 
   // 配信者マイクに音割れ防止コンプレッサーをアタッチ（応援の歓声でクリッピングする問題対策）
-  useAudioCompressor();
+  // 5/04 BAND 化により無効化:
+  // - リミッターのアタックが速すぎて短いアーティファクト（5 秒に 1 回の「びっ」「ぎゅっ」）
+  //   が発生していたため
+  // - audioCaptureDefaults 側で autoGainControl: true に変更したことで、
+  //   OS / WebRTC 標準の AGC が音割れを抑制してくれる（BAND と同じ仕組み）
+  // useAudioCompressor();
 
   useEffect(() => {
     if (
@@ -299,12 +304,14 @@ export function LiveKitBroadcaster({
             adaptiveStream: true,
             dynacast: true,
             audioCaptureDefaults: {
-              // スポーツ配信は歓声・ボール音などの環境音が重要。noiseSuppression は
-              // しばしば「シュッ」「サー」のアーチファクトを生むため off。
-              // autoGainControl も無音時にノイズフロアを増幅するので off。
+              // 5/04 BAND 化: noiseSuppression / autoGainControl を OFF に
+              // していたが、配信者近くの保護者の声で音割れ + カスタム
+              // リミッター起因の短いアーティファクト (5 秒に 1 回の「びっ」「ぎゅっ」)
+              // が発生していたため、OS / WebRTC 標準処理に任せる方針に統一。
+              // BAND と同等の安定音質を優先。
               echoCancellation: true,
-              noiseSuppression: false,
-              autoGainControl: false,
+              noiseSuppression: true,
+              autoGainControl: true,
               // ステレオマイク対応端末（iPhone XS+, Pixel/Galaxy 上位機種等）で
               // 観客席の左右の声援・ボール音の方向感を伝送可能にする
               channelCount: 2,
@@ -354,9 +361,10 @@ export function LiveKitBroadcaster({
             resolution: { width: 1280, height: 720, frameRate: 30 },
           },
           audioCaptureDefaults: {
+            // 5/04 BAND 化: 標準処理に統一（上の焼き込みパスと同じ理由）
             echoCancellation: true,
-            noiseSuppression: false,
-            autoGainControl: false,
+            noiseSuppression: true,
+            autoGainControl: true,
             // ステレオマイク対応端末で観客席の左右の声援・ボール音の方向感を伝送
             channelCount: 2,
           },
