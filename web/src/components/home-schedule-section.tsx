@@ -11,20 +11,20 @@ const HOME_LIMIT = 5;
 
 export function HomeScheduleSection({
   initialSchedules,
-  adminTeams,
+  editableTeams,
   teamNameMap,
-  adminTeamIds,
+  editableTeamIds,
 }: {
   initialSchedules: TeamSchedule[];
-  adminTeams: ScheduleFormTeam[];
+  editableTeams: ScheduleFormTeam[];
   teamNameMap: Record<string, string>;
-  adminTeamIds: string[];
+  editableTeamIds: string[];
 }) {
   const toast = useToast();
   const [schedules, setSchedules] = useState<TeamSchedule[]>(initialSchedules);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<TeamSchedule | null>(null);
-  const adminSet = new Set(adminTeamIds);
+  const editableSet = new Set(editableTeamIds);
 
   const refresh = useCallback(async () => {
     const list = await listMyUpcomingSchedules();
@@ -55,7 +55,7 @@ export function HomeScheduleSection({
 
   const visible = schedules.slice(0, HOME_LIMIT);
   const hasMore = schedules.length > HOME_LIMIT;
-  const canCreate = adminTeams.length > 0;
+  const canCreate = editableTeams.length > 0;
 
   return (
     <section className="px-5 md:px-8 lg:px-10 pt-10">
@@ -74,7 +74,7 @@ export function HomeScheduleSection({
       {formOpen && !editing && (
         <ScheduleForm
           mode="create"
-          teams={adminTeams}
+          teams={editableTeams}
           onSaved={() => {
             setFormOpen(false);
             refresh();
@@ -86,7 +86,7 @@ export function HomeScheduleSection({
       {editing && (
         <ScheduleForm
           mode="edit"
-          teams={adminTeams}
+          teams={editableTeams}
           initial={editing}
           onSaved={() => {
             setEditing(null);
@@ -113,9 +113,9 @@ export function HomeScheduleSection({
               key={s.id}
               schedule={s}
               teamName={teamNameMap[s.team_id] || ""}
-              canEdit={adminSet.has(s.team_id)}
-              onEdit={adminSet.has(s.team_id) ? () => setEditing(s) : undefined}
-              onDelete={adminSet.has(s.team_id) ? () => handleDelete(s.id) : undefined}
+              canEdit={editableSet.has(s.team_id)}
+              onEdit={editableSet.has(s.team_id) ? () => setEditing(s) : undefined}
+              onDelete={editableSet.has(s.team_id) ? () => handleDelete(s.id) : undefined}
             />
           ))}
         </div>

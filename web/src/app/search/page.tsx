@@ -550,7 +550,10 @@ function TeamPageInner() {
           {detailTab === "schedule" && (
             <TeamScheduleTab
               team={selectedTeam}
-              isAdmin={isAdmin}
+              canEdit={
+                !!myMembership &&
+                (profile?.plan === "broadcaster" || profile?.plan === "team")
+              }
             />
           )}
 
@@ -854,7 +857,7 @@ function TeamPageInner() {
 }
 
 // ===== 予定タブ =====
-function TeamScheduleTab({ team, isAdmin }: { team: Team; isAdmin: boolean }) {
+function TeamScheduleTab({ team, canEdit }: { team: Team; canEdit: boolean }) {
   const toast = useToast();
   const [schedules, setSchedules] = useState<TeamSchedule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -901,7 +904,7 @@ function TeamScheduleTab({ team, isAdmin }: { team: Team; isAdmin: boolean }) {
 
   return (
     <div>
-      {isAdmin && !formOpen && !editing && (
+      {canEdit && !formOpen && !editing && (
         <button
           onClick={() => setFormOpen(true)}
           className="mb-4 w-full md:max-w-sm bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold py-2.5 rounded-md transition"
@@ -945,9 +948,9 @@ function TeamScheduleTab({ team, isAdmin }: { team: Team; isAdmin: boolean }) {
         <div className="text-center py-12">
           <p className="text-sm font-bold text-gray-400">予定はまだありません</p>
           <p className="mt-2 text-[11px] text-gray-500 leading-relaxed">
-            {isAdmin
+            {canEdit
               ? "「+ 予定を追加」から、次の試合や練習を登録できます"
-              : "オーナー・管理者が予定を登録するとここに表示されます"}
+              : "配信可能なプラン（¥300以上）のチームメンバーが予定を登録できます"}
           </p>
         </div>
       )}
@@ -959,9 +962,9 @@ function TeamScheduleTab({ team, isAdmin }: { team: Team; isAdmin: boolean }) {
               key={s.id}
               schedule={s}
               teamName=""
-              canEdit={isAdmin}
-              onEdit={isAdmin ? () => setEditing(s) : undefined}
-              onDelete={isAdmin ? () => handleDelete(s.id) : undefined}
+              canEdit={canEdit}
+              onEdit={canEdit ? () => setEditing(s) : undefined}
+              onDelete={canEdit ? () => handleDelete(s.id) : undefined}
             />
           ))}
         </div>

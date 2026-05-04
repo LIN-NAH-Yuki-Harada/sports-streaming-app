@@ -161,21 +161,21 @@ export default async function DiscoverPage() {
     ]);
   }
 
-  const adminTeamIds = memberships
-    .filter((m) => m.role === "owner" || m.role === "admin")
-    .map((m) => m.team_id);
-  const adminTeams = myTeams.filter((t) => adminTeamIds.includes(t.id));
+  // 配信可能プラン (broadcaster / team) のチームメンバーが予定 CRUD できる
+  const isPaidUser = userPlan === "broadcaster" || userPlan === "team";
+  const editableTeamIds = isPaidUser ? memberships.map((m) => m.team_id) : [];
+  const editableTeams = myTeams.filter((t) => editableTeamIds.includes(t.id));
   const teamNameMap: Record<string, string> = Object.fromEntries(
     myTeams.map((t) => [t.id, t.name]),
   );
 
   // 予定セクションのバリアント決定
-  // A: 自分が運営側（owner/admin）→ ホームから作成・編集
-  // B: 所属はあるが運営権限なし → 読み取り専用で次の予定
-  // C: どこにも所属していない → チームプラン誘導
+  // A: 配信可能プラン + チーム所属 → ホームから作成・編集
+  // B: チーム所属あるが無料プラン → 読み取り専用で次の予定
+  // C: どこにも所属していない → アップグレード CTA
   let scheduleVariant: "A" | "B" | "C" | null = null;
   if (user) {
-    if (adminTeamIds.length > 0) scheduleVariant = "A";
+    if (editableTeamIds.length > 0) scheduleVariant = "A";
     else if (memberships.length > 0) scheduleVariant = "B";
     else scheduleVariant = "C";
   }
@@ -329,9 +329,9 @@ export default async function DiscoverPage() {
           {scheduleVariant === "A" && (
             <HomeScheduleSection
               initialSchedules={upcoming}
-              adminTeams={adminTeams}
+              editableTeams={editableTeams}
               teamNameMap={teamNameMap}
-              adminTeamIds={adminTeamIds}
+              editableTeamIds={editableTeamIds}
             />
           )}
 
