@@ -10,9 +10,12 @@ import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
 import {
   getBroadcastHistory,
+  getMyTeams,
+  getTeamBroadcastHistory,
   listMyUpcomingSchedules,
   type Broadcast,
   type TeamSchedule,
+  type TeamWithMembers,
 } from "@/lib/database";
 
 const SPORT_EMOJI: Record<string, string> = {
@@ -648,16 +651,42 @@ function ScheduleItem({
 }
 
 // ===== 履歴タブ =====
+// "self" = 自分の配信のみ / それ以外 = teamId（自分の所属チーム）
+type HistoryFilter = "self" | string;
+
 function HistoryTab() {
+  const { user } = useAuth();
+  const [filter, setFilter] = useState<HistoryFilter>("self");
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
+  const [myTeams, setMyTeams] = useState<TeamWithMembers[]>([]);
 
+  // 自分の所属チームを取得（初回のみ）
   useEffect(() => {
-    getBroadcastHistory().then((data) => {
+    if (!user) return;
+    getMyTeams(user.id).then(setMyTeams);
+  }, [user]);
+
+  // フィルタ切替で履歴を取得し直す
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const fetcher =
+      filter === "self"
+        ? getBroadcastHistory()
+        : getTeamBroadcastHistory(filter).then((data) =>
+            // チーム配信履歴はライブも含むので、履歴タブでは終了済みに絞る
+            data.filter((bc) => bc.status === "ended"),
+          );
+    fetcher.then((data) => {
+      if (cancelled) return;
       setBroadcasts(data);
       setLoading(false);
     });
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [filter]);
 
   const grouped: { date: string; items: Broadcast[] }[] = [];
   for (const bc of broadcasts) {
@@ -672,28 +701,78 @@ function HistoryTab() {
     }
   }
 
+  // 所属チームがあるときだけフィルタタブを表示（個人ユーザーには無関係）
+  const filterTabs = myTeams.length > 0 && (
+    <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-4 px-4 sm:mx-0 sm:px-0">
+      <button
+        onClick={() => setFilter("self")}
+        className={
+          filter === "self"
+            ? "shrink-0 bg-[#e63946] text-white text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap transition"
+            : "shrink-0 bg-white/5 hover:bg-white/10 text-gray-400 text-xs px-3 py-1.5 rounded-full whitespace-nowrap transition"
+        }
+      >
+        自分の配信
+      </button>
+      {myTeams.map((team) => (
+        <button
+          key={team.id}
+          onClick={() => setFilter(team.id)}
+          className={
+            filter === team.id
+              ? "shrink-0 bg-[#e63946] text-white text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap transition"
+              : "shrink-0 bg-white/5 hover:bg-white/10 text-gray-400 text-xs px-3 py-1.5 rounded-full whitespace-nowrap transition"
+          }
+        >
+          👥 {team.name}
+        </button>
+      ))}
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
-      </div>
+      <>
+        {filterTabs}
+        <div className="flex items-center justify-center py-16">
+          <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+        </div>
+      </>
     );
   }
 
   if (broadcasts.length === 0) {
+    const isTeamFilter = filter !== "self";
     return (
-      <div className="text-center py-16">
-        <p className="text-sm text-gray-500">まだ配信履歴がありません</p>
-        <p className="text-xs text-gray-600 mt-1">配信を行うとここに履歴が表示されます</p>
-        <a href="/broadcast" className="inline-block mt-4 text-xs text-[#e63946] hover:underline">
-          配信をはじめる
-        </a>
-      </div>
+      <>
+        {filterTabs}
+        <div className="text-center py-16">
+          <p className="text-sm text-gray-500">
+            {isTeamFilter
+              ? "このチームの配信履歴はまだありません"
+              : "まだ配信履歴がありません"}
+          </p>
+          <p className="text-xs text-gray-600 mt-1">
+            {isTeamFilter
+              ? "チームメンバーが配信するとここに表示されます"
+              : "配信を行うとここに履歴が表示されます"}
+          </p>
+          {!isTeamFilter && (
+            <a
+              href="/broadcast"
+              className="inline-block mt-4 text-xs text-[#e63946] hover:underline"
+            >
+              配信をはじめる
+            </a>
+          )}
+        </div>
+      </>
     );
   }
 
   return (
     <>
+      {filterTabs}
       {grouped.map((group) => (
         <div key={group.date} className="mt-6 first:mt-4">
           <h2 className="text-xs text-gray-500 font-medium mb-2">{group.date}</h2>
