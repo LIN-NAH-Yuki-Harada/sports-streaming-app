@@ -2,9 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Logo } from "@/components/logo";
 import { ShareCodeInput, InstallGuide } from "@/components/home-extras";
+import { HomeScheduleSection } from "@/components/home-schedule-section";
+import { ScheduleItem } from "@/components/schedule-item";
 import { getAdminClient } from "@/lib/supabase-admin";
 import { getServerUser } from "@/lib/supabase-server";
-import { BROADCAST_PUBLIC_COLUMNS, type Broadcast } from "@/lib/database";
+import {
+  BROADCAST_PUBLIC_COLUMNS,
+  type Broadcast,
+  type TeamSchedule,
+} from "@/lib/database";
 
 export const metadata: Metadata = {
   title: "ホーム",
@@ -34,14 +40,34 @@ const SPORT_EMOJI: Record<string, string> = {
   ハンドボール: "🤾",
 };
 
-async function fetchMyTeamIds(userId: string): Promise<string[]> {
+type Membership = { team_id: string; role: "owner" | "admin" | "member" };
+
+async function fetchMyMemberships(userId: string): Promise<Membership[]> {
   const supabase = getAdminClient();
   const { data, error } = await supabase
     .from("team_members")
-    .select("team_id")
+    .select("team_id, role")
     .eq("user_id", userId);
   if (error || !data) return [];
-  return data.map((r: { team_id: string }) => r.team_id);
+  return data as Membership[];
+}
+
+async function fetchUpcomingSchedules(
+  teamIds: string[],
+  limit: number,
+): Promise<TeamSchedule[]> {
+  if (teamIds.length === 0) return [];
+  const supabase = getAdminClient();
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("team_schedules")
+    .select("*")
+    .in("team_id", teamIds)
+    .gte("start_at", nowIso)
+    .order("start_at", { ascending: true })
+    .limit(limit);
+  if (error || !data) return [];
+  return data as TeamSchedule[];
 }
 
 async function fetchMyTeams(
@@ -119,16 +145,39 @@ export default async function DiscoverPage() {
   let ended: Broadcast[] = [];
   let myTeams: { id: string; name: string; sport: string }[] = [];
   let userPlan: "free" | "broadcaster" | "team" = "free";
+  let memberships: Membership[] = [];
+  let upcoming: TeamSchedule[] = [];
 
   if (user) {
-    const teamIds = await fetchMyTeamIds(user.id);
+    memberships = await fetchMyMemberships(user.id);
+    const teamIds = memberships.map((m) => m.team_id);
     const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
-    [live, ended, myTeams, userPlan] = await Promise.all([
+    [live, ended, myTeams, userPlan, upcoming] = await Promise.all([
       fetchMyRelatedBroadcasts(user.id, teamIds, "live", { limit: 20 }),
       fetchMyRelatedBroadcasts(user.id, teamIds, "ended", { limit: 12, since }),
       fetchMyTeams(teamIds),
       fetchUserPlan(user.id),
+      fetchUpcomingSchedules(teamIds, 20),
     ]);
+  }
+
+  const adminTeamIds = memberships
+    .filter((m) => m.role === "owner" || m.role === "admin")
+    .map((m) => m.team_id);
+  const adminTeams = myTeams.filter((t) => adminTeamIds.includes(t.id));
+  const teamNameMap: Record<string, string> = Object.fromEntries(
+    myTeams.map((t) => [t.id, t.name]),
+  );
+
+  // 予定セクションのバリアント決定
+  // A: 自分が運営側（owner/admin）→ ホームから作成・編集
+  // B: 所属はあるが運営権限なし → 読み取り専用で次の予定
+  // C: どこにも所属していない → チームプラン誘導
+  let scheduleVariant: "A" | "B" | "C" | null = null;
+  if (user) {
+    if (adminTeamIds.length > 0) scheduleVariant = "A";
+    else if (memberships.length > 0) scheduleVariant = "B";
+    else scheduleVariant = "C";
   }
 
   return (
@@ -275,6 +324,90 @@ export default async function DiscoverPage() {
               </div>
             )}
           </section>
+
+          {/* 予定セクション（プラン × ロールでバリアント切替） */}
+          {scheduleVariant === "A" && (
+            <HomeScheduleSection
+              initialSchedules={upcoming}
+              adminTeams={adminTeams}
+              teamNameMap={teamNameMap}
+              adminTeamIds={adminTeamIds}
+            />
+          )}
+
+          {scheduleVariant === "B" && (
+            <section className="px-5 md:px-8 lg:px-10 pt-10">
+              <h2 className="text-sm font-bold text-gray-300 mb-3">次の予定</h2>
+              {upcoming.length > 0 ? (
+                <>
+                  <div className="grid gap-2 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                    {upcoming.slice(0, 5).map((s) => (
+                      <ScheduleItem
+                        key={s.id}
+                        schedule={s}
+                        teamName={teamNameMap[s.team_id] || ""}
+                        canEdit={false}
+                      />
+                    ))}
+                  </div>
+                  {upcoming.length > 5 && (
+                    <p className="mt-3 text-[10px] text-gray-600">
+                      ほかに {upcoming.length - 5} 件の予定があります（チーム詳細から確認できます）
+                    </p>
+                  )}
+                </>
+              ) : (
+                <div className="rounded-lg bg-[#111] border border-white/5 px-4 py-6 text-center">
+                  <p className="text-xs text-gray-500">
+                    所属チームに登録された予定はまだありません
+                  </p>
+                  <p className="text-[10px] text-gray-600 mt-1">
+                    チームのオーナー・管理者が予定を追加するとここに表示されます
+                  </p>
+                </div>
+              )}
+            </section>
+          )}
+
+          {scheduleVariant === "C" && (
+            <section className="px-5 md:px-8 lg:px-10 pt-10">
+              <h2 className="text-sm font-bold text-gray-300 mb-3">次の予定</h2>
+              {userPlan === "team" ? (
+                <div className="rounded-xl bg-[#111] border border-white/5 p-5 text-center">
+                  <p className="text-sm font-semibold mb-1">
+                    チームを作成して予定を管理しましょう
+                  </p>
+                  <p className="text-[11px] text-gray-500 leading-relaxed max-w-md mx-auto">
+                    チームを作成すると、試合の予定をチーム全体で共有できます。
+                  </p>
+                  <Link
+                    href="/search"
+                    className="inline-block mt-4 bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-5 py-2 rounded-md transition"
+                  >
+                    + チームを作成
+                  </Link>
+                </div>
+              ) : (
+                <div className="rounded-xl bg-gradient-to-br from-[#e63946]/10 via-[#111] to-[#111] border border-[#e63946]/20 p-5 text-center">
+                  <p className="text-[10px] font-bold tracking-[0.2em] text-[#e63946] mb-1.5">
+                    TEAM PLAN
+                  </p>
+                  <p className="text-sm font-semibold mb-1">
+                    チームの予定をまとめて管理
+                  </p>
+                  <p className="text-[11px] text-gray-500 leading-relaxed max-w-md mx-auto">
+                    チームプラン（¥500/月）で、試合の予定登録・チーム共有・YouTube Live 同時配信が使えます。
+                  </p>
+                  <Link
+                    href="/pricing"
+                    className="inline-block mt-4 bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-5 py-2 rounded-md transition"
+                  >
+                    プラン詳細を見る
+                  </Link>
+                </div>
+              )}
+            </section>
+          )}
 
           {/* 直近終了した試合（自分・所属チーム） */}
           {ended.length > 0 && (

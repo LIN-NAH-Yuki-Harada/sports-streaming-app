@@ -8,7 +8,14 @@ import { PlanTeaser } from "@/components/plan-teaser";
 import { useToast } from "@/components/toaster";
 import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase";
-import { getTeamBroadcastHistory, type Broadcast } from "@/lib/database";
+import {
+  getTeamBroadcastHistory,
+  listTeamSchedules,
+  type Broadcast,
+  type TeamSchedule,
+} from "@/lib/database";
+import { ScheduleForm } from "@/components/schedule-form";
+import { ScheduleItem } from "@/components/schedule-item";
 import Link from "next/link";
 import Image from "next/image";
 
@@ -79,7 +86,7 @@ function TeamPageInner() {
   const [loadingTeams, setLoadingTeams] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [tab, setTab] = useState<"list" | "create" | "join">("list");
-  const [detailTab, setDetailTab] = useState<"members" | "history" | "settings">("members");
+  const [detailTab, setDetailTab] = useState<"members" | "schedule" | "history" | "settings">("members");
   const [teamBroadcasts, setTeamBroadcasts] = useState<Broadcast[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -452,9 +459,10 @@ function TeamPageInner() {
           })()}
 
           {/* タブ */}
-          <div className="flex gap-1 mb-4">
+          <div className="flex gap-1 mb-4 overflow-x-auto">
             {([
               { key: "members" as const, label: "メンバー" },
+              { key: "schedule" as const, label: "予定" },
               { key: "history" as const, label: "試合履歴" },
               ...(isOwner ? [{ key: "settings" as const, label: "設定" }] : []),
             ]).map((t) => (
@@ -536,6 +544,14 @@ function TeamPageInner() {
                   </div>
                 ))}
             </div>
+          )}
+
+          {/* 予定タブ */}
+          {detailTab === "schedule" && (
+            <TeamScheduleTab
+              team={selectedTeam}
+              isAdmin={isAdmin}
+            />
           )}
 
           {/* 試合履歴タブ */}
@@ -833,6 +849,123 @@ function TeamPageInner() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ===== 予定タブ =====
+function TeamScheduleTab({ team, isAdmin }: { team: Team; isAdmin: boolean }) {
+  const toast = useToast();
+  const [schedules, setSchedules] = useState<TeamSchedule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<TeamSchedule | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await listTeamSchedules(team.id, "upcoming");
+      setSchedules(list);
+    } finally {
+      setLoading(false);
+    }
+  }, [team.id]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("この予定を削除しますか？")) return;
+    try {
+      const supabase = createClient();
+      const { data: session } = await supabase.auth.getSession();
+      const token = session.session?.access_token;
+      const res = await fetch(`/api/schedules/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "削除に失敗しました");
+        return;
+      }
+      toast.success("予定を削除しました");
+      refresh();
+    } catch {
+      toast.error("削除に失敗しました");
+    }
+  };
+
+  const formTeams = [{ id: team.id, name: team.name, sport: team.sport }];
+
+  return (
+    <div>
+      {isAdmin && !formOpen && !editing && (
+        <button
+          onClick={() => setFormOpen(true)}
+          className="mb-4 w-full md:max-w-sm bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold py-2.5 rounded-md transition"
+        >
+          + 予定を追加
+        </button>
+      )}
+
+      {formOpen && !editing && (
+        <ScheduleForm
+          mode="create"
+          teams={formTeams}
+          onSaved={() => {
+            setFormOpen(false);
+            refresh();
+          }}
+          onCancel={() => setFormOpen(false)}
+        />
+      )}
+
+      {editing && (
+        <ScheduleForm
+          mode="edit"
+          teams={formTeams}
+          initial={editing}
+          onSaved={() => {
+            setEditing(null);
+            refresh();
+          }}
+          onCancel={() => setEditing(null)}
+        />
+      )}
+
+      {loading && (
+        <div className="flex items-center justify-center py-16">
+          <div className="w-5 h-5 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+
+      {!loading && schedules.length === 0 && !formOpen && !editing && (
+        <div className="text-center py-12">
+          <p className="text-sm font-bold text-gray-400">予定はまだありません</p>
+          <p className="mt-2 text-[11px] text-gray-500 leading-relaxed">
+            {isAdmin
+              ? "「+ 予定を追加」から、次の試合や練習を登録できます"
+              : "オーナー・管理者が予定を登録するとここに表示されます"}
+          </p>
+        </div>
+      )}
+
+      {!loading && schedules.length > 0 && (
+        <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-3">
+          {schedules.map((s) => (
+            <ScheduleItem
+              key={s.id}
+              schedule={s}
+              teamName=""
+              canEdit={isAdmin}
+              onEdit={isAdmin ? () => setEditing(s) : undefined}
+              onDelete={isAdmin ? () => handleDelete(s.id) : undefined}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
