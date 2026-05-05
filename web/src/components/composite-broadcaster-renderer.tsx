@@ -11,6 +11,7 @@ import { useReconnectDuration } from "@/components/livekit-video";
 import { useCompositeBroadcastTrack } from "@/lib/use-composite-broadcast-track";
 import { useAudioCompressor } from "@/lib/use-audio-compressor";
 import { BroadcastHealthBadges } from "@/components/broadcast-health-badges";
+import { CameraControls } from "@/components/camera-controls";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import type { BroadcastResolution } from "@/lib/user-agent";
 
@@ -39,7 +40,19 @@ export function CompositeBroadcasterRenderer({
     targetResolution,
     enabled: true,
   });
-  const { canvasRef, videoRef, videoTrack, status, error } = composite;
+  const {
+    canvasRef,
+    videoRef,
+    videoTrack,
+    status,
+    error,
+    availableCameras,
+    currentCameraId,
+    switchCamera,
+    zoomCapability,
+    currentZoom,
+    setZoom,
+  } = composite;
 
   // 配信者マイクに音割れ防止コンプレッサーをアタッチ（応援の歓声でクリッピングする問題対策）
   // 5/04 BAND 化により無効化:
@@ -258,6 +271,18 @@ export function CompositeBroadcasterRenderer({
 
       {/* 配信ヘルスバッジ（Wake Lock 失敗・電池残少の警告。接続中のみ表示） */}
       {connectionState === ConnectionState.Connected && <BroadcastHealthBadges />}
+
+      {/* カメラ操作（広角/ズーム）— 接続中のみ表示 */}
+      {connectionState === ConnectionState.Connected && (
+        <CameraControls
+          availableCameras={availableCameras}
+          currentCameraId={currentCameraId}
+          onSwitchCamera={switchCamera}
+          zoomCapability={zoomCapability}
+          currentZoom={currentZoom}
+          onSetZoom={setZoom}
+        />
+      )}
     </>
   );
 }
