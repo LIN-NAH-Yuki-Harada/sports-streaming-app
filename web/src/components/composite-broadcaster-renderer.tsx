@@ -20,6 +20,9 @@ type Props = {
   targetResolution: BroadcastResolution;
   onConnected?: () => void;
   onDisconnected?: () => void;
+  // LINE 共有中（Safari バックグラウンド）にカメラの代わりに案内
+  // メッセージを canvas に焼くフラグ。視聴者画面のブラックアウト対策。
+  isSharing?: boolean;
 };
 
 export function CompositeBroadcasterRenderer({
@@ -27,6 +30,7 @@ export function CompositeBroadcasterRenderer({
   targetResolution,
   onConnected,
   onDisconnected,
+  isSharing = false,
 }: Props) {
   const connectionState = useConnectionState();
   const { localParticipant } = useLocalParticipant();
@@ -39,6 +43,7 @@ export function CompositeBroadcasterRenderer({
     state,
     targetResolution,
     enabled: true,
+    isSharing,
   });
   const {
     canvasRef,
