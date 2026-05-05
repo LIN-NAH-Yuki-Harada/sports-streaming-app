@@ -49,6 +49,14 @@ type UseCompositeBroadcastTrackResult = {
   zoomCapability: ZoomCapability | null;
   currentZoom: number | null;
   setZoom: (zoom: number) => Promise<void>;
+  // LINE 共有開始時に同期的に canvas を「URL 共有中」案内に切り替える。
+  // setIsSharing(true) は React rerender → useEffect → ref 反映 → 次の
+  // rVFC/rAF で描画、という非同期パスのため、Safari がバックグラウンド
+  // 遷移して JS 停止する前に最終フレーム差し替えが間に合わないケースが
+  // あった（5/05 PR #114 の不具合）。同期描画で確実に captureStream の
+  // 最後フレーム = 案内画面 に固定する。
+  startSharing: () => void;
+  endSharing: () => void;
 };
 
 type RVFCHandle = number;
@@ -184,6 +192,11 @@ export function useCompositeBroadcastTrack({
     null,
   );
   const [currentZoom, setCurrentZoom] = useState<number | null>(null);
+
+  // 共有開始/解除を pipeline effect の closure に橋渡しするための ref。
+  // pipeline effect 内で書き込まれ、外部からは startSharing()/endSharing() で呼ぶ。
+  const startSharingImplRef = useRef<(() => void) | null>(null);
+  const endSharingImplRef = useRef<(() => void) | null>(null);
 
   // state の最新値を ref にミラー
   useEffect(() => {
@@ -437,6 +450,16 @@ export function useCompositeBroadcastTrack({
 
         function scheduleNext() {
           if (cancelled) return;
+          // 共有中は rVFC ではなく rAF を強制使用。
+          // rVFC は video element に新フレームが届いた時にだけ発火するが、
+          // Safari バックグラウンド時は camera が止まって新フレームが来ない
+          // → rVFC が永久に発火しない → 案内画面が描画されない、という
+          // 不具合があった（5/05 PR #114 の症状）。rAF はカメラ独立で
+          // 動くので「共有中の薄い更新ループ」を維持できる。
+          if (isSharingRef.current) {
+            rafHandle = window.requestAnimationFrame(renderFrame);
+            return;
+          }
           if (typeof videoEl!.requestVideoFrameCallback === "function") {
             rvfcHandle = videoEl!.requestVideoFrameCallback(renderFrame);
           } else {
@@ -519,6 +542,62 @@ export function useCompositeBroadcastTrack({
 
         setVideoTrack(vt);
         setStatus("ready");
+
+        // 共有開始/解除の同期実装を ref に登録（外部から startSharing() で呼ぶ）。
+        // pipeline effect の closure（ctx / videoEl / rvfcHandle / rafHandle 等）を
+        // クロージャで掴む必要があるためここで定義する。
+        startSharingImplRef.current = () => {
+          if (cancelled) return;
+          isSharingRef.current = true;
+
+          // pending な rVFC をキャンセル。Safari がバックグラウンドに入ると
+          // video frame が来なくなって rVFC が永久に発火しなくなるため、
+          // 共有中は rAF ループに切り替える必要がある。
+          if (rvfcHandle !== null) {
+            videoEl!.cancelVideoFrameCallback?.(rvfcHandle);
+            rvfcHandle = null;
+          }
+          if (rafHandle !== null) {
+            window.cancelAnimationFrame(rafHandle);
+            rafHandle = null;
+          }
+
+          // 同期的に canvas を「URL 共有中」案内画面に書き換える。
+          // これで navigator.share() 経由で Safari がバックグラウンド遷移する前に
+          // captureStream の最後フレーム = 案内画面 を確定できる。
+          // （setIsSharing(true) → useEffect → ref 更新 → 次の rAF/rVFC、
+          //  という非同期パスでは Safari 遷移までに描画が間に合わなかった）
+          try {
+            drawSharingOverlay(
+              ctx!,
+              targetResolution.width,
+              targetResolution.height,
+            );
+            const overlay = overlayRef.current;
+            if (overlay) {
+              ctx!.drawImage(overlay, 0, 0);
+            } else {
+              drawScoreboard(
+                ctx!,
+                stateRef.current,
+                targetResolution.width,
+                targetResolution.height,
+              );
+            }
+          } catch (e) {
+            console.error("[composite] startSharing 同期描画エラー:", e);
+          }
+
+          // 復帰待ちの間も rAF で薄く更新を続ける（フォアグラウンド復帰時に
+          // 即座に renderFrame が回ってカメラ映像に戻れるよう）。
+          rafHandle = window.requestAnimationFrame(renderFrame);
+        };
+
+        endSharingImplRef.current = () => {
+          if (cancelled) return;
+          isSharingRef.current = false;
+          // 次の renderFrame で scheduleNext が rVFC ルートに戻すので何もしない
+        };
       } catch (e) {
         if (cancelled) return;
         const err = e instanceof Error ? e : new Error(String(e));
@@ -557,6 +636,9 @@ export function useCompositeBroadcastTrack({
       }
       setVideoTrack(null);
       setStatus("idle");
+      // pipeline 解体時は共有制御も無効化
+      startSharingImplRef.current = null;
+      endSharingImplRef.current = null;
     };
   }, [
     enabled,
@@ -636,6 +718,14 @@ export function useCompositeBroadcastTrack({
     }
   }, []);
 
+  const startSharing = useCallback(() => {
+    startSharingImplRef.current?.();
+  }, []);
+
+  const endSharing = useCallback(() => {
+    endSharingImplRef.current?.();
+  }, []);
+
   return {
     canvasRef,
     videoRef,
@@ -648,5 +738,7 @@ export function useCompositeBroadcastTrack({
     zoomCapability,
     currentZoom,
     setZoom,
+    startSharing,
+    endSharing,
   };
 }

@@ -23,6 +23,10 @@ type Props = {
   // LINE 共有中（Safari バックグラウンド）にカメラの代わりに案内
   // メッセージを canvas に焼くフラグ。視聴者画面のブラックアウト対策。
   isSharing?: boolean;
+  // 共有ボタン onClick から canvas を同期的に書き換えるための ref。
+  // page.tsx 側でこの ref.current を呼ぶと内部の startSharing() を実行する。
+  startSharingRef?: React.MutableRefObject<(() => void) | null>;
+  endSharingRef?: React.MutableRefObject<(() => void) | null>;
 };
 
 export function CompositeBroadcasterRenderer({
@@ -31,6 +35,8 @@ export function CompositeBroadcasterRenderer({
   onConnected,
   onDisconnected,
   isSharing = false,
+  startSharingRef,
+  endSharingRef,
 }: Props) {
   const connectionState = useConnectionState();
   const { localParticipant } = useLocalParticipant();
@@ -57,7 +63,20 @@ export function CompositeBroadcasterRenderer({
     zoomCapability,
     currentZoom,
     setZoom,
+    startSharing,
+    endSharing,
   } = composite;
+
+  // 親（broadcast/page.tsx）が共有ボタン onClick から同期描画を発火できるよう
+  // 公開関数を ref に橋渡しする。ref 経由なので毎レンダで張替えても無駄レンダなし。
+  useEffect(() => {
+    if (startSharingRef) startSharingRef.current = startSharing;
+    if (endSharingRef) endSharingRef.current = endSharing;
+    return () => {
+      if (startSharingRef) startSharingRef.current = null;
+      if (endSharingRef) endSharingRef.current = null;
+    };
+  }, [startSharingRef, endSharingRef, startSharing, endSharing]);
 
   // 配信者マイクに音割れ防止コンプレッサーをアタッチ（応援の歓声でクリッピングする問題対策）
   // 5/04 BAND 化により無効化:

@@ -162,6 +162,14 @@ function BroadcastPageInner() {
   // 切り替えて視聴者画面のブラックアウトを防ぐ。
   // 解除条件: visibility=visible 復帰 / 60 秒タイムアウト / 配信終了。
   const [isSharing, setIsSharing] = useState(false);
+  // 共有ボタン onClick から canvas を「同期描画」するための ref。
+  // setIsSharing(true) は React rerender → useEffect → 次の rAF/rVFC、という
+  // 非同期パスのため、navigator.share() で Safari がバックグラウンドに遷移する
+  // までに案内画面の描画が間に合わないケースがあった（5/05 PR #114 の不具合）。
+  // この ref 経由で同期描画を発火することで captureStream の最後フレームを
+  // 確実に「URL 共有中」画面に固定できる。
+  const sharingStartRef = useRef<(() => void) | null>(null);
+  const sharingEndRef = useRef<(() => void) | null>(null);
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
@@ -231,10 +239,13 @@ function BroadcastPageInner() {
   // 共有中オーバーレイの自動解除:
   // 配信者が LINE 等から Safari に戻ってきた瞬間（visibility=visible）に
   // isSharing を false にしてカメラ映像描画を再開する。
+  // ref 経由の同期解除も呼んで isSharingRef.current = false を即時反映し、
+  // 次の rAF で renderFrame が rVFC ルートに戻るようにする。
   useEffect(() => {
     if (!isSharing) return;
     function onVisibilityChange() {
       if (document.visibilityState === "visible") {
+        sharingEndRef.current?.();
         setIsSharing(false);
       }
     }
@@ -249,7 +260,10 @@ function BroadcastPageInner() {
   // した場合に永遠にオーバーレイが残らないよう 60 秒で強制解除する。
   useEffect(() => {
     if (!isSharing) return;
-    const t = window.setTimeout(() => setIsSharing(false), 60_000);
+    const t = window.setTimeout(() => {
+      sharingEndRef.current?.();
+      setIsSharing(false);
+    }, 60_000);
     return () => window.clearTimeout(t);
   }, [isSharing]);
 
@@ -1036,6 +1050,8 @@ function BroadcastPageInner() {
               scoreboardState={scoreboardState}
               broadcastResolution={broadcastResolution}
               isSharing={isSharing}
+              startSharingRef={sharingStartRef}
+              endSharingRef={sharingEndRef}
             />
           ) : livekitError ? (
             <div className="absolute inset-0 flex items-center justify-center px-6">
@@ -1308,6 +1324,14 @@ function BroadcastPageInner() {
                     // captureStream の最後のフレーム = この絵 が出続けるので
                     // 視聴者は黒画面ではなく案内メッセージを見続ける。
                     // 解除は visibility=visible 復帰 / 60 秒タイムアウトで自動。
+                    //
+                    // ref 経由の同期描画を最初に呼ぶ。setIsSharing(true) は
+                    // React の rerender → useEffect → 次の rAF/rVFC を待つ
+                    // 非同期パスで、Safari バックグラウンド遷移までに描画が
+                    // 間に合わないケースがあった（5/05 不具合）。ref 経由なら
+                    // この onClick の同期コンテキストで canvas に焼き込めるので
+                    // navigator.share() の前に最終フレームが確定する。
+                    sharingStartRef.current?.();
                     setIsSharing(true);
 
                     // iOS Safari の Native Share API を最優先。

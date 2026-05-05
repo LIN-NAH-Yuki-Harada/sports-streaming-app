@@ -341,6 +341,8 @@ export function LiveKitBroadcaster({
   scoreboardState,
   broadcastResolution,
   isSharing = false,
+  startSharingRef,
+  endSharingRef,
 }: {
   token: string;
   serverUrl: string;
@@ -353,6 +355,11 @@ export function LiveKitBroadcaster({
   // LINE 共有中（Safari バックグラウンド）に視聴者画面のブラックアウトを
   // 防ぐため、canvas を「URL 共有中」オーバーレイに切り替えるフラグ
   isSharing?: boolean;
+  // 共有ボタン onClick から canvas を同期描画するための ref。
+  // setIsSharing(true) は React 経由の非同期更新で Safari バックグラウンド
+  // 遷移までに描画が間に合わないため、ref ベースで直接同期実行する経路を持つ。
+  startSharingRef?: React.MutableRefObject<(() => void) | null>;
+  endSharingRef?: React.MutableRefObject<(() => void) | null>;
 }) {
   // 焼き込みモード: カメラ + スコアを canvas 合成して video のみ手動 publish。
   // 音声は LiveKit の auto-publish (audio=true) で枯れたコードパスに任せる。
@@ -405,6 +412,8 @@ export function LiveKitBroadcaster({
             onConnected={onConnected}
             onDisconnected={onDisconnected}
             isSharing={isSharing}
+            startSharingRef={startSharingRef}
+            endSharingRef={endSharingRef}
           />
         </LiveKitRoom>
       </div>
