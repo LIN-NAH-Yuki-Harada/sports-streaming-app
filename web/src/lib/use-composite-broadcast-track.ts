@@ -379,6 +379,65 @@ export function useCompositeBroadcastTrack({
           }
         }
 
+        // 重要: captureStream は「実映像が canvas に描画された後」に作る。
+        //
+        // 5/05 PR #109 のリファクタで camera 取得とパイプラインを別 effect に
+        // 分離した結果、空 canvas から captureStream を作って LiveKit に publish
+        // していた。エンコーダ（VP8/H264）は最初の数秒で bitrate / 量子化を学習
+        // するため、黒フレームで「低 bitrate でよい」と固定され、後から実映像が
+        // 来てもブロックノイズが残る画質劣化が発生していた（5/03 配信より荒い）。
+        //
+        // ここで video element に最初の実フレームが届くまで明示的に待ち、
+        // renderFrame() で 1 フレーム描画してから captureStream を作る。
+        if (videoEl.readyState < 2 || !videoEl.videoWidth) {
+          await new Promise<void>((resolve) => {
+            let pollHandle: number | null = null;
+
+            function check() {
+              if (cancelled) {
+                cleanup();
+                resolve();
+                return;
+              }
+              if (videoEl!.readyState >= 2 && videoEl!.videoWidth > 0) {
+                cleanup();
+                resolve();
+              }
+            }
+
+            function cleanup() {
+              window.clearTimeout(timer);
+              if (pollHandle !== null) {
+                window.clearInterval(pollHandle);
+              }
+              videoEl!.removeEventListener("loadedmetadata", check);
+              videoEl!.removeEventListener("loadeddata", check);
+              videoEl!.removeEventListener("canplay", check);
+              videoEl!.removeEventListener("playing", check);
+            }
+
+            const timer = window.setTimeout(() => {
+              cleanup();
+              resolve();
+            }, 30_000);
+
+            // 200ms 間隔のポーリング（cancelled / 権限拒否でハングしないため）
+            pollHandle = window.setInterval(check, 200);
+
+            videoEl!.addEventListener("loadedmetadata", check);
+            videoEl!.addEventListener("loadeddata", check);
+            videoEl!.addEventListener("canplay", check);
+            videoEl!.addEventListener("playing", check);
+            check(); // mount タイミングですでに ready なケース
+          });
+        }
+
+        if (cancelled) return;
+
+        // recomputeCoverRect は videoEl.videoWidth/Height が確定してから呼ぶ
+        recomputeCoverRect();
+
+        // 実映像から最初のフレームを描画
         renderFrame();
 
         const cs = canvasEl.captureStream(targetResolution.frameRate);
