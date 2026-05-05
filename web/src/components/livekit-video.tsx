@@ -366,14 +366,15 @@ export function LiveKitBroadcaster({
             adaptiveStream: true,
             dynacast: true,
             audioCaptureDefaults: {
-              // 5/04 BAND 化: noiseSuppression / autoGainControl を OFF に
-              // していたが、配信者近くの保護者の声で音割れ + カスタム
-              // リミッター起因の短いアーティファクト (5 秒に 1 回の「びっ」「ぎゅっ」)
-              // が発生していたため、OS / WebRTC 標準処理に任せる方針に統一。
-              // BAND と同等の安定音質を優先。
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
+              // 5/05 RAW 化: AGC が大音量入力（撮影者の声）を検出して全体ゲインを
+              // 下げる ducking 効果で、声と同時にコート音が消える事象が発生。
+              // 体育館配信ではコート音の連続性が最優先のため、OS 側の音声処理を
+              // 全部 OFF にして「マイクが拾ったままの音」を送る方針に変更。
+              // - 音割れリスクは「マイク部分を口から離す」運用で対処
+              // - 残響を「エコー」と誤判定するリスク回避のため EC も OFF
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
               // ステレオマイク対応端末（iPhone XS+, Pixel/Galaxy 上位機種等）で
               // 観客席の左右の声援・ボール音の方向感を伝送可能にする
               channelCount: 2,
@@ -423,10 +424,10 @@ export function LiveKitBroadcaster({
             resolution: { width: 1280, height: 720, frameRate: 30 },
           },
           audioCaptureDefaults: {
-            // 5/04 BAND 化: 標準処理に統一（上の焼き込みパスと同じ理由）
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            // 5/05 RAW 化: 上の焼き込みパスと同じ理由で OS 側音声処理を全 OFF
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
             // ステレオマイク対応端末で観客席の左右の声援・ボール音の方向感を伝送
             channelCount: 2,
           },
