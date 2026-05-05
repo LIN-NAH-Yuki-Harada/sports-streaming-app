@@ -246,6 +246,11 @@ export function useCompositeBroadcastTrack({
             setCurrentZoom(null);
           }
         }
+
+        // 取得完了。pipeline 側の "ready" と整合させるため明示的にも立てる。
+        // currentCameraId が後から確定すると effect が再実行されて "acquiring"
+        // のままになる事象（5/05 報告）を防止。
+        setStatus("ready");
       } catch (e) {
         if (cancelled) return;
         const err = e instanceof Error ? e : new Error(String(e));
