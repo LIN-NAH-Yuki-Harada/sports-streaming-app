@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   drawScoreboard,
   type ScoreboardState,
@@ -9,6 +9,22 @@ import {
 type Resolution = { width: number; height: number; frameRate: number };
 
 type Status = "idle" | "acquiring" | "ready" | "error";
+
+export type LensType = "ultra-wide" | "wide" | "telephoto" | "unknown";
+
+export type CameraInfo = {
+  deviceId: string;
+  label: string;
+  lensType: LensType;
+  // 表示用の倍率ラベル（0.5x / 1x / 2x など）。判定不能なら null
+  focalLabel: number | null;
+};
+
+export type ZoomCapability = {
+  min: number;
+  max: number;
+  step: number;
+};
 
 type UseCompositeBroadcastTrackArgs = {
   state: ScoreboardState;
@@ -22,13 +38,17 @@ type UseCompositeBroadcastTrackResult = {
   videoTrack: MediaStreamTrack | null;
   status: Status;
   error: Error | null;
+  // カメラ制御（5/05 追加: 広角/ズーム対応）
+  availableCameras: CameraInfo[];
+  currentCameraId: string | null;
+  switchCamera: (deviceId: string) => void;
+  zoomCapability: ZoomCapability | null;
+  currentZoom: number | null;
+  setZoom: (zoom: number) => Promise<void>;
 };
 
 type RVFCHandle = number;
 
-// オフスクリーン overlay の再描画要否を判定するためのキー。
-// state の同値判定（参照比較ではなく値比較）で、親の再レンダリングで
-// 新オブジェクトが渡されても中身が同じなら再描画をスキップする。
 function scoreboardKey(s: ScoreboardState): string {
   return [
     s.home_team,
@@ -50,6 +70,48 @@ type VideoElementWithRVFC = HTMLVideoElement & {
   cancelVideoFrameCallback?: (handle: RVFCHandle) => void;
 };
 
+// MediaTrackCapabilities / Constraints の zoom は標準型に未収録（W3C Image Capture API 拡張）
+type ZoomCapabilities = MediaTrackCapabilities & {
+  zoom?: { min: number; max: number; step: number };
+};
+type ZoomSettings = MediaTrackSettings & { zoom?: number };
+type ZoomAdvancedConstraint = MediaTrackConstraintSet & { zoom?: number };
+
+function parseLens(label: string): { type: LensType; focal: number | null } {
+  const lower = label.toLowerCase();
+  // フロント / ユーザー向きカメラは除外対象（戻り値は呼び出し側で判断）
+  if (lower.includes("ultra wide") || lower.includes("ultrawide") || lower.includes("ultra-wide")) {
+    return { type: "ultra-wide", focal: 0.5 };
+  }
+  if (lower.includes("telephoto")) {
+    // iPhone は 2x / 3x が混在するのでラベル内の数字を優先的に拾う
+    const m = label.match(/(\d+(?:\.\d+)?)\s*x/i);
+    return { type: "telephoto", focal: m ? Number(m[1]) : 2 };
+  }
+  if (
+    lower.includes("back") ||
+    lower.includes("environment") ||
+    lower.includes("rear") ||
+    lower.includes("背面") ||
+    lower.includes("外側")
+  ) {
+    return { type: "wide", focal: 1 };
+  }
+  return { type: "unknown", focal: null };
+}
+
+function isFrontCamera(label: string): boolean {
+  const lower = label.toLowerCase();
+  return (
+    lower.includes("front") ||
+    lower.includes("user") ||
+    lower.includes("face") ||
+    lower.includes("前面") ||
+    lower.includes("内側") ||
+    lower.includes("インカメラ")
+  );
+}
+
 export function useCompositeBroadcastTrack({
   state,
   targetResolution,
@@ -58,20 +120,27 @@ export function useCompositeBroadcastTrack({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const stateRef = useRef<ScoreboardState>(state);
-  // スコアボードのオフスクリーンキャッシュ。state 変化時のみ再描画して
-  // 毎フレームのテキスト計測・描画コストを削減する。
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
   const lastOverlayKeyRef = useRef<string>("");
+  const cameraStreamRef = useRef<MediaStream | null>(null);
   const [videoTrack, setVideoTrack] = useState<MediaStreamTrack | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<Error | null>(null);
 
-  // state の最新値を ref にミラー（描画ループから参照）
+  // カメラ制御 state
+  const [availableCameras, setAvailableCameras] = useState<CameraInfo[]>([]);
+  const [currentCameraId, setCurrentCameraId] = useState<string | null>(null);
+  const [zoomCapability, setZoomCapability] = useState<ZoomCapability | null>(
+    null,
+  );
+  const [currentZoom, setCurrentZoom] = useState<number | null>(null);
+
+  // state の最新値を ref にミラー
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  // オフスクリーン overlay canvas を作成・破棄。解像度変化時にも作り直す。
+  // オフスクリーン overlay canvas
   useEffect(() => {
     if (!enabled) return;
     const overlay = document.createElement("canvas");
@@ -89,7 +158,7 @@ export function useCompositeBroadcastTrack({
     };
   }, [enabled, targetResolution.width, targetResolution.height]);
 
-  // state 変化時にだけ overlay を再描画（同値 state のスキップ含む）
+  // state 変化時にだけ overlay を再描画
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
@@ -102,11 +171,112 @@ export function useCompositeBroadcastTrack({
     lastOverlayKeyRef.current = key;
   }, [state]);
 
+  // カメラ取得 — currentCameraId 変更時に再実行（pipeline は維持）
   useEffect(() => {
     if (!enabled) return;
 
     let cancelled = false;
-    let cameraStream: MediaStream | null = null;
+    let acquiredStream: MediaStream | null = null;
+
+    async function acquire() {
+      setStatus("acquiring");
+      setError(null);
+      try {
+        const videoConstraints: MediaTrackConstraints = currentCameraId
+          ? {
+              deviceId: { exact: currentCameraId },
+              width: { ideal: targetResolution.width },
+              height: { ideal: targetResolution.height },
+              frameRate: { ideal: targetResolution.frameRate },
+            }
+          : {
+              facingMode: "environment",
+              width: { ideal: targetResolution.width },
+              height: { ideal: targetResolution.height },
+              frameRate: { ideal: targetResolution.frameRate },
+            };
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: false,
+        });
+
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        // 旧ストリームを停止してから新しいものに差し替え
+        const prev = cameraStreamRef.current;
+        if (prev) {
+          prev.getTracks().forEach((t) => t.stop());
+        }
+        cameraStreamRef.current = stream;
+        acquiredStream = stream;
+
+        const videoEl = videoRef.current as VideoElementWithRVFC | null;
+        if (!videoEl) {
+          throw new Error("video ref が未アタッチです");
+        }
+        videoEl.muted = true;
+        videoEl.playsInline = true;
+        videoEl.srcObject = stream;
+        await videoEl.play().catch(() => {});
+
+        // facingMode で初回取得した場合、確定 deviceId を currentCameraId に反映
+        const settings = stream.getVideoTracks()[0]?.getSettings();
+        if (!currentCameraId && settings?.deviceId) {
+          setCurrentCameraId(settings.deviceId);
+        }
+
+        // ズーム capability を確認
+        const track = stream.getVideoTracks()[0];
+        if (track && typeof track.getCapabilities === "function") {
+          const caps = track.getCapabilities() as ZoomCapabilities;
+          if (caps.zoom) {
+            setZoomCapability({
+              min: caps.zoom.min,
+              max: caps.zoom.max,
+              step: caps.zoom.step,
+            });
+            const cur = (track.getSettings() as ZoomSettings).zoom ?? caps.zoom.min;
+            setCurrentZoom(cur);
+          } else {
+            setZoomCapability(null);
+            setCurrentZoom(null);
+          }
+        }
+      } catch (e) {
+        if (cancelled) return;
+        const err = e instanceof Error ? e : new Error(String(e));
+        console.error("[composite] camera 取得エラー:", err);
+        setError(err);
+        setStatus("error");
+      }
+    }
+
+    acquire();
+
+    return () => {
+      cancelled = true;
+      if (acquiredStream && cameraStreamRef.current === acquiredStream) {
+        acquiredStream.getTracks().forEach((t) => t.stop());
+        cameraStreamRef.current = null;
+      }
+    };
+  }, [
+    enabled,
+    currentCameraId,
+    targetResolution.width,
+    targetResolution.height,
+    targetResolution.frameRate,
+  ]);
+
+  // Canvas パイプライン — enabled / 解像度のみで再構築（カメラ切替では維持される）
+  useEffect(() => {
+    if (!enabled) return;
+
+    let cancelled = false;
     let captureStream: MediaStream | null = null;
     let rvfcHandle: RVFCHandle | null = null;
     let rafHandle: number | null = null;
@@ -114,38 +284,12 @@ export function useCompositeBroadcastTrack({
     const coverRect = { sx: 0, sy: 0, sw: 0, sh: 0 };
 
     async function start() {
-      setStatus("acquiring");
-      setError(null);
-
       try {
-        // 音声は LiveKitRoom の audio={true} 経由で auto-publish させる（枯れたコードパス）。
-        // ここでは video 専用ストリームのみ取得して Canvas 合成に使う。
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "environment",
-            width: { ideal: targetResolution.width },
-            height: { ideal: targetResolution.height },
-            frameRate: { ideal: targetResolution.frameRate },
-          },
-          audio: false,
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        cameraStream = stream;
-
         const videoEl = videoRef.current as VideoElementWithRVFC | null;
         const canvasEl = canvasRef.current;
         if (!videoEl || !canvasEl) {
           throw new Error("video/canvas ref が未アタッチです");
         }
-        videoEl.muted = true;
-        videoEl.playsInline = true;
-        videoEl.srcObject = stream;
-        await videoEl.play().catch(() => {
-          // play() が失敗する場合があるが、 srcObject 設定だけでも動くケースが多い
-        });
 
         canvasEl.width = targetResolution.width;
         canvasEl.height = targetResolution.height;
@@ -161,13 +305,11 @@ export function useCompositeBroadcastTrack({
           const canvasAspect = targetResolution.width / targetResolution.height;
           const videoAspect = vw / vh;
           if (videoAspect > canvasAspect) {
-            // 映像が横長 → 左右をクロップ
             coverRect.sh = vh;
             coverRect.sw = Math.round(vh * canvasAspect);
             coverRect.sy = 0;
             coverRect.sx = Math.round((vw - coverRect.sw) / 2);
           } else {
-            // 映像が縦長 → 上下をクロップ
             coverRect.sw = vw;
             coverRect.sh = Math.round(vw / canvasAspect);
             coverRect.sx = 0;
@@ -206,13 +348,10 @@ export function useCompositeBroadcastTrack({
               ctx!.fillStyle = "#000";
               ctx!.fillRect(0, 0, targetResolution.width, targetResolution.height);
             }
-            // スコアボードはオフスクリーンキャッシュ済み（state 変化時のみ再描画）。
-            // 毎フレームは drawImage によるブリットだけで済むので CPU 負荷が大きく下がる。
             const overlay = overlayRef.current;
             if (overlay) {
               ctx!.drawImage(overlay, 0, 0);
             } else {
-              // フォールバック: 何らかの理由で overlay 未生成なら直描画
               drawScoreboard(
                 ctx!,
                 stateRef.current,
@@ -235,7 +374,6 @@ export function useCompositeBroadcastTrack({
           }
         }
 
-        // 最初の 1 フレームを描画してから captureStream を呼ぶ（0x0 track 回避）
         renderFrame();
 
         const cs = canvasEl.captureStream(targetResolution.frameRate);
@@ -247,7 +385,6 @@ export function useCompositeBroadcastTrack({
 
         if (cancelled) {
           cs.getTracks().forEach((t) => t.stop());
-          stream.getTracks().forEach((t) => t.stop());
           return;
         }
 
@@ -256,7 +393,7 @@ export function useCompositeBroadcastTrack({
       } catch (e) {
         if (cancelled) return;
         const err = e instanceof Error ? e : new Error(String(e));
-        console.error("[composite] 初期化エラー:", err);
+        console.error("[composite] pipeline 初期化エラー:", err);
         setError(err);
         setStatus("error");
       }
@@ -280,17 +417,18 @@ export function useCompositeBroadcastTrack({
       if (captureStream) {
         captureStream.getTracks().forEach((t) => t.stop());
       }
-      if (cameraStream) {
-        cameraStream.getTracks().forEach((t) => t.stop());
-      }
       if (videoRef.current) {
         videoRef.current.srcObject = null;
+      }
+      // カメラストリームは別 effect で管理
+      const cam = cameraStreamRef.current;
+      if (cam) {
+        cam.getTracks().forEach((t) => t.stop());
+        cameraStreamRef.current = null;
       }
       setVideoTrack(null);
       setStatus("idle");
     };
-    // targetResolution の各値は安定していることが前提。再取得を避けるため個別依存にせず JSON で比較
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     enabled,
     targetResolution.width,
@@ -298,5 +436,88 @@ export function useCompositeBroadcastTrack({
     targetResolution.frameRate,
   ]);
 
-  return { canvasRef, videoRef, videoTrack, status, error };
+  // カメラ列挙 — 初回取得後（permission 取得後）に label が埋まる
+  useEffect(() => {
+    if (!enabled) return;
+    if (!currentCameraId) return; // 1 度カメラ取得が成功してから列挙
+
+    let cancelled = false;
+
+    async function enumerate() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) return;
+
+        const cams: CameraInfo[] = [];
+        for (const d of devices) {
+          if (d.kind !== "videoinput") continue;
+          if (isFrontCamera(d.label)) continue; // フロントカメラは除外
+          const { type, focal } = parseLens(d.label);
+          cams.push({
+            deviceId: d.deviceId,
+            label: d.label,
+            lensType: type,
+            focalLabel: focal,
+          });
+        }
+
+        // 焦点距離の昇順（0.5x → 1x → 2x → unknown 末尾）
+        cams.sort((a, b) => {
+          if (a.focalLabel === null && b.focalLabel === null) return 0;
+          if (a.focalLabel === null) return 1;
+          if (b.focalLabel === null) return -1;
+          return a.focalLabel - b.focalLabel;
+        });
+
+        setAvailableCameras(cams);
+      } catch (e) {
+        console.error("[composite] enumerateDevices エラー:", e);
+      }
+    }
+
+    enumerate();
+
+    // デバイス着脱で再列挙
+    const onDeviceChange = () => enumerate();
+    navigator.mediaDevices.addEventListener?.("devicechange", onDeviceChange);
+
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices.removeEventListener?.("devicechange", onDeviceChange);
+    };
+  }, [enabled, currentCameraId]);
+
+  const switchCamera = useCallback((deviceId: string) => {
+    setCurrentCameraId(deviceId);
+    // ズームは新カメラの capability に依存するので一旦リセット（acquire 内で再設定される）
+    setZoomCapability(null);
+    setCurrentZoom(null);
+  }, []);
+
+  const setZoom = useCallback(async (zoom: number) => {
+    const stream = cameraStreamRef.current;
+    const track = stream?.getVideoTracks()[0];
+    if (!track || typeof track.applyConstraints !== "function") return;
+    try {
+      const advanced: ZoomAdvancedConstraint[] = [{ zoom }];
+      await track.applyConstraints({ advanced } as MediaTrackConstraints);
+      setCurrentZoom(zoom);
+    } catch (e) {
+      console.error("[composite] zoom applyConstraints エラー:", e);
+    }
+  }, []);
+
+  return {
+    canvasRef,
+    videoRef,
+    videoTrack,
+    status,
+    error,
+    availableCameras,
+    currentCameraId,
+    switchCamera,
+    zoomCapability,
+    currentZoom,
+    setZoom,
+  };
 }
