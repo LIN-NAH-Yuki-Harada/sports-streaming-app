@@ -11,3 +11,6 @@ docs/assets/brand-sources/
 ~$*.xlsx
 ~$*.docx
 ~$*.pptx
+
+# 機密情報を含むドキュメント（外部担当者の連絡先等）
+docs/日本政策金融公庫の担当者.txt
