@@ -528,7 +528,22 @@ export function useCompositeBroadcastTrack({
         // 実映像から最初のフレームを描画
         renderFrame();
 
-        const cs = canvasEl.captureStream(targetResolution.frameRate);
+        // captureStream() は引数なしで呼ぶ。
+        //
+        // 第 1 引数に framerate を渡すと WebKit (iOS Safari) は「指定 fps の
+        // wall-clock-independent な timestamp」を内部生成して video track の
+        // PTS に乗せる。実描画 fps（rVFC ベース = カメラ実 fps、24-30fps 可変）
+        // と要求 fps が乖離すると、1 秒あたり数 frame ぶんの timestamp 進み/
+        // 遅れが累積し、audio track の wall clock 基準 PTS と drift していく。
+        //
+        // 5/05 試合のアーカイブで「**音がどんどん遅れる**」事象として顕在化。
+        // 1 試合 30-60 分で数秒〜数十秒のズレに成長。
+        //
+        // 引数なしだと「描画があった瞬間にフレーム発火」モードになり、video
+        // track の PTS が実描画タイミング（= rVFC 発火 = カメラ実 fps）に
+        // 追従する。これで audio track の wall clock と整合し drift しなくなる。
+        // 共有中は PR #115 の rAF 強制ループで描画が継続するので publish も止まらない。
+        const cs = canvasEl.captureStream();
         captureStream = cs;
         const vt = cs.getVideoTracks()[0] ?? null;
         if (!vt) {
