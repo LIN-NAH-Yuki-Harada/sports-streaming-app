@@ -30,6 +30,10 @@ type UseCompositeBroadcastTrackArgs = {
   state: ScoreboardState;
   targetResolution: Resolution;
   enabled: boolean;
+  // 配信者が LINE 等で URL を共有中（Safari バックグラウンド）に
+  // 視聴者画面が黒くならないよう、カメラ映像の代わりに「共有中」
+  // オーバーレイを canvas に描画するフラグ。
+  isSharing?: boolean;
 };
 
 type UseCompositeBroadcastTrackResult = {
@@ -48,6 +52,48 @@ type UseCompositeBroadcastTrackResult = {
 };
 
 type RVFCHandle = number;
+
+/**
+ * 配信者が LINE 等で URL を共有中（Safari バックグラウンド）に
+ * 視聴者画面に出すフォールバックオーバーレイ。
+ *
+ * iOS Safari は他アプリ起動でバックグラウンドに入ると JS / camera が
+ * 停止するが、canvas.captureStream は最後に描画されたフレームを
+ * 出し続けるため、共有開始時点でこの絵を canvas に焼いておけば
+ * 視聴者には黒画面ではなく案内メッセージが見える。
+ *
+ * 1080p (1920x1080) を想定したサイズ。スマホ視聴で縮小されても
+ * 読めるよう大きめのフォントで描画する。
+ */
+function drawSharingOverlay(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+): void {
+  // 完全に黒で塗りつぶし（凍ったカメラフレームが見えると混乱するため）
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, w, h);
+
+  const cx = w / 2;
+  const cy = h / 2;
+
+  // 大きいアイコン（emoji）
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "160px sans-serif";
+  ctx.fillText("📱", cx, cy - 140);
+
+  // メインメッセージ
+  ctx.font = "bold 72px sans-serif";
+  ctx.fillText("配信者がLINEでURLを共有中です", cx, cy + 30);
+
+  // サブメッセージ
+  ctx.fillStyle = "#bbbbbb";
+  ctx.font = "44px sans-serif";
+  ctx.fillText("チームに案内を送っています", cx, cy + 110);
+  ctx.fillText("しばらくお待ちください...", cx, cy + 170);
+}
 
 function scoreboardKey(s: ScoreboardState): string {
   return [
@@ -116,10 +162,14 @@ export function useCompositeBroadcastTrack({
   state,
   targetResolution,
   enabled,
+  isSharing = false,
 }: UseCompositeBroadcastTrackArgs): UseCompositeBroadcastTrackResult {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const stateRef = useRef<ScoreboardState>(state);
+  // renderFrame closure で参照するため ref 経由（state 直接参照だと再レンダ
+  // 後の closure が古くて反映が遅れる）
+  const isSharingRef = useRef(isSharing);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
   const lastOverlayKeyRef = useRef<string>("");
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -139,6 +189,11 @@ export function useCompositeBroadcastTrack({
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  // isSharing の最新値を ref にミラー（renderFrame closure 用）
+  useEffect(() => {
+    isSharingRef.current = isSharing;
+  }, [isSharing]);
 
   // オフスクリーン overlay canvas
   useEffect(() => {
@@ -337,7 +392,17 @@ export function useCompositeBroadcastTrack({
             recomputeCoverRect();
           }
           try {
-            if (coverRect.sw && coverRect.sh) {
+            if (isSharingRef.current) {
+              // 共有中オーバーレイ（カメラ映像の代わり）。
+              // iOS Safari バックグラウンドで JS が停止しても、canvas の
+              // 最後のフレーム = この絵 が captureStream から出続けるため
+              // 視聴者には黒ではなく「URL 共有中」が見え続ける。
+              drawSharingOverlay(
+                ctx!,
+                targetResolution.width,
+                targetResolution.height,
+              );
+            } else if (coverRect.sw && coverRect.sh) {
               ctx!.drawImage(
                 videoEl,
                 coverRect.sx,

@@ -158,6 +158,10 @@ function BroadcastPageInner() {
   const [livekitToken, setLivekitToken] = useState<string | null>(null);
   const [livekitError, setLivekitError] = useState<string | null>(null);
   const [showCameraGuide, setShowCameraGuide] = useState(false);
+  // 共有ボタン押下中フラグ。true の間は配信 canvas を「URL 共有中」案内に
+  // 切り替えて視聴者画面のブラックアウトを防ぐ。
+  // 解除条件: visibility=visible 復帰 / 60 秒タイムアウト / 配信終了。
+  const [isSharing, setIsSharing] = useState(false);
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
@@ -223,6 +227,31 @@ function BroadcastPageInner() {
     if (v) setVenue(v);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 共有中オーバーレイの自動解除:
+  // 配信者が LINE 等から Safari に戻ってきた瞬間（visibility=visible）に
+  // isSharing を false にしてカメラ映像描画を再開する。
+  useEffect(() => {
+    if (!isSharing) return;
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        setIsSharing(false);
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [isSharing]);
+
+  // 共有中オーバーレイの安全タイムアウト:
+  // visibility イベントが届かない端末や、ユーザーが共有シートをキャンセル
+  // した場合に永遠にオーバーレイが残らないよう 60 秒で強制解除する。
+  useEffect(() => {
+    if (!isSharing) return;
+    const t = window.setTimeout(() => setIsSharing(false), 60_000);
+    return () => window.clearTimeout(t);
+  }, [isSharing]);
 
   // 無料お試しタイマー（秒数）
   const [trialRemaining, setTrialRemaining] = useState<number | null>(null);
@@ -1006,6 +1035,7 @@ function BroadcastPageInner() {
               burnScoreboard={burnScoreboard}
               scoreboardState={scoreboardState}
               broadcastResolution={broadcastResolution}
+              isSharing={isSharing}
             />
           ) : livekitError ? (
             <div className="absolute inset-0 flex items-center justify-center px-6">
@@ -1272,6 +1302,13 @@ function BroadcastPageInner() {
                       ? `\n\n📺 YouTube版\n${youtubeWatchUrl}`
                       : "";
                     const text = `【試合配信中】\n${home} vs ${away}\n${tournamentLine}\n📱 より高画質・リアルタイム視聴（推奨）\n${shareUrl}${youtubeBlock}`;
+
+                    // 共有開始時点で canvas を「URL 共有中」オーバーレイに切替。
+                    // LINE アプリ起動 → Safari バックグラウンド → JS 停止後も
+                    // captureStream の最後のフレーム = この絵 が出続けるので
+                    // 視聴者は黒画面ではなく案内メッセージを見続ける。
+                    // 解除は visibility=visible 復帰 / 60 秒タイムアウトで自動。
+                    setIsSharing(true);
 
                     // iOS Safari の Native Share API を最優先。
                     // ネイティブシェアシートは Safari のオーバーレイ UI として開くため、

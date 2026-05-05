@@ -340,6 +340,7 @@ export function LiveKitBroadcaster({
   burnScoreboard = false,
   scoreboardState,
   broadcastResolution,
+  isSharing = false,
 }: {
   token: string;
   serverUrl: string;
@@ -349,6 +350,9 @@ export function LiveKitBroadcaster({
   burnScoreboard?: boolean;
   scoreboardState?: ScoreboardState;
   broadcastResolution?: BroadcastResolution;
+  // LINE 共有中（Safari バックグラウンド）に視聴者画面のブラックアウトを
+  // 防ぐため、canvas を「URL 共有中」オーバーレイに切り替えるフラグ
+  isSharing?: boolean;
 }) {
   // 焼き込みモード: カメラ + スコアを canvas 合成して video のみ手動 publish。
   // 音声は LiveKit の auto-publish (audio=true) で枯れたコードパスに任せる。
@@ -400,6 +404,7 @@ export function LiveKitBroadcaster({
             targetResolution={broadcastResolution}
             onConnected={onConnected}
             onDisconnected={onDisconnected}
+            isSharing={isSharing}
           />
         </LiveKitRoom>
       </div>
