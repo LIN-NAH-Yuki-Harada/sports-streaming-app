@@ -82,6 +82,28 @@ function MyPageInner() {
       toast.error("YouTube連携でエラーが発生しました");
       router.replace("/mypage");
     }
+    if (
+      youtube === "no_channel" &&
+      handledYoutubeRef.current !== "no_channel"
+    ) {
+      handledYoutubeRef.current = "no_channel";
+      toast.error(
+        "YouTubeチャンネルが未作成です。先に youtube.com でチャンネルを作成してから再連携してください。",
+        10_000,
+      );
+      router.replace("/mypage");
+    }
+    if (
+      youtube === "plan_required" &&
+      handledYoutubeRef.current !== "plan_required"
+    ) {
+      handledYoutubeRef.current = "plan_required";
+      toast.error(
+        "YouTube連携はチームプラン（¥500/月）でのみ利用できます。",
+        8_000,
+      );
+      router.replace("/mypage");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, router, refreshProfile]);
 
