@@ -125,11 +125,12 @@ export function CompositeBroadcasterRenderer({
           simulcast: true,
           videoCodec: "h264",
           videoEncoding: {
-            // 5/03: 配信チェーン全体を 1080p に引き上げに伴い、
-            // bitrate も 2.5Mbps → 5Mbps に倍化。
-            // YouTube 推奨 1080p30 bitrate (4.5-9 Mbps) の中央値。
-            // 発熱リスクは室内競技なら問題ないが、夏屋外で症状が出たら下げる。
-            maxBitrate: 5_000_000,
+            // 5/06: 720p 引き下げに合わせて 5Mbps → 2.5Mbps に統一。
+            // YouTube 推奨 720p30 bitrate (1.5-4 Mbps) の中央値。
+            // 配信側で 2.5Mbps、Egress 側で 4Mbps（再エンコード時の余裕分）。
+            // CPU 負荷・発熱・バッテリー消費が 1080p 比で約半減し、
+            // 夏屋外配信や 4G 環境でも止まりにくい設定に。
+            maxBitrate: 2_500_000,
             maxFramerate: 30,
           },
         });

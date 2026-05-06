@@ -66,11 +66,14 @@ export function buildExternalBrowserUrl(currentUrl: string, platform: Platform):
 }
 
 // Canvas 合成配信の解像度。
-// 5/03 配信チェーン全体を 1080p に引き上げ（LiveKit publish / Egress / YouTube ingest を統一）。
-// 撮影画質を上げないと YouTube Live ingest 側で 1080p 宣言しても元素材が 720p のため
-// アップスケール限界に当たる、という 4/30 朝の実測結果を受けての対応。
-// 発熱リスクは：室内体育館（春〜秋の屋内競技）→ 影響小、夏屋外 → 要監視。
-// 端末発熱で配信が止まる事案が出たら端末別に 720p フォールバックを検討する。
+// 5/06 通信安定性優先で 720p に戻す（5/03 引き上げ → 5/06 引き下げ）。
+// 理由:
+//  - 1080p は CPU 負荷・発熱・バッテリー消費が 720p の約 2 倍
+//  - 夏屋外配信での発熱止まりリスク回避（春の体育館では問題なかったが先回り）
+//  - 4G 配信時のアップロード安定性確保（5Mbps → 2.5Mbps）
+//  - 古い端末（iPhone X 以前）の HW エンコーダ余裕確保
+//  - 「配信が止まらない」を最優先（オーナー判断 5/06）
+// 高画質 1080p モードはチームプラン特典として将来 UI トグル化を検討。
 export function pickBroadcastResolution(): BroadcastResolution {
-  return { width: 1920, height: 1080, frameRate: 30 };
+  return { width: 1280, height: 720, frameRate: 30 };
 }

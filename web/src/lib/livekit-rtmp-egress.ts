@@ -11,23 +11,30 @@ import { getEgressClient, getRoomServiceClient } from "./livekit-egress";
 /**
  * RTMP push 用の EncodingOptions（YouTube Live 受信品質を最大化）。
  *
- * - videoBitrate: 8 Mbps（preset デフォルト 4.5 Mbps の約 1.8 倍）
- *   YouTube 推奨 1080p30 bitrate (4.5-9 Mbps) の上限近く。
- *   YouTube 受信時の圧縮アーチファクト軽減効果あり。
- *   → LiveKit Cloud 側の処理なので配信者スマホへの負荷ゼロ。
- *   → transcode minutes は時間ベースのため bitrate 上げても消費量変化なし。
- * - keyFrameInterval: 2 秒（YouTube 推奨）。
- *   preset デフォルト 4 秒だと CDN 側のシークやサムネ生成精度が落ちる。
- * - audioCodec: AAC（YouTube Live ingest が必須要件）。
- * - videoCodec: H264_MAIN（preset と同等・互換性最大）。
+ * 5/06 改修:
+ * - 配信側 1080p → 720p 引き下げ（user-agent.ts pickBroadcastResolution）に
+ *   合わせて Egress も 720p に統一。元素材より高い解像度を Egress 側で
+ *   宣言してもアップスケール限界で品質改善せず、bitrate を無駄に消費するため。
+ * - videoBitrate: 8 Mbps → 4 Mbps（YouTube 推奨 720p30 bitrate 1.5-4 Mbps の上限）
+ * - videoCodec: H264_MAIN → **H264_HIGH**（同 bitrate で 10-15% 圧縮効率 UP、
+ *   互換性は iOS/Android/PC ブラウザほぼ全部 OK）
+ * - keyFrameInterval: 2 → **1 秒**（動きの多いシーンチェンジ・カメラパンで
+ *   品質安定。データ量 +5-10% 程度）
+ *
+ * 不変:
+ * - audioCodec: AAC（YouTube Live ingest が必須要件）
+ * - audioBitrate: 128 kbps（音声品質維持）
+ *
+ * 配信者スマホへの負荷ゼロ（LiveKit Cloud 側の処理）。
+ * transcode minutes は時間ベースのため bitrate 変更で消費量変化なし。
  */
 const RTMP_HIGH_QUALITY_ENCODING = new EncodingOptions({
-  width: 1920,
-  height: 1080,
+  width: 1280,
+  height: 720,
   framerate: 30,
-  videoCodec: VideoCodec.H264_MAIN,
-  videoBitrate: 8_000,
-  keyFrameInterval: 2,
+  videoCodec: VideoCodec.H264_HIGH,
+  videoBitrate: 4_000,
+  keyFrameInterval: 1,
   audioCodec: AudioCodec.AAC,
   audioBitrate: 128,
   audioFrequency: 44_100,
