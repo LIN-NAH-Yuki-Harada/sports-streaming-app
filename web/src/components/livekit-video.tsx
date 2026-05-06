@@ -358,7 +358,8 @@ export function LiveKitBroadcaster({
   // 共有ボタン onClick から canvas を同期描画するための ref。
   // setIsSharing(true) は React 経由の非同期更新で Safari バックグラウンド
   // 遷移までに描画が間に合わないため、ref ベースで直接同期実行する経路を持つ。
-  startSharingRef?: React.MutableRefObject<(() => void) | null>;
+  // deadlineMs (epoch ms) を渡すとカウントダウン表示を有効化。
+  startSharingRef?: React.MutableRefObject<((deadlineMs?: number) => void) | null>;
   endSharingRef?: React.MutableRefObject<(() => void) | null>;
 }) {
   // 焼き込みモード: カメラ + スコアを canvas 合成して video のみ手動 publish。
