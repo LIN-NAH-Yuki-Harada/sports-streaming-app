@@ -1083,7 +1083,10 @@ function BroadcastPageInner() {
 
           {/* 左上: スコアボード・オーバーレイ（焼き込み時は canvas 内に同じ内容を描画するので非表示） */}
           {!burnScoreboard && (
-            <div className="absolute top-3 left-3 sm:top-4 sm:left-4 flex flex-col items-start gap-1">
+            <div
+              className="absolute left-3 sm:left-4 flex flex-col items-start gap-1"
+              style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+            >
               <div className="flex items-center bg-black/70 backdrop-blur-sm rounded overflow-hidden text-[10px] sm:text-xs">
                 <div className="px-2 sm:px-3 py-1 sm:py-1.5 bg-white/10 flex items-center gap-1.5">
                   <span className="font-bold">{home}</span>
@@ -1214,7 +1217,10 @@ function BroadcastPageInner() {
           </div>
 
           {/* 右上: 全画面ボタン + 大会名 + LIVE + お試し表示 */}
-          <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center gap-1.5">
+          <div
+            className="absolute right-3 sm:right-4 flex items-center gap-1.5"
+            style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+          >
             <button
               type="button"
               onClick={toggleLiveFullscreen}
