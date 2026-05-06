@@ -269,7 +269,10 @@ export function CompositeBroadcasterRenderer({
 
       {/* 視聴者数 */}
       {connectionState === ConnectionState.Connected && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[2] flex items-center gap-1 bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1">
+        <div
+          className="absolute left-1/2 -translate-x-1/2 z-[2] flex items-center gap-1 bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1"
+          style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+        >
           <svg
             className="w-3 h-3 text-gray-400"
             fill="none"
