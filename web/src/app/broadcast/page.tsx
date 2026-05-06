@@ -1679,6 +1679,43 @@ function BroadcastPageInner() {
           </div>
         )}
 
+        {/* 配信前チェックリスト（YouTube 削除リスク回避・最重要） */}
+        <details className="rounded-md bg-red-500/5 border border-red-500/20 group" open>
+          <summary className="cursor-pointer list-none px-3 py-2.5 text-[11px] font-medium text-red-200 flex items-center justify-between select-none">
+            <span className="flex items-center gap-2">
+              <span aria-hidden="true">📺</span>
+              <span>YouTube 削除リスク回避（必読）</span>
+            </span>
+            <span className="text-red-300/60 text-[10px] group-open:rotate-180 transition-transform" aria-hidden="true">▼</span>
+          </summary>
+          <div className="px-3 pb-3 text-[10px] text-gray-300 leading-relaxed space-y-2.5">
+            <p className="text-red-100/90">YouTube 同時配信を ON にする場合、ガイドライン違反で動画が自動削除されないよう以下にご注意ください。</p>
+            <div>
+              <p className="text-red-200 font-semibold mb-1">🚨 子どもだけが映る配信は禁止（最重要）</p>
+              <ul className="space-y-0.5 list-disc list-inside marker:text-gray-600">
+                <li>13 歳未満が映る配信は「大人（保護者・コーチ・監督）が画面に同時に映る」必要があります</li>
+                <li>ベンチや観客席を時々映すのも有効です</li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-red-200 font-semibold mb-1">📺 他メディアの映り込みに注意</p>
+              <ul className="space-y-0.5 list-disc list-inside marker:text-gray-600">
+                <li>周囲のテレビ画面が映ると Content ID 検出で削除されます</li>
+                <li>選手入場曲・BGM など著作権のある音楽も同様</li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-red-200 font-semibold mb-1">⚠️ 違反が累積するとリスク</p>
+              <ul className="space-y-0.5 list-disc list-inside marker:text-gray-600">
+                <li>警告 1 回 → 90 日で消滅（ペナルティなし）</li>
+                <li>同じ違反を繰り返すと「ストライク」となり配信制限がかかります</li>
+                <li>3 回でチャンネル削除のリスクがあります</li>
+              </ul>
+            </div>
+            <p className="text-gray-400 italic">YouTube 連携 OFF で配信すれば本リスクは発生しません（自社プレイヤーのみ視聴可能）。</p>
+          </div>
+        </details>
+
         {/* 配信前チェックリスト（発熱対策） */}
         <details className="rounded-md bg-amber-500/5 border border-amber-500/20 group">
           <summary className="cursor-pointer list-none px-3 py-2.5 text-[11px] font-medium text-amber-200 flex items-center justify-between select-none">
