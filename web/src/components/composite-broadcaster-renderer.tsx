@@ -25,7 +25,8 @@ type Props = {
   isSharing?: boolean;
   // 共有ボタン onClick から canvas を同期的に書き換えるための ref。
   // page.tsx 側でこの ref.current を呼ぶと内部の startSharing() を実行する。
-  startSharingRef?: React.MutableRefObject<(() => void) | null>;
+  // deadlineMs (epoch ms) を渡すとカウントダウン表示を有効化。
+  startSharingRef?: React.MutableRefObject<((deadlineMs?: number) => void) | null>;
   endSharingRef?: React.MutableRefObject<(() => void) | null>;
 };
 

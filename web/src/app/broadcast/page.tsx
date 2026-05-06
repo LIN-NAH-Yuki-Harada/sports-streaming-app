@@ -168,8 +168,12 @@ function BroadcastPageInner() {
   // までに案内画面の描画が間に合わないケースがあった（5/05 PR #114 の不具合）。
   // この ref 経由で同期描画を発火することで captureStream の最後フレームを
   // 確実に「URL 共有中」画面に固定できる。
-  const sharingStartRef = useRef<(() => void) | null>(null);
+  // deadlineMs (epoch ms) を渡すと案内画面に「あと XX 秒で自動解除」を表示。
+  const sharingStartRef = useRef<((deadlineMs?: number) => void) | null>(null);
   const sharingEndRef = useRef<(() => void) | null>(null);
+  // 共有自動解除までの時間。LINE 共有は通常 5-15 秒で完了するので 30 秒で十分。
+  // 60 秒だと体感長すぎ + 視聴者を待たせすぎという 5/06 オーナー指摘で短縮。
+  const SHARING_TIMEOUT_MS = 30_000;
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
@@ -257,13 +261,14 @@ function BroadcastPageInner() {
 
   // 共有中オーバーレイの安全タイムアウト:
   // visibility イベントが届かない端末や、ユーザーが共有シートをキャンセル
-  // した場合に永遠にオーバーレイが残らないよう 60 秒で強制解除する。
+  // した場合に永遠にオーバーレイが残らないよう SHARING_TIMEOUT_MS で強制解除する。
+  // 案内画面のカウントダウンと同じ時間にする（startSharing 呼び出し側で deadline 計算）。
   useEffect(() => {
     if (!isSharing) return;
     const t = window.setTimeout(() => {
       sharingEndRef.current?.();
       setIsSharing(false);
-    }, 60_000);
+    }, SHARING_TIMEOUT_MS);
     return () => window.clearTimeout(t);
   }, [isSharing]);
 
@@ -1331,7 +1336,9 @@ function BroadcastPageInner() {
                     // 間に合わないケースがあった（5/05 不具合）。ref 経由なら
                     // この onClick の同期コンテキストで canvas に焼き込めるので
                     // navigator.share() の前に最終フレームが確定する。
-                    sharingStartRef.current?.();
+                    // deadline を渡すと案内画面に「あと XX 秒で自動解除」を表示。
+                    const deadlineMs = Date.now() + SHARING_TIMEOUT_MS;
+                    sharingStartRef.current?.(deadlineMs);
                     setIsSharing(true);
 
                     // iOS Safari の Native Share API を最優先。

@@ -55,7 +55,10 @@ type UseCompositeBroadcastTrackResult = {
   // 遷移して JS 停止する前に最終フレーム差し替えが間に合わないケースが
   // あった（5/05 PR #114 の不具合）。同期描画で確実に captureStream の
   // 最後フレーム = 案内画面 に固定する。
-  startSharing: () => void;
+  //
+  // `deadlineMs` (epoch ms) を渡すと案内画面に「あと XX 秒で自動解除」の
+  // カウントダウンを表示する。フォアグラウンド時は毎フレーム再計算される。
+  startSharing: (deadlineMs?: number) => void;
   endSharing: () => void;
 };
 
@@ -72,11 +75,16 @@ type RVFCHandle = number;
  *
  * 1080p (1920x1080) を想定したサイズ。スマホ視聴で縮小されても
  * 読めるよう大きめのフォントで描画する。
+ *
+ * `remainingSec` が指定されている場合は「あと XX 秒で自動解除」を
+ * 追記する。背景時は描画ループが止まるので背景滞在中は表示が固定されるが、
+ * フォアグラウンド時（シェアシート表示直後など）は毎フレーム更新される。
  */
 function drawSharingOverlay(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
+  remainingSec: number | null,
 ): void {
   // 完全に黒で塗りつぶし（凍ったカメラフレームが見えると混乱するため）
   ctx.fillStyle = "#000000";
@@ -101,6 +109,13 @@ function drawSharingOverlay(
   ctx.font = "44px sans-serif";
   ctx.fillText("チームに案内を送っています", cx, cy + 110);
   ctx.fillText("しばらくお待ちください...", cx, cy + 170);
+
+  // カウントダウン（最大 30 秒、毎秒 renderFrame で更新）
+  if (remainingSec !== null) {
+    ctx.fillStyle = "#888888";
+    ctx.font = "36px sans-serif";
+    ctx.fillText(`あと ${remainingSec} 秒で自動解除`, cx, cy + 260);
+  }
 }
 
 function scoreboardKey(s: ScoreboardState): string {
@@ -195,8 +210,13 @@ export function useCompositeBroadcastTrack({
 
   // 共有開始/解除を pipeline effect の closure に橋渡しするための ref。
   // pipeline effect 内で書き込まれ、外部からは startSharing()/endSharing() で呼ぶ。
-  const startSharingImplRef = useRef<(() => void) | null>(null);
+  const startSharingImplRef = useRef<((deadlineMs?: number) => void) | null>(
+    null,
+  );
   const endSharingImplRef = useRef<(() => void) | null>(null);
+  // 共有自動解除予定時刻 (epoch ms)。renderFrame で残り秒を計算して
+  // drawSharingOverlay に渡す。null なら共有中でない or カウントダウンなし。
+  const sharingDeadlineRef = useRef<number | null>(null);
 
   // state の最新値を ref にミラー
   useEffect(() => {
@@ -410,10 +430,16 @@ export function useCompositeBroadcastTrack({
               // iOS Safari バックグラウンドで JS が停止しても、canvas の
               // 最後のフレーム = この絵 が captureStream から出続けるため
               // 視聴者には黒ではなく「URL 共有中」が見え続ける。
+              const deadline = sharingDeadlineRef.current;
+              const remainingSec =
+                deadline !== null
+                  ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+                  : null;
               drawSharingOverlay(
                 ctx!,
                 targetResolution.width,
                 targetResolution.height,
+                remainingSec,
               );
             } else if (coverRect.sw && coverRect.sh) {
               ctx!.drawImage(
@@ -450,16 +476,16 @@ export function useCompositeBroadcastTrack({
 
         function scheduleNext() {
           if (cancelled) return;
-          // 共有中は rVFC ではなく rAF を強制使用。
-          // rVFC は video element に新フレームが届いた時にだけ発火するが、
-          // Safari バックグラウンド時は camera が止まって新フレームが来ない
-          // → rVFC が永久に発火しない → 案内画面が描画されない、という
-          // 不具合があった（5/05 PR #114 の症状）。rAF はカメラ独立で
-          // 動くので「共有中の薄い更新ループ」を維持できる。
-          if (isSharingRef.current) {
-            rafHandle = window.requestAnimationFrame(renderFrame);
-            return;
-          }
+          // 5/06: 共有中の rAF 強制を削除（5/05 PR #115 の rAF 強制が原因で
+          // 共有中→復帰時に audio との PTS 系列が乖離し、YouTube Live で
+          // 「音先行・映像遅延」のズレが発生していた）。
+          //
+          // 共有中の案内表示は startSharing() の同期描画で canvas に焼き
+          // 込まれており、captureStream の最後フレームとして emit され続ける
+          // ので rAF で更新ループを回し続ける必要はない。背景時に rVFC が
+          // 発火しなくても、最後に焼かれた案内画面が視聴者に届き続ける。
+          // 復帰時は rVFC が同じ系列のまま再開するので audio との PTS
+          // 関係も連続性を保てる。
           if (typeof videoEl!.requestVideoFrameCallback === "function") {
             rvfcHandle = videoEl!.requestVideoFrameCallback(renderFrame);
           } else {
@@ -561,21 +587,10 @@ export function useCompositeBroadcastTrack({
         // 共有開始/解除の同期実装を ref に登録（外部から startSharing() で呼ぶ）。
         // pipeline effect の closure（ctx / videoEl / rvfcHandle / rafHandle 等）を
         // クロージャで掴む必要があるためここで定義する。
-        startSharingImplRef.current = () => {
+        startSharingImplRef.current = (deadlineMs?: number) => {
           if (cancelled) return;
           isSharingRef.current = true;
-
-          // pending な rVFC をキャンセル。Safari がバックグラウンドに入ると
-          // video frame が来なくなって rVFC が永久に発火しなくなるため、
-          // 共有中は rAF ループに切り替える必要がある。
-          if (rvfcHandle !== null) {
-            videoEl!.cancelVideoFrameCallback?.(rvfcHandle);
-            rvfcHandle = null;
-          }
-          if (rafHandle !== null) {
-            window.cancelAnimationFrame(rafHandle);
-            rafHandle = null;
-          }
+          sharingDeadlineRef.current = deadlineMs ?? null;
 
           // 同期的に canvas を「URL 共有中」案内画面に書き換える。
           // これで navigator.share() 経由で Safari がバックグラウンド遷移する前に
@@ -583,10 +598,15 @@ export function useCompositeBroadcastTrack({
           // （setIsSharing(true) → useEffect → ref 更新 → 次の rAF/rVFC、
           //  という非同期パスでは Safari 遷移までに描画が間に合わなかった）
           try {
+            const remainingSec =
+              deadlineMs !== undefined
+                ? Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000))
+                : null;
             drawSharingOverlay(
               ctx!,
               targetResolution.width,
               targetResolution.height,
+              remainingSec,
             );
             const overlay = overlayRef.current;
             if (overlay) {
@@ -603,15 +623,17 @@ export function useCompositeBroadcastTrack({
             console.error("[composite] startSharing 同期描画エラー:", e);
           }
 
-          // 復帰待ちの間も rAF で薄く更新を続ける（フォアグラウンド復帰時に
-          // 即座に renderFrame が回ってカメラ映像に戻れるよう）。
-          rafHandle = window.requestAnimationFrame(renderFrame);
+          // 5/06: rAF 強制を削除し、既存の scheduleNext (rVFC) を継続使用。
+          // 既に pending なハンドル（rvfc/raf）があるならそのまま継続する。
+          // 新規にスケジュールする必要はない（既存のループの中で次の renderFrame
+          // が呼ばれた時に isSharingRef が true なので案内画面が描画される）。
         };
 
         endSharingImplRef.current = () => {
           if (cancelled) return;
           isSharingRef.current = false;
-          // 次の renderFrame で scheduleNext が rVFC ルートに戻すので何もしない
+          sharingDeadlineRef.current = null;
+          // 次の renderFrame で通常のカメラ映像描画に戻る
         };
       } catch (e) {
         if (cancelled) return;
@@ -733,8 +755,8 @@ export function useCompositeBroadcastTrack({
     }
   }, []);
 
-  const startSharing = useCallback(() => {
-    startSharingImplRef.current?.();
+  const startSharing = useCallback((deadlineMs?: number) => {
+    startSharingImplRef.current?.(deadlineMs);
   }, []);
 
   const endSharing = useCallback(() => {
