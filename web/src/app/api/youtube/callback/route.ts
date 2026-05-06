@@ -66,16 +66,40 @@ export async function GET(request: Request) {
     const channelId = channel?.id || null;
     const channelName = channel?.snippet?.title || null;
 
+    // YouTube チャンネル未作成のケースを検出。
+    // Google アカウントを作っただけでは YouTube チャンネルは作られない仕様
+    // （YouTube を初めて使うときに「チャンネルを作成」操作が必要）。
+    // 5/06 オーナー報告: 別 Google ID でログインして OAuth 連携したら
+    // 「連携されました」と表示されるのに マイページでは「未連携」のまま、
+    // という UX バグで気付いた。channelId が null のまま profiles を update
+    // すると、URL クエリ ?youtube=linked で成功表示しつつ DB は未連携状態
+    // になる矛盾が発生していた。
+    if (!channelId) {
+      console.warn(
+        `YouTube callback: no YouTube channel for user ${sessionUser.id}`,
+      );
+      return NextResponse.redirect(
+        new URL("/mypage?youtube=no_channel", request.url),
+      );
+    }
+
+    // refresh_token は初回連携時のみ Google が返す仕様。
+    // 再連携時に null だと既存の refresh_token を null で上書きして
+    // しまうため、null のときは update から除外する。
+    const updatePayload: Record<string, string | null> = {
+      youtube_channel_id: channelId,
+      youtube_channel_name: channelName,
+      youtube_access_token: tokens.access_token ?? null,
+      youtube_linked_at: new Date().toISOString(),
+    };
+    if (tokens.refresh_token) {
+      updatePayload.youtube_refresh_token = tokens.refresh_token;
+    }
+
     // profiles テーブルにYouTube情報を保存
     await admin
       .from("profiles")
-      .update({
-        youtube_channel_id: channelId,
-        youtube_channel_name: channelName,
-        youtube_access_token: tokens.access_token,
-        youtube_refresh_token: tokens.refresh_token,
-        youtube_linked_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq("id", sessionUser.id);
 
     return NextResponse.redirect(
