@@ -119,7 +119,14 @@ export async function createLiveBroadcast(
       },
       status: {
         privacyStatus: metadata.privacy,
-        selfDeclaredMadeForKids: false,
+        // 5/06: COPPA 準拠で true に変更。LIVE SPOtCH は子ども（13歳未満含む）の
+        // スポーツ配信が本質のため、false 宣言だと YouTube AI が「子どもが映って
+        // いるのに madeForKids=false」を検出して自動削除候補にする（実際 5/06 に
+        // テレビ映り込みと併発で動画削除された）。
+        // true 化のデメリット（コメント OFF / レコメンド制限 / 収益化制限 /
+        // パーソナライズ広告 OFF）は LIVE SPOtCH の設計（自社プレイヤー視聴 +
+        // LINE 直接共有モデル）には影響なし。
+        selfDeclaredMadeForKids: true,
       },
       contentDetails: {
         // RTMP データ受信時に自動で testing → live に遷移
