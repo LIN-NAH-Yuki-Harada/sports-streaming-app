@@ -131,12 +131,17 @@ export function CompositeBroadcasterRenderer({
           simulcast: false,
           videoCodec: "h264",
           videoEncoding: {
-            // 5/10: 2.5Mbps → 1.5Mbps に引き下げ。YouTube 推奨 720p30
-            // bitrate (1.5-4 Mbps) の下限。simulcast off と組み合わせて、
-            // 上り変動時の品質安定性を最優先。BAND 等の他プラットフォーム
-            // との比較で「安定 > リアルタイム性」を選んだオーナー判断
-            // （feedback_realtime_user_perception.md / 5/10 確立）。
-            maxBitrate: 1_500_000,
+            // 5/10 (再調整): 1.5Mbps では画質が荒すぎる事案を受けて 2.0Mbps に引き上げ。
+            // 1.5Mbps は「4G 上り余裕がない場所でも止まらない最低値」だったが、
+            // 元素材の bitrate 不足で全視聴経路 (WebRTC subscribe / YouTube iframe) で
+            // 画質が「使い物にならない」レベルに落ちていた。
+            // 2.0Mbps は 4G 体育館で実用的に通る上限値 + simulcast off の効果で、
+            // 5/06 以前の simulcast on 720p 3 レイヤー合計 (~3.15Mbps) より実質軽い。
+            // 視聴側は YouTube iframe 経由 (PR #124) で HLS バッファによる帯域変動
+            // 吸収が効くため、配信者→Cloud 区間の WebRTC でフレーム drop が起きても
+            // YouTube→視聴者区間で安定再生される設計。
+            // 中期計画として B 案 (配信プロトコル TCP 化) で 1080p / 3Mbps 化を予定。
+            maxBitrate: 2_000_000,
             maxFramerate: 30,
           },
         });
