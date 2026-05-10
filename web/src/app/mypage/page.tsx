@@ -10,7 +10,7 @@ import { useToast } from "@/components/toaster";
 import { Logo } from "@/components/logo";
 import { AvatarUploader } from "@/components/avatar-uploader";
 import { createClient } from "@/lib/supabase";
-import { updateProfile } from "@/lib/database";
+import { endBroadcast, updateProfile } from "@/lib/database";
 import { isArchiveEnabled } from "@/lib/archive-flag";
 import { isLiveArchiveEnabled } from "@/lib/live-archive-flag";
 
@@ -44,6 +44,18 @@ function MyPageInner() {
   const [togglingLive, setTogglingLive] = useState(false);
   const archiveFeatureLive = isArchiveEnabled();
   const liveArchiveLive = isLiveArchiveEnabled();
+
+  // ストレイ broadcast (status='live' のまま 30 分以上残ってる) の検出 + 強制終了 UI。
+  // 5/10 ブロックシード大会で endBroadcast 失敗で配信が「LIVE」のまま残るケースが
+  // 発生したのを受けて追加（オーナーが Supabase で手動 DELETE で対処したもの）。
+  const [strandedBroadcasts, setStrandedBroadcasts] = useState<Array<{
+    id: string;
+    share_code: string;
+    home_team: string;
+    away_team: string;
+    started_at: string;
+  }>>([]);
+  const [endingStrandedId, setEndingStrandedId] = useState<string | null>(null);
 
   // YouTube連携後・決済後のリダイレクト処理
   const handledCheckoutRef = useRef<string | null>(null);
@@ -206,6 +218,44 @@ function MyPageInner() {
     setSaving(false);
   };
 
+  // ストレイ broadcast の検出（30 分以上 status='live' のまま残っている自分の配信）。
+  // 配信ページ側の handleEnd / handlePageHide が失敗したケースでも、マイページを
+  // 開いた時点でユーザーが自分で復旧できるようにする。
+  useEffect(() => {
+    if (!user) return;
+    const fetchStranded = async () => {
+      const supabase = createClient();
+      const thirtyMinutesAgo = new Date(
+        Date.now() - 30 * 60 * 1000,
+      ).toISOString();
+      const { data } = await supabase
+        .from("broadcasts")
+        .select("id, share_code, home_team, away_team, started_at")
+        .eq("broadcaster_id", user.id)
+        .eq("status", "live")
+        .lt("started_at", thirtyMinutesAgo)
+        .order("started_at", { ascending: false })
+        .limit(10);
+      setStrandedBroadcasts(data ?? []);
+    };
+    fetchStranded();
+  }, [user]);
+
+  const handleEndStranded = async (broadcastId: string) => {
+    if (!confirm("この配信を強制的に終了しますか？")) return;
+    setEndingStrandedId(broadcastId);
+    const success = await endBroadcast(broadcastId);
+    if (success) {
+      toast.success("配信を終了しました");
+      setStrandedBroadcasts((prev) => prev.filter((b) => b.id !== broadcastId));
+    } else {
+      toast.error(
+        "終了処理に失敗しました。時間を空けて再度お試しいただくか、ヘルプにご連絡ください。",
+      );
+    }
+    setEndingStrandedId(null);
+  };
+
   return (
     <div>
       <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
@@ -216,6 +266,47 @@ function MyPageInner() {
       </div>
 
       <div className="px-5 md:px-8 lg:px-10 pt-4 md:pt-8 pb-20">
+        {/* ストレイ broadcast 警告: status='live' のまま 30 分以上残ってる自分の配信を表示。
+            5/10 の事案を踏まえて追加。配信終了処理の失敗で残った配信を、ユーザーが
+            自分で強制終了できる UI。 */}
+        {!loading && user && strandedBroadcasts.length > 0 && (
+          <div className="mb-6 p-4 sm:p-5 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+            <p className="text-sm font-bold text-amber-400 mb-1">
+              ⚠️ LIVE のまま残っている配信があります
+            </p>
+            <p className="text-[11px] sm:text-xs text-gray-400 mb-3 leading-relaxed">
+              配信終了処理が完了しなかった可能性があります。下のボタンで強制終了できます。
+              （30 分以上前に開始された配信のみ表示しています）
+            </p>
+            <div className="space-y-2">
+              {strandedBroadcasts.map((bc) => (
+                <div
+                  key={bc.id}
+                  className="flex items-center justify-between bg-black/30 rounded p-3 gap-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs sm:text-sm font-medium truncate">
+                      {bc.home_team} vs {bc.away_team}
+                    </p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">
+                      開始: {new Date(bc.started_at).toLocaleString("ja-JP")}
+                      {" / "}コード: {bc.share_code}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleEndStranded(bc.id)}
+                    disabled={endingStrandedId === bc.id}
+                    className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-[11px] sm:text-xs font-semibold px-3 py-1.5 rounded shrink-0 transition"
+                  >
+                    {endingStrandedId === bc.id ? "終了中…" : "終了する"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 読み込み中 */}
         {loading && (
           <div className="flex items-center justify-center py-16">

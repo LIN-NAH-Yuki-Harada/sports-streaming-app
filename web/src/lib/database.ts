@@ -499,32 +499,47 @@ export async function updateBroadcastScore(
 
 export async function endBroadcast(broadcastId: string): Promise<boolean> {
   const supabase = createClient();
-  const { error } = await supabase
-    .from("broadcasts")
-    .update({
-      status: "ended",
-      ended_at: new Date().toISOString(),
-    })
-    .eq("id", broadcastId);
 
-  if (error) {
-    console.error("配信終了エラー:", error.message);
-    return false;
+  // 5/10: 最大 3 回リトライ。ネットワーク不調や Supabase 一時エラーで failed になり
+  // status='live' のまま残るとマイページから配信が消えず、見込み客に「終わってないように
+  // 見える」ストレイ broadcast 事案が発生（5/10 ブロックシード大会試合配信で発生）。
+  // 1 秒間隔で 3 回試行する。3 回失敗しても、マイページのストレイ警告 UI と
+  // cleanupStaleBroadcasts (30 分閾値) で救済される設計。
+  let lastError: string | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { error } = await supabase
+      .from("broadcasts")
+      .update({
+        status: "ended",
+        ended_at: new Date().toISOString(),
+      })
+      .eq("id", broadcastId);
+
+    if (!error) return true;
+    lastError = error.message;
+    if (attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
   }
-  return true;
+
+  console.error("配信終了エラー (3 回試行失敗):", lastError);
+  return false;
 }
 
 // 放置された配信を自動終了する（ページ読み込み時に呼ぶ）
-// 開始から2時間以上経った live 配信のみ対象（配信中のものを誤終了しない）
+// 5/10: 閾値を 2 時間 → 30 分に短縮。endBroadcast 失敗で status='live' のまま残った
+// 配信を、マイページを開いた時点で自動終了させて UX を救済する。試合 1 セット
+// （バレー ≒ 25 分、サッカー前半 ≒ 45 分）の中間値として 30 分。配信中のオーナーが
+// 試合中にマイページを開くケースは想定しにくいため誤終了リスクは低い。
 export async function cleanupStaleBroadcasts(userId: string): Promise<void> {
   const supabase = createClient();
-  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   const { error } = await supabase
     .from("broadcasts")
     .update({ status: "ended", ended_at: new Date().toISOString() })
     .eq("broadcaster_id", userId)
     .eq("status", "live")
-    .lt("started_at", twoHoursAgo);
+    .lt("started_at", thirtyMinutesAgo);
 
   if (error) {
     console.error("古い配信のクリーンアップエラー:", error.message);
