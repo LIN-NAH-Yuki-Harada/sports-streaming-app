@@ -122,15 +122,21 @@ export function CompositeBroadcasterRenderer({
       try {
         const videoPub = await localParticipant.publishTrack(videoTrack, {
           source: Track.Source.Camera,
-          simulcast: true,
+          // 5/10: simulcast off で配信者の上り帯域 + CPU 負荷を削減。
+          // simulcast on（複数解像度の並列 publish）は視聴者の帯域差に
+          // 追随できる利点がある反面、配信者側のエンコーダ負荷が重く、
+          // モバイル 4G の上り変動下では最高レイヤーが頻繁に落ちて画質が
+          // 不安定になる症状が確認された（5/10 ブロックシード大会・
+          // サレジオ vs 小平六）。1 レイヤー固定で帯域確保を優先する。
+          simulcast: false,
           videoCodec: "h264",
           videoEncoding: {
-            // 5/06: 720p 引き下げに合わせて 5Mbps → 2.5Mbps に統一。
-            // YouTube 推奨 720p30 bitrate (1.5-4 Mbps) の中央値。
-            // 配信側で 2.5Mbps、Egress 側で 4Mbps（再エンコード時の余裕分）。
-            // CPU 負荷・発熱・バッテリー消費が 1080p 比で約半減し、
-            // 夏屋外配信や 4G 環境でも止まりにくい設定に。
-            maxBitrate: 2_500_000,
+            // 5/10: 2.5Mbps → 1.5Mbps に引き下げ。YouTube 推奨 720p30
+            // bitrate (1.5-4 Mbps) の下限。simulcast off と組み合わせて、
+            // 上り変動時の品質安定性を最優先。BAND 等の他プラットフォーム
+            // との比較で「安定 > リアルタイム性」を選んだオーナー判断
+            // （feedback_realtime_user_perception.md / 5/10 確立）。
+            maxBitrate: 1_500_000,
             maxFramerate: 30,
           },
         });
