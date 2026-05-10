@@ -267,11 +267,39 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         style={isFakeFullscreen ? undefined : { minHeight: "60vh" }}
       >
         {isWatching && viewerToken && isLive ? (
+          // 視聴者が「自社プレイヤーで見る」を選択中（WebRTC、リアルタイム）
           <LiveKitViewer
             token={viewerToken}
             serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
           />
+        ) : isLive && broadcast.live_youtube_broadcast_id ? (
+          // 配信中 + チームプラン配信（YouTube Live 同時配信あり）→ YouTube Live iframe を
+          // デフォルト視聴経路にする。BAND 同等の視聴安定性を狙うオーナー判断（5/10）に基づき、
+          // 上り帯域変動・simulcast の影響を受けない HLS/DASH 配信を視聴側のデフォルトに。
+          // 5-15 秒の遅延が発生するが、ユーザー認識上「リアルタイム」に含まれる範囲
+          // （feedback_realtime_user_perception.md / 5/10 確立）。リアルタイム性を優先したい
+          // 視聴者は右下のボタンから自社プレイヤー（WebRTC、0.25s 遅延）に切替可能。
+          <>
+            <iframe
+              className="absolute inset-0 w-full h-full"
+              src={`https://www.youtube.com/embed/${broadcast.live_youtube_broadcast_id}?rel=0&autoplay=1`}
+              title={`${broadcast.home_team} vs ${broadcast.away_team} ライブ`}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerPolicy="strict-origin-when-cross-origin"
+              allowFullScreen
+            />
+            {/* リアルタイム視聴に切替（自社プレイヤー / WebRTC）。視聴遅延 0.25s だが
+                配信者の上り帯域次第で画質変動が起きる。デフォルトの YouTube は安定性優先 */}
+            <button
+              onClick={handleStartWatching}
+              className="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 bg-black/60 hover:bg-black/80 text-white text-[10px] sm:text-xs font-medium px-2.5 py-1.5 rounded-md backdrop-blur transition"
+              aria-label="自社プレイヤー（リアルタイム）で見る"
+            >
+              <span aria-hidden="true">⚡</span> リアルタイム視聴に切替
+            </button>
+          </>
         ) : isLive ? (
+          // 配信中 + YouTube 同時配信なし（配信者プラン ¥300 等）→ 自社プレイヤー WebRTC 起動ボタン
           <button
             onClick={handleStartWatching}
             className="flex flex-col items-center gap-3 group"
