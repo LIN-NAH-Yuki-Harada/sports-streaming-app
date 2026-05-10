@@ -414,11 +414,11 @@ function MyPageInner() {
                   <span className="text-[10px] text-amber-400 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5 font-semibold">ベータ</span>
                 </div>
                 <p className="text-xs text-gray-400 leading-relaxed">
-                  <span className="text-white font-medium">チームプラン特典</span> — 配信中、自社プレイヤー（リアルタイム配信）と並行で YouTube Live にもリアルタイム push します。配信終了後、自動的に YouTube アーカイブが残ります。
+                  <span className="text-white font-medium">チームプラン特典</span> — 配信中、自社プレイヤーと並行で YouTube Live にも push します。配信終了後、自動的に YouTube アーカイブが残ります。
                 </p>
                 <ul className="mt-3 space-y-1 text-[11px] text-gray-500">
-                  <li>・自社プレイヤー: 0.25 秒遅延（リアルタイム性重視）</li>
-                  <li>・YouTube Live: 5-15 秒遅延（拡散性 + アーカイブ性重視）</li>
+                  <li>・自社プレイヤー: LIVE SPOtCH のサイト内で視聴</li>
+                  <li>・YouTube Live: 拡散性 + アーカイブ性重視</li>
                   <li>・限定公開（unlisted）— URL を知る人のみ視聴可能</li>
                 </ul>
                 {profile?.plan !== "team" ? (
