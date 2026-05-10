@@ -50,7 +50,7 @@ const FAQ_ITEMS = [
 const LP_TITLE =
   "子どもの試合をスマホでライブ配信｜スポーツ少年団・部活・地域大会対応";
 const LP_DESCRIPTION =
-  "スポーツ少年団・中学部活・高校部活・ジュニアの試合を、保護者のスマホ1台でライブ配信。スコアボード常時表示・低遅延0.25秒・限定公開で安心。サッカー・野球・バスケ・バレー・陸上などあらゆるスポーツ対応。1週間無料クーポン『SPOT1W』配布中。";
+  "スポーツ少年団・中学部活・高校部活・ジュニアの試合を、保護者のスマホ1台でライブ配信。スコアボード常時表示・限定公開で安心。サッカー・野球・バスケ・バレー・陸上などあらゆるスポーツ対応。1週間無料クーポン『SPOT1W』配布中。";
 
 export const metadata: Metadata = {
   title: LP_TITLE,
@@ -70,7 +70,6 @@ export const metadata: Metadata = {
     "野球 ライブ配信",
     "バスケ ライブ配信",
     "限定公開 試合配信",
-    "低遅延 スポーツ配信",
   ],
   alternates: { canonical: "/" },
   openGraph: {
@@ -106,7 +105,7 @@ const SOFTWARE_APP_JSONLD = {
   applicationCategory: "SportsApplication",
   operatingSystem: "Any (Web, iOS, Android PWA)",
   description:
-    "保護者のスマホ1台でスポーツ少年団・部活・地域大会の試合をライブ配信。スコアボード・低遅延・限定公開に対応したUGC型スポーツライブ配信プラットフォーム。",
+    "保護者のスマホ1台でスポーツ少年団・部活・地域大会の試合をライブ配信。スコアボード・限定公開に対応したUGC型スポーツライブ配信プラットフォーム。",
   url: `${SITE_URL}/`,
   image: `${SITE_URL}/opengraph-image.jpg`,
   offers: [
@@ -136,7 +135,7 @@ const SOFTWARE_APP_JSONLD = {
   ],
   featureList: [
     "HDスコアボード常時オーバーレイ表示",
-    "低遅延0.25秒のライブ配信",
+    "スマホ1台でライブ配信",
     "共有コードによる限定公開",
     "LINE ワンタップ共有",
     "サッカー・野球・バスケ・バレー・陸上など全スポーツ対応",
@@ -224,7 +223,7 @@ export default function LandingPage() {
                   <span aria-hidden="true">🔒</span> 限定公開なので安心
                 </span>
                 <span className="inline-flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-full px-3 py-1 text-[11px] text-gray-300">
-                  <span aria-hidden="true">⚡</span> 低遅延 0.25秒
+                  <span aria-hidden="true">📱</span> スマホ1台でOK
                 </span>
                 <span className="inline-flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-full px-3 py-1 text-[11px] text-gray-300">
                   <span aria-hidden="true">📺</span> TV中継品質のスコアボード
@@ -349,10 +348,10 @@ export default function LandingPage() {
         <h2 className="text-lg font-bold mb-6 sm:mb-8">YouTubeライブにはない、試合配信に特化した4つの機能</h2>
         <div className="grid gap-6 sm:gap-8 lg:gap-12 grid-cols-2 lg:grid-cols-4">
           <div>
-            <p className="text-[#e63946] text-xl sm:text-2xl font-black mb-2">0.25秒</p>
-            <p className="text-xs sm:text-sm font-medium mb-1">超低遅延</p>
+            <p className="text-[#e63946] text-xl sm:text-2xl font-black mb-2">スマホ1台</p>
+            <p className="text-xs sm:text-sm font-medium mb-1">機材不要</p>
             <p className="text-[11px] sm:text-xs text-gray-500 leading-relaxed">
-              テレビ放送より速い。ゴールの瞬間を、離れた家族とほぼ同時に。
+              プロ機材なしでスマホ1台。手軽にライブ配信。
             </p>
           </div>
           <div>
