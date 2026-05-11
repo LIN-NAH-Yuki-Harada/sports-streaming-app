@@ -9,21 +9,21 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@livekit/components-react": "^2.9.20",
+    "@livekit/components-react": "^2.9.21",
     "@stripe/stripe-js": "^9.4.0",
-    "@supabase/ssr": "^0.10.2",
+    "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.1",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "googleapis": "^171.4.0",
-    "livekit-client": "^2.18.8",
+    "livekit-client": "^2.18.9",
     "livekit-server-sdk": "^2.15.2",
-    "next": "16.2.4",
+    "next": "16.2.6",
     "qrcode.react": "^4.2.0",
-    "react": "19.2.5",
-    "react-dom": "19.2.5",
-    "resend": "^6.12.2",
-    "stripe": "^22.1.0"
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "resend": "^6.12.3",
+    "stripe": "^22.1.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -31,7 +31,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.4",
+    "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
