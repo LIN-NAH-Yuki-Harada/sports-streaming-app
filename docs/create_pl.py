@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""LIVE SPOtCH 月次PL（3年分）Excel生成 — PPT数値統一版"""
+"""LIVE SPOtCH 月次PL（3年分）Excel生成 — v2 改訂版
+
+変更点 (v1 → v2):
+- ローンチ起点を 2026/6/1 に変更 (Year 1 = 2026/6〜2027/5)
+- LiveKit Cloud Build (¥5,000/月) → Ship (¥7,500/月) 固定費に変更
+- 配信プロトコル TCP 化用の中継 server 費 ¥1,500/月 を新項目で追加
+- 借入着金 2026/5/末 → 返済開始 2026/6/月から
+- 前提条件シートを v2 整合 (ローンチ時期 2026/6/1, LiveKit Ship, TCP中継 server)
+"""
 
 import os, math
 from openpyxl import Workbook
@@ -39,19 +47,20 @@ thick_top    = Border(top=Side(style="medium", color="1E1E2E"), bottom=thin, lef
 NUM_FMT     = '#,##0'
 NUM_FMT_NEG = '#,##0;[Red]▲#,##0'
 
-# ── 月次ラベル ──
+# ── 月次ラベル (v2: 2026/6 ローンチ起点) ──
 months_label = []
-for y, ms in [(2026, range(7, 13)), (2027, range(1, 13)), (2028, range(1, 13)), (2029, range(1, 7))]:
+for y, ms in [(2026, range(6, 13)), (2027, range(1, 13)), (2028, range(1, 13)), (2029, range(1, 6))]:
     for m in ms:
         months_label.append(f"{y}/{m}")
+# 36ヶ月: 2026/6 〜 2029/5
 
 # ══════════════════════════════════════════
 # 成長モデル（PPTの年次目標に合わせて設計）
 # ══════════════════════════════════════════
-# 目標:
-#   Year 1末: 登録 8,000 / 有料 1,000
-#   Year 2末: 登録 35,000 / 有料 4,500
-#   Year 3末: 登録 100,000 / 有料 13,000
+# 目標 (Year サイクル: 6月開始 / 翌年5月終了):
+#   Year 1末 (2027/5): 登録 8,000 / 有料 1,000
+#   Year 2末 (2028/5): 登録 35,000 / 有料 4,500
+#   Year 3末 (2029/5): 登録 100,000 / 有料 13,000
 
 # 月次新規登録ユーザー（合計が年次目標に一致するよう設計）
 growth_y1 = [
@@ -62,25 +71,12 @@ growth_y1 = [
 ]  # 合計: 8,000
 
 growth_y2 = [
-    1800, 2000, 2200,  # M13-15
-    2400, 2600, 2200,  # M16-18
-    2000, 2200, 2800,  # M19-21
-    3000, 3200, 3600,  # M22-24
-]  # 合計: 30,000 → 累計 38,000 だが目標35,000なので微調整
-# 調整: 合計27,000にする
-growth_y2 = [
     1500, 1700, 1900,  # M13-15
     2100, 2300, 2000,  # M16-18
     1800, 2000, 2500,  # M19-21
     2700, 3000, 3500,  # M22-24
 ]  # 合計: 27,000 → 累計 35,000
 
-growth_y3 = [
-    4000, 4500, 5000,  # M25-27
-    5500, 5500, 5000,  # M28-30
-    5500, 6000, 6500,  # M31-33
-    7000, 7500, 8500,  # M34-36
-]  # 合計: 75,000 だが目標は累計100,000なので65,000必要
 growth_y3 = [
     3500, 4000, 4500,  # M25-27
     5000, 5000, 4500,  # M28-30
@@ -133,7 +129,11 @@ for i in range(24, 36):
 rev_total = [rev_individual[i] + rev_team[i] + rev_archive[i] + rev_ad[i] for i in range(36)]
 
 # ── 月次経費 ──
-cost_livekit = [5000 + paid[i] * 15 for i in range(36)]
+# v2: LiveKit Cloud Ship $50/月 = ¥7,500 の固定費 + Egress 超過分（有料会員数比例）
+cost_livekit = [7500 + paid[i] * 15 for i in range(36)]
+
+# v2 新規: TCP化用 中継 server (Cloudflare Workers / Fly.io 等) $10/月 = ¥1,500
+cost_tcp_relay = [1500] * 36
 
 cost_supabase = [0] * 36
 for i in range(36):
@@ -148,7 +148,11 @@ for i in range(36):
 cost_stripe = [int((rev_individual[i] + rev_team[i]) * 0.036) for i in range(36)]
 cost_infra_other = [2000] * 36
 
-cost_infra_total = [cost_livekit[i] + cost_supabase[i] + cost_vercel[i] + cost_stripe[i] + cost_infra_other[i] for i in range(36)]
+cost_infra_total = [
+    cost_livekit[i] + cost_tcp_relay[i] + cost_supabase[i]
+    + cost_vercel[i] + cost_stripe[i] + cost_infra_other[i]
+    for i in range(36)
+]
 
 cost_dev = [0] * 36
 for i in range(36):
@@ -166,7 +170,7 @@ cost_other = [0] * 36
 for i in range(36):
     cost_other[i] = 20000 if i < 12 else (30000 if i < 24 else 50000)
 
-# 借入返済（5年60回、利率2.0%想定）
+# 借入返済（5年60回、利率2.0%想定、2026/5/末着金 → 2026/6/月から返済開始）
 LOAN = 7000000
 RATE_M = 0.02 / 12
 TERM = 60
@@ -205,7 +209,7 @@ def create_sheet(ws, title, start_m, end_m, year_label):
     ws.row_dimensions[1].height = 35
 
     ws.merge_cells('A2:O2')
-    c = ws['A2']; c.value = "LIN-NAH株式会社 ／ 単位: 円"; c.font = f_sub
+    c = ws['A2']; c.value = "LIN-NAH株式会社 ／ 単位: 円 ／ v2改訂版（2026/05/11）"; c.font = f_sub
     ws.row_dimensions[2].height = 20
     ws.row_dimensions[3].height = 8
 
@@ -225,7 +229,8 @@ def create_sheet(ws, title, start_m, end_m, year_label):
         ("subtotal", "売上高 合計", rev_total),
         ("blank", None, None),
         ("section", "売上原価・インフラ費", None),
-        ("item", "LiveKit Cloud（映像配信）", cost_livekit),
+        ("item", "LiveKit Cloud Ship（映像配信）", cost_livekit),
+        ("item", "TCP化中継server（B案・配信安定）", cost_tcp_relay),
         ("item", "Supabase（DB・認証）", cost_supabase),
         ("item", "Vercel（ホスティング）", cost_vercel),
         ("item", "Stripe手数料（3.6%）", cost_stripe),
@@ -316,7 +321,10 @@ def create_sheet(ws, title, start_m, end_m, year_label):
 
     row += 1
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=15)
-    ws.cell(row=row, column=1).value = "※ 本計画は見込み数値です。借入条件: 700万円 / 5年返済 / 年利2.0%想定"
+    ws.cell(row=row, column=1).value = (
+        "※ 本計画は見込み数値です。借入条件: 公庫350万 + 埼玉りそな350万 = 700万円協調融資 / "
+        "5年返済 / 年利2.0%想定 / 2026年5月末着金 → 6月1日正式ローンチ → 6月から返済開始"
+    )
     ws.cell(row=row, column=1).font = f_note
 
     ws.page_setup.orientation = 'landscape'
@@ -327,11 +335,11 @@ def create_sheet(ws, title, start_m, end_m, year_label):
 
 # ── 3シート作成 ──
 ws1 = wb.active
-create_sheet(ws1, "Year1（2026.7-2027.6）", 0, 12, "Year 1: 2026年7月〜2027年6月")
+create_sheet(ws1, "Year1（2026.6-2027.5）", 0, 12, "Year 1: 2026年6月〜2027年5月")
 ws2 = wb.create_sheet()
-create_sheet(ws2, "Year2（2027.7-2028.6）", 12, 24, "Year 2: 2027年7月〜2028年6月")
+create_sheet(ws2, "Year2（2027.6-2028.5）", 12, 24, "Year 2: 2027年6月〜2028年5月")
 ws3 = wb.create_sheet()
-create_sheet(ws3, "Year3（2028.7-2029.6）", 24, 36, "Year 3: 2028年7月〜2029年6月")
+create_sheet(ws3, "Year3（2028.6-2029.5）", 24, 36, "Year 3: 2028年6月〜2029年5月")
 
 
 # ══════════════════════════════════════════
@@ -346,10 +354,10 @@ for ci in range(2, 6):
     ws0.column_dimensions[get_column_letter(ci)].width = 18
 
 ws0.merge_cells('A1:E1')
-ws0['A1'].value = "LIVE SPOtCH  3年間サマリー"; ws0['A1'].font = f_title
+ws0['A1'].value = "LIVE SPOtCH  3年間サマリー（v2）"; ws0['A1'].font = f_title
 ws0.row_dimensions[1].height = 35
 ws0.merge_cells('A2:E2')
-ws0['A2'].value = "LIN-NAH株式会社 ／ 単位: 円"; ws0['A2'].font = f_sub
+ws0['A2'].value = "LIN-NAH株式会社 ／ 単位: 円 ／ 2026/6/1正式ローンチ起点"; ws0['A2'].font = f_sub
 ws0.row_dimensions[2].height = 20; ws0.row_dimensions[3].height = 8
 
 for ci, h in enumerate(["項目", "Year 1", "Year 2", "Year 3", "3年合計"], 1):
@@ -436,7 +444,10 @@ for stype, label, y1, y2, y3 in summary_rows:
 
 row += 1
 ws0.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
-ws0.cell(row=row, column=1).value = "※ 借入条件: 700万円 / 5年返済 / 年利2.0%想定"
+ws0.cell(row=row, column=1).value = (
+    "※ 借入条件: 公庫350万 + 埼玉りそな350万 = 700万円 / 5年 / 年利2.0% / "
+    "2026/5/末 着金 → 2026/6/1 ローンチ → 2026/6 から返済開始"
+)
 ws0.cell(row=row, column=1).font = f_note
 ws0.freeze_panes = 'B5'
 
@@ -444,18 +455,27 @@ ws0.freeze_panes = 'B5'
 # ── 前提条件シート ──
 ws_a = wb.create_sheet("前提条件")
 ws_a.sheet_properties.tabColor = "888899"
-ws_a.column_dimensions['A'].width = 30; ws_a.column_dimensions['B'].width = 40
+ws_a.column_dimensions['A'].width = 30; ws_a.column_dimensions['B'].width = 50
 
 ws_a.merge_cells('A1:B1')
-ws_a['A1'].value = "収支計画の前提条件"; ws_a['A1'].font = f_title
+ws_a['A1'].value = "収支計画の前提条件 (v2 改訂版)"; ws_a['A1'].font = f_title
 ws_a.row_dimensions[1].height = 30
 
 assumptions = [
     ("", ""),
-    ("【料金設定】", ""),
-    ("配信者プラン月額", "¥300"),
-    ("チームプラン月額", "¥500"),
-    ("アーカイブ課金（1ヶ月経過後）", "¥100/回"),
+    ("【ローンチタイムライン (v2)】", ""),
+    ("提案書 v1.0 提出予定", "2026/5/16 (早期提出版)"),
+    ("借入着金予定", "2026/5/末 (公庫350万 + 埼玉りそな350万)"),
+    ("正式ローンチ予定", "2026/6/1"),
+    ("Phase 0 完璧化期", "2026/5/10 - 5/31 (3週)"),
+    ("Phase 1 ローンチ期", "2026/6/1 - 7/31 (8週)"),
+    ("KPI ゲート1: 有料5名", "2026/6/7"),
+    ("KPI ゲート2: 有料20名", "2026/8/6"),
+    ("", ""),
+    ("【料金設定 (v2: 2026/4/30 確定)】", ""),
+    ("配信者プラン月額", "¥300 (ライブ専用、アーカイブなし)"),
+    ("チームプラン月額", "¥500 (+YouTube Live同時配信+アーカイブ+チーム管理)"),
+    ("アーカイブ課金 (1ヶ月経過後)", "¥100/視聴 (チームプラン配信のみ)"),
     ("", ""),
     ("【転換率】", ""),
     ("有料転換率（Year 1前半）", "8〜10%"),
@@ -474,25 +494,30 @@ assumptions = [
     ("Year 3末 登録ユーザー", "100,000人"),
     ("Year 3末 有料会員", "約13,000人"),
     ("", ""),
-    ("【インフラ】", ""),
-    ("LiveKit Cloud", "¥5,000/月 + 有料会員×¥15"),
-    ("Supabase", "¥3,000〜25,000（段階制）"),
-    ("Vercel", "¥2,500〜10,000（段階制）"),
+    ("【インフラ費 (v2: 5/10 LiveKit Ship 昇格反映)】", ""),
+    ("LiveKit Cloud Ship", "¥7,500/月 (Egress 600分含み) + 有料会員×¥15"),
+    ("TCP化中継 server (B 案)", "¥1,500/月 (Cloudflare Workers / Fly.io 等)"),
+    ("Supabase", "¥3,000〜25,000 (段階制)"),
+    ("Vercel", "¥2,500〜10,000 (段階制)"),
     ("Stripe手数料", "売上の3.6%"),
     ("", ""),
     ("【広告収入】", ""),
     ("広告開始時期", "Year 2後半（19ヶ月目〜）"),
     ("初期広告単価", "¥50,000/月〜"),
     ("", ""),
-    ("【借入条件】", ""),
-    ("借入金額", "¥7,000,000"),
+    ("【借入条件 (v2: 協調融資)】", ""),
+    ("総借入金額", "¥7,000,000"),
+    ("内訳: 日本政策金融公庫", "¥3,500,000"),
+    ("内訳: 埼玉りそな銀行", "¥3,500,000"),
     ("返済期間", "5年（60回）"),
     ("想定利率", "年2.0%"),
     (f"月額返済額", f"¥{MONTHLY_REPAY:,}"),
     (f"年間返済額", f"¥{MONTHLY_REPAY * 12:,}"),
+    ("着金予定", "2026年5月末"),
+    ("返済開始", "2026年6月 (ローンチ同月)"),
     ("", ""),
     ("【その他】", ""),
-    ("ローンチ時期", "2026年7月"),
+    ("正式ローンチ時期", "2026年6月1日"),
     ("黒字化目標", "Year 2中盤（18ヶ月目前後）"),
 ]
 
@@ -517,7 +542,7 @@ ws_r.column_dimensions['D'].width = 16
 ws_r.column_dimensions['E'].width = 16
 
 ws_r.merge_cells('A1:E1')
-ws_r['A1'].value = "借入金返済スケジュール（700万円 / 5年 / 年利2.0%）"
+ws_r['A1'].value = "借入金返済スケジュール（700万円 / 5年 / 年利2.0% / 2026/6 開始）"
 ws_r['A1'].font = f_title; ws_r.row_dimensions[1].height = 30
 
 for ci, h in enumerate(["回", "月額返済", "元金", "利息", "残高"], 1):
@@ -546,7 +571,7 @@ for i in range(60):
 
 
 # ── 検証値を出力 ──
-print(f"=== 数値検証 ===")
+print(f"=== 数値検証 (v2 改訂版) ===")
 print(f"Year 1末 登録: {registered[11]:,}人 / 有料: {paid[11]:,}人")
 print(f"Year 2末 登録: {registered[23]:,}人 / 有料: {paid[23]:,}人")
 print(f"Year 3末 登録: {registered[35]:,}人 / 有料: {paid[35]:,}人")
@@ -557,6 +582,12 @@ print(f"Year 1 経費: {ysum(cost_total,0,12):,}円 ({ysum(cost_total,0,12)/1000
 print(f"Year 2 経費: {ysum(cost_total,12,24):,}円 ({ysum(cost_total,12,24)/10000:.0f}万円)")
 print(f"Year 3 経費: {ysum(cost_total,24,36):,}円 ({ysum(cost_total,24,36)/10000:.0f}万円)")
 print(f"月額返済: ¥{MONTHLY_REPAY:,}")
+print(f"")
+print(f"--- v2 増減分析 (v1 → v2) ---")
+print(f"LiveKit 月額: ¥5,000固定 → ¥7,500固定 (+¥2,500)")
+print(f"TCP中継 server: 新規 +¥1,500/月")
+print(f"インフラ費 増加 = ¥4,000/月 × 36ヶ月 = ¥144,000 (3年合計)")
+print(f"ローンチ時期: 2026/7 → 2026/6 (1ヶ月前倒し)")
 
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LIVE_SPOtCH_月次PL.xlsx")
 wb.save(out)

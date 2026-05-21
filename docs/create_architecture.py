@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""LIVE SPOtCH システム構造チャート — シンプル版 + 将来拡張"""
+"""LIVE SPOtCH システム構造チャート v2 — 2026/05/11 改訂版
+
+変更点 (v1 → v2):
+- 配信エンジンを「WebRTC publish (720p/2.0Mbps/simulcast off) + Canvas 焼き込み」に
+- 視聴経路を「WebRTC subscribe + YouTube iframe デフォルト (PR #124)」に
+- LiveKit を Cloud → Cloud Ship ($50/月) に明示 (5/10 昇格反映)
+- TCP 化中継 server (5/末完成見込み / B 案) を新規追加
+- YouTube Live 同時配信 + アーカイブ を「5/01 稼働中」に変更
+- フッターを「2026年5月 v2 改訂版」に
+"""
 
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -80,9 +89,9 @@ rect(Inches(0), Inches(0), Pt(5), Inches(7.5), PRIMARY)
 
 # ═══ タイトル ═══
 txt(Inches(0.6), Inches(0.25), Inches(7), Inches(0.4),
-    "LIVE SPOtCH — システム構造", sz=22, color=DARK, bold=True)
+    "LIVE SPOtCH — システム構造 (v2 改訂版)", sz=22, color=DARK, bold=True)
 txt(Inches(0.6), Inches(0.65), Inches(7), Inches(0.25),
-    "現在の構成と将来の拡張ポイント", sz=11, color=SUB)
+    "5/10 時点の本番稼働構成 + 5月中完璧化計画", sz=11, color=SUB)
 rect(Inches(0.6), Inches(0.95), Inches(1), Pt(3), PRIMARY)
 
 # ════════════════════════════════════════
@@ -94,7 +103,7 @@ rrect(Inches(2.5), Inches(1.2), Inches(3.2), Inches(0.7), P_LIGHT, PRIMARY)
 txt(Inches(2.7), Inches(1.28), Inches(2.8), Inches(0.25),
     "ユーザー（保護者・家族）", sz=13, color=PRIMARY, bold=True, align=PP_ALIGN.CENTER)
 txt(Inches(2.7), Inches(1.55), Inches(2.8), Inches(0.2),
-    "スマホのブラウザからアクセス（アプリDL不要）", sz=8, color=SUB, align=PP_ALIGN.CENTER)
+    "スマホ・PCブラウザからアクセス（アプリDL不要・PWA対応）", sz=8, color=SUB, align=PP_ALIGN.CENTER)
 
 # 矢印: ユーザー → アプリ
 arrow_d(Inches(3.9), Inches(1.95), Inches(0.35), Inches(0.35), GRAY)
@@ -102,15 +111,15 @@ arrow_d(Inches(3.9), Inches(1.95), Inches(0.35), Inches(0.35), GRAY)
 # --- アプリ（中央の大きなボックス） ---
 rrect(Inches(0.6), Inches(2.4), Inches(7.0), Inches(2.7), GRAY_L, DARK)
 txt(Inches(0.9), Inches(2.5), Inches(6.4), Inches(0.3),
-    "LIVE SPOtCH（Next.js / Vercel）", sz=14, color=DARK, bold=True)
+    "LIVE SPOtCH (Next.js / Vercel) — live-spotch.com", sz=14, color=DARK, bold=True)
 
 # アプリ内の機能ブロック（横並び）
 app_features = [
-    ("配信エンジン", "カメラ映像取得\nスコアオーバーレイ\nリアルタイム配信", PRIMARY),
-    ("視聴画面", "共有コードで接続\nスコア自動更新\nLINE共有", BLUE),
-    ("チーム管理", "招待コード\nメンバー権限\nチーム配信", GREEN),
-    ("決済", "Stripe連携\n¥300/¥500月額\n解約・退会", ORANGE),
-    ("YouTube", "OAuth連携\nアーカイブ保存\n（Phase 2-3）", PURPLE),
+    ("配信エンジン", "Canvas焼き込み\nWebRTC publish\n720p/2.0Mbps", PRIMARY),
+    ("視聴画面", "WebRTC subscribe\n＋YouTube iframe\n(PR #124)", BLUE),
+    ("チーム管理", "招待コード\nスケジュール\nメンバー権限", GREEN),
+    ("決済", "Stripe連携\n¥300 / ¥500\n月額サブスク", ORANGE),
+    ("YouTube Live", "同時配信\nアーカイブ自動\n(チームプラン)", PURPLE),
 ]
 for i, (title, desc, ac) in enumerate(app_features):
     x = Inches(0.8 + i * 1.36)
@@ -122,10 +131,9 @@ for i, (title, desc, ac) in enumerate(app_features):
         desc, sz=8, color=SUB, align=PP_ALIGN.CENTER)
 
 # --- 矢印: アプリ → 外部サービス ---
-# 各機能から下の対応サービスへの縦線
 connections = [
-    (Inches(1.39), PRIMARY),   # 配信 → LiveKit
-    (Inches(2.75), BLUE),      # 視聴 → Supabase
+    (Inches(1.39), PRIMARY),   # 配信 → LiveKit Ship
+    (Inches(2.75), BLUE),      # 視聴 → Supabase / YouTube
     (Inches(4.11), GREEN),     # チーム → Supabase
     (Inches(5.47), ORANGE),    # 決済 → Stripe
     (Inches(6.50), PURPLE),    # YouTube → YouTube API
@@ -136,26 +144,34 @@ for x, color in connections:
 # --- 外部サービス ---
 y_svc = Inches(5.35)
 services = [
-    ("LiveKit Cloud", "映像配信基盤", PRIMARY, P_LIGHT),
+    ("LiveKit Cloud Ship", "$50/月・600分含み", PRIMARY, P_LIGHT),
     ("Supabase", "DB・認証・Realtime", BLUE, B_LIGHT),
-    ("Stripe", "決済処理", ORANGE, O_LIGHT),
-    ("YouTube API", "動画保存", PURPLE, P2_LIGHT),
-    ("Vercel", "ホスティング", GREEN, G_LIGHT),
+    ("Stripe", "決済・課金", ORANGE, O_LIGHT),
+    ("YouTube Live API", "同時配信・アーカイブ", PURPLE, P2_LIGHT),
+    ("Vercel", "ホスティング・CDN", GREEN, G_LIGHT),
 ]
 for i, (title, desc, ac, bg) in enumerate(services):
     x = Inches(0.6 + i * 1.42)
     rrect(x, y_svc, Inches(1.24), Inches(0.85), bg, ac)
     txt(x + Inches(0.06), y_svc + Inches(0.1), Inches(1.12), Inches(0.2),
-        title, sz=10, color=ac, bold=True, align=PP_ALIGN.CENTER)
+        title, sz=9, color=ac, bold=True, align=PP_ALIGN.CENTER)
     txt(x + Inches(0.06), y_svc + Inches(0.38), Inches(1.12), Inches(0.3),
         desc, sz=8, color=SUB, align=PP_ALIGN.CENTER)
 
 # Supabaseは2つの機能（視聴+チーム）に紐づくので横線を追加
 rect(Inches(2.75), Inches(5.05), Inches(1.36), Pt(2), BLUE)
 
+# --- 5月中完璧化: TCP 化中継 server (B 案) を点線枠で示す ---
+rrect(Inches(0.6), Inches(6.3), Inches(7.0), Inches(0.55), O_LIGHT, ORANGE)
+txt(Inches(0.8), Inches(6.35), Inches(0.85), Inches(0.45),
+    "5月末\n追加", sz=8, color=ORANGE, bold=True, align=PP_ALIGN.CENTER)
+txt(Inches(1.65), Inches(6.36), Inches(5.85), Inches(0.45),
+    "TCP化中継 server (B案) → 4G環境下の配信品質を BAND 同等に / +$5-20/月 / 5月末完成見込み",
+    sz=9, color=ORANGE, bold=True)
+
 # ═══ ラベル ═══
-txt(Inches(0.6), Inches(6.35), Inches(7), Inches(0.2),
-    "■ 実線 = 現在稼働中の接続    ■ 各色 = 機能と対応サービスの紐付き", sz=8, color=GRAY)
+txt(Inches(0.6), Inches(6.95), Inches(7), Inches(0.2),
+    "■ 実線 = 現在稼働中の接続    ■ オレンジ枠 = 5月中完璧化で追加予定（提案書 v2 / 借入対応）", sz=8, color=GRAY)
 
 
 # ════════════════════════════════════════
@@ -229,12 +245,18 @@ for i, (ver, title, desc, tech, cost, period, ac, bg) in enumerate(extensions):
 # 合計
 rrect(x_r, Inches(7.05), Inches(5.0), Inches(0.35), P_LIGHT, PRIMARY)
 txt(x_r + Inches(0.2), Inches(7.08), Inches(3.5), Inches(0.3),
-    "全拡張の概算合計: 約610〜1,050万円（段階的に投資）", sz=11, color=PRIMARY, bold=True)
+    "全拡張の概算合計: 約610〜1,050万円（Phase 2-3 で段階的に投資）", sz=11, color=PRIMARY, bold=True)
 
 # フッター
 txt(Inches(0.6), Inches(7.2), Inches(7), Inches(0.2),
-    "LIVE SPOtCH  |  LIN-NAH株式会社  |  2026年4月", sz=8, color=GRAY)
+    "LIVE SPOtCH  |  LIN-NAH株式会社  |  2026年5月 v2 改訂版", sz=8, color=GRAY)
 
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LIVE_SPOtCH_構造チャート.pptx")
 prs.save(out)
 print(f"保存完了: {out}")
+print(f"")
+print(f"=== v2 改訂概要 ===")
+print(f"アプリ内機能: 配信エンジン (Canvas + WebRTC publish 720p/2.0Mbps) / 視聴 (WebRTC + YouTube iframe) /")
+print(f"  チーム管理 / 決済 / YouTube Live 同時配信 (5/01 稼働中)")
+print(f"外部サービス: LiveKit Cloud Ship / Supabase / Stripe / YouTube Live API / Vercel")
+print(f"5月中完璧化追加: TCP化中継 server (B案 / +$5-20/月 / 5月末完成見込み)")
