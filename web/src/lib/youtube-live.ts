@@ -129,6 +129,10 @@ export async function createLiveBroadcast(
         selfDeclaredMadeForKids: true,
       },
       contentDetails: {
+        // 自社サイト (live-spotch.com) の watch ページで iframe 埋め込み視聴を
+        // デフォルト経路にしているため必須。未指定だと YouTube は埋め込み再生を
+        // 拒否し、視聴者に「他のウェブサイトでの再生は無効」エラーが出る。
+        enableEmbed: true,
         // RTMP データ受信時に自動で testing → live に遷移
         enableAutoStart: true,
         // RTMP 切断時に自動で live → complete に遷移（アーカイブ自動生成）
