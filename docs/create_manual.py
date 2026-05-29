@@ -163,7 +163,7 @@ vsteps = [
     ("STEP 2", "すぐに観戦スタート", "アプリのインストールは不要です。\nブラウザでログインすれば、すぐに視聴が始まります。"),
 ]
 v_step_w = (W - 80 - 8) / 2
-v_step_h = 60
+v_step_h = 68  # 上下余白の偏り解消（60 だと下に文字が張り付いていた）
 vy = y - v_step_h - 10
 for i, (step, title, desc) in enumerate(vsteps):
     x = 40 + i * (v_step_w + 8)
