@@ -343,9 +343,25 @@ function TeamPageInner() {
     }
   };
 
-  // ローディング
+  // ローディング: 完全白画面だと遷移直後にユーザーが「アプリが固まった？」と感じるので、
+  // ヘッダー（ロゴ + タイトル）だけ即表示してページシェルを示す。
   if (loading) {
-    return <div className="min-h-screen" />;
+    return (
+      <div>
+        <div
+          className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3"
+          style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+        >
+          <div className="flex items-center justify-between">
+            <Logo />
+            <h1 className="text-sm font-bold text-gray-400">チーム</h1>
+          </div>
+        </div>
+        <div className="flex items-center justify-center py-32">
+          <div className="w-5 h-5 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+        </div>
+      </div>
+    );
   }
 
   // 未ログイン

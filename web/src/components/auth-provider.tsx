@@ -62,10 +62,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // 安全策: 3秒後に loading を強制解除
+    // 安全策: 800ms 後に loading を強制解除。
+    // 通常 INITIAL_SESSION は数十ms 以内に届くので、3秒は worst case の
+    // 体感もっさり (= 描画ゲートしているページが最大3秒空白) を悪化させていた。
+    // 800ms は localStorage 読み込み+rehydrate の現実的上限を確保しつつ、
+    // 失敗時の体感を 1 秒未満に抑える。
     const timeout = setTimeout(() => {
       setLoading(false);
-    }, 3000);
+    }, 800);
 
     return () => {
       subscription.unsubscribe();
