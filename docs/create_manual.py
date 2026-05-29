@@ -89,9 +89,9 @@ c.drawString(40, y - 50, "どこにいても見届ける。")
 
 c.setFillColor(GRAY1)
 c.setFont(JP, 9)
-c.drawString(40, y - 72, "スポーツ少年団や部活、地域の大会など、テレビでは取り上げられない子どもたちの試合。")
-c.drawString(40, y - 86, "保護者の方がスマホで撮影し、共有URLを送るだけで、ご家族はどこからでも観戦できます。")
-c.drawString(40, y - 100, "アプリのインストールは不要。視聴は無料でご利用いただけます。")
+c.drawString(40, y - 72, "スポーツ少年団や部活、地域大会の試合を、")
+c.drawString(40, y - 86, "保護者の方がスマホで撮影してライブ配信。")
+c.drawString(40, y - 100, "ご家族はアプリ不要・無料で観戦できます。")
 
 # 右上の無料カード
 c.setFillColor(HexColor("#1a0608"))
@@ -256,26 +256,30 @@ trust = [
     ("スケジュール", "次の試合の予定をチームで共有。\n配信担当もワンタップで決められます。"),
     ("安心のセキュリティ", "Stripe決済・2段階認証に対応。\nMade for Kids 対応で安全な配信。"),
 ]
-t_w = (W - 80 - 30) / 6
-t_h = 50
+t_w = (W - 80 - 16) / 3
+t_h = 52
+t_gap_v = 8
 ty = y - t_h - 10
 for i, (title, desc) in enumerate(trust):
-    x = 40 + i * (t_w + 6)
+    row = i // 3
+    col = i % 3
+    x = 40 + col * (t_w + 8)
+    y_card = ty - row * (t_h + t_gap_v)
     c.setFillColor(CARD)
-    c.roundRect(x, ty, t_w, t_h, 4, stroke=0, fill=1)
+    c.roundRect(x, y_card, t_w, t_h, 4, stroke=0, fill=1)
     c.setStrokeColor(BORDER)
     c.setLineWidth(0.4)
-    c.roundRect(x, ty, t_w, t_h, 4, stroke=1, fill=0)
+    c.roundRect(x, y_card, t_w, t_h, 4, stroke=1, fill=0)
     c.setFillColor(ACCENT)
-    c.setFont(JP, 8)
-    c.drawString(x + 8, ty + t_h - 14, title)
+    c.setFont(JP, 9)
+    c.drawString(x + 10, y_card + t_h - 16, title)
     c.setFillColor(GRAY1)
-    c.setFont(JP, 6.5)
+    c.setFont(JP, 8)
     for j, line in enumerate(desc.split("\n")):
-        c.drawString(x + 8, ty + t_h - 27 - j * 9, line)
+        c.drawString(x + 10, y_card + t_h - 30 - j * 11, line)
 
-# 推奨環境
-ey = ty - 16
+# 推奨環境（カード 2 段の下に配置）
+ey = ty - (t_h + t_gap_v) - 16
 c.setFillColor(GRAY2)
 c.setFont(JP, 7)
 c.drawString(40, ey, "推奨環境: iOS 15+ / Android 10+ / Chrome・Safari 最新版 / Wi-Fi または 4G/5G 回線推奨")
