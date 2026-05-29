@@ -961,10 +961,23 @@ function BroadcastPageInner() {
   }, [isLiveScreen]);
 
   // ===== 読み込み中 =====
+  // ヘッダー（ロゴ + タイトル）を即表示してページシェル感を出す。
+  // 認証チェック中の空白画面で「アプリが固まった？」と感じさせない。
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-32">
-        <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+      <div>
+        <div
+          className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3"
+          style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+        >
+          <div className="flex items-center justify-between">
+            <Logo />
+            <h1 className="text-sm font-bold text-gray-400">配信</h1>
+          </div>
+        </div>
+        <div className="flex items-center justify-center py-32">
+          <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+        </div>
       </div>
     );
   }
