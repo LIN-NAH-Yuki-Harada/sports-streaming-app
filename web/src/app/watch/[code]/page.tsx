@@ -272,55 +272,70 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             token={viewerToken}
             serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
           />
-        ) : isLive && broadcast.live_youtube_broadcast_id ? (
-          // 配信中 + チームプラン配信（YouTube Live 同時配信あり）→ YouTube Live iframe を
-          // デフォルト視聴経路にする。BAND 同等の視聴安定性を狙うオーナー判断（5/10）に基づき、
-          // 上り帯域変動・simulcast の影響を受けない HLS/DASH 配信を視聴側のデフォルトに。
-          // 5-15 秒の遅延が発生するが、ユーザー認識上「リアルタイム」に含まれる範囲
-          // （feedback_realtime_user_perception.md / 5/10 確立）。リアルタイム性を優先したい
-          // 視聴者は右下のボタンから自社プレイヤー（WebRTC、0.25s 遅延）に切替可能。
-          <>
-            <iframe
-              className="absolute inset-0 w-full h-full"
-              src={`https://www.youtube.com/embed/${broadcast.live_youtube_broadcast_id}?rel=0&autoplay=1`}
-              title={`${broadcast.home_team} vs ${broadcast.away_team} ライブ`}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              referrerPolicy="strict-origin-when-cross-origin"
-              allowFullScreen
-            />
-            {/* リアルタイム視聴に切替（自社プレイヤー / WebRTC）。視聴遅延 0.25s だが
-                配信者の上り帯域次第で画質変動が起きる。デフォルトの YouTube は安定性優先 */}
+        ) : isLive ? (
+          // 配信中 → 自社プレイヤー（WebRTC）が常時デフォルト。
+          // 過去（5/10 PR #124）はチームプラン配信を YouTube iframe デフォルトにしていたが、
+          // selfDeclaredMadeForKids:true の YouTube Live は他サイトへの埋め込みが
+          // 構造的に許可されず iframe で「他のウェブサイトでの再生は無効」エラーが出るため、
+          // 自社プレイヤーをデフォルトに戻し、YouTube 視聴はサブ経路としてリンク化する。
+          // （5/28 PR #134 で enableEmbed:true を試したが Made for Kids と衝突して
+          // broadcast 作成が全件失敗 → 5/30 hotfix PR #140 で revert 済）
+          <div className="flex flex-col items-center gap-4 group">
             <button
               onClick={handleStartWatching}
-              className="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 bg-black/60 hover:bg-black/80 text-white text-[10px] sm:text-xs font-medium px-2.5 py-1.5 rounded-md backdrop-blur transition"
-              aria-label="自社プレイヤー（リアルタイム）で見る"
+              className="flex flex-col items-center gap-3"
+              aria-label="自社プレイヤーで視聴開始"
             >
-              <span aria-hidden="true">⚡</span> リアルタイム視聴に切替
+              <div className="w-16 h-16 rounded-full bg-[#e63946] flex items-center justify-center group-hover:bg-[#d62836] transition shadow-lg shadow-[#e63946]/20">
+                <svg className="w-6 h-6 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </div>
+              <span className="text-xs text-gray-400">タップして視聴</span>
             </button>
-          </>
-        ) : isLive ? (
-          // 配信中 + YouTube 同時配信なし（配信者プラン ¥300 等）→ 自社プレイヤー WebRTC 起動ボタン
-          <button
-            onClick={handleStartWatching}
-            className="flex flex-col items-center gap-3 group"
-          >
-            <div className="w-16 h-16 rounded-full bg-[#e63946] flex items-center justify-center group-hover:bg-[#d62836] transition shadow-lg shadow-[#e63946]/20">
-              <svg className="w-6 h-6 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z" />
+            {broadcast.live_youtube_broadcast_id && (
+              <a
+                href={`https://www.youtube.com/watch?v=${broadcast.live_youtube_broadcast_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-300 transition"
+              >
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                </svg>
+                YouTubeで見る（別タブ）
+              </a>
+            )}
+          </div>
+        ) : broadcast.youtube_video_id ? (
+          // 配信終了 + YouTube アーカイブあり
+          // ※ Made for Kids 配信のアーカイブは iframe 埋め込みが拒否されるため、
+          //   YouTube で開くリンクをメインの導線として置く（iframe での再生失敗を回避）。
+          <div className="flex flex-col items-center gap-5 px-6 max-w-sm text-center">
+            <div className="w-16 h-16 rounded-full bg-[#1a0608] border border-[#e63946]/40 flex items-center justify-center">
+              <svg className="w-7 h-7 text-[#e63946]" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
               </svg>
             </div>
-            <span className="text-xs text-gray-400">タップして視聴</span>
-          </button>
-        ) : broadcast.youtube_video_id ? (
-          // 配信終了 + YouTube アーカイブあり → iframe 埋め込み
-          <iframe
-            className="absolute inset-0 w-full h-full"
-            src={`https://www.youtube.com/embed/${broadcast.youtube_video_id}?rel=0`}
-            title={`${broadcast.home_team} vs ${broadcast.away_team} アーカイブ`}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            referrerPolicy="strict-origin-when-cross-origin"
-            allowFullScreen
-          />
+            <div>
+              <p className="text-sm font-semibold text-white">YouTube にアーカイブがあります</p>
+              <p className="mt-1.5 text-[11px] text-gray-500 leading-relaxed">
+                試合のアーカイブは YouTube 上で公開されています。<br />
+                下のボタンから YouTube を開いてご視聴ください。
+              </p>
+            </div>
+            <a
+              href={`https://www.youtube.com/watch?v=${broadcast.youtube_video_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-5 py-2.5 rounded-md transition"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+              </svg>
+              YouTube で視聴する
+            </a>
+          </div>
         ) : (
           <div className="text-center px-6 max-w-md">
             <p className="text-sm text-gray-400">この配信は終了しました</p>
