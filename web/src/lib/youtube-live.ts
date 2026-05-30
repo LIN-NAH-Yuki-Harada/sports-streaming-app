@@ -129,10 +129,15 @@ export async function createLiveBroadcast(
         selfDeclaredMadeForKids: true,
       },
       contentDetails: {
-        // 自社サイト (live-spotch.com) の watch ページで iframe 埋め込み視聴を
-        // デフォルト経路にしているため必須。未指定だと YouTube は埋め込み再生を
-        // 拒否し、視聴者に「他のウェブサイトでの再生は無効」エラーが出る。
-        enableEmbed: true,
+        // ⚠️ enableEmbed: true は付けないこと。
+        // selfDeclaredMadeForKids: true（5/06 PR #120 以降）の Made for Kids 配信は
+        // YouTube が embed を構造的に拒否するため、両方 true にすると liveBroadcasts.insert
+        // が "Embed setting was invalid" で 400 拒否され、配信が完全に作成できなくなる。
+        // 5/28 PR #134 で enableEmbed: true を付けた結果、それ以降のチームプラン配信が
+        // 全件 YouTube broadcast 作成失敗 → アーカイブ未生成、という障害が発生した。
+        // 5/30 hotfix で再度 enableEmbed を取り除き、視聴者 iframe で出る
+        // 「他のウェブサイトでの再生は無効」表記は別経路（自社プレイヤー経由）で吸収する。
+        //
         // RTMP データ受信時に自動で testing → live に遷移
         enableAutoStart: true,
         // RTMP 切断時に自動で live → complete に遷移（アーカイブ自動生成）
