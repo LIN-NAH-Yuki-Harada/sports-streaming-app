@@ -498,6 +498,24 @@ function BroadcastPageInner() {
     trialSnapshotRef.current = 0;
 
     try {
+      // 念のため、自分の「まだ生きている配信」（前回が異常終了して裏に残った
+      // ゴースト含む）をサーバー側で全部終了してから新規開始する。これをしないと
+      // 1 台の端末が映像を 2 本同時にエンコードして発熱・シャットダウンする事故が
+      // 起きる（2026-06-07 実発生）。best-effort（失敗しても続行）。
+      try {
+        const cleanupClient = createClient();
+        const { data: cleanupSession } = await cleanupClient.auth.getSession();
+        const cleanupToken = cleanupSession.session?.access_token;
+        if (cleanupToken) {
+          await fetch("/api/livekit/broadcast/cleanup-stale", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${cleanupToken}` },
+          });
+        }
+      } catch (e) {
+        console.warn("古い配信の終了に失敗（続行します）:", e);
+      }
+
       // DBに保存（共有コードは自動生成・衝突時リトライ付き）
       const broadcast = await createBroadcast({
         userId: user.id,
