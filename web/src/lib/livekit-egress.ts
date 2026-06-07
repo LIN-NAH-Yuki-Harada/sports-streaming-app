@@ -65,6 +65,21 @@ export function getRoomServiceClient(): RoomServiceClient {
 }
 
 /**
+ * 指定ルームをサーバー側から強制削除する（参加者を全員切断）。
+ *
+ * 配信者が画面を閉じる / 端末がスリープする等でクライアント側の停止処理が
+ * 走らないと、publish が裏で残り続ける（ゴースト配信）。新規配信開始時に
+ * これを呼ぶと、古いルームの参加者（= 端末）を強制切断でき、1 台の端末が
+ * 映像を 2 本同時にエンコードして発熱・シャットダウンする事故を防げる。
+ *
+ * 存在しないルーム名でも LiveKit は例外を投げないため、呼び出し側で
+ * 特別な存在チェックは不要。
+ */
+export async function deleteRoom(roomName: string): Promise<void> {
+  await getRoomServiceClient().deleteRoom(roomName);
+}
+
+/**
  * Egress の MP4 出力設定（Supabase Storage を S3 互換として書き込み）。
  * filepath は LiveKit が `{time}` を ISO8601 で展開する。実際に書き込まれた
  * 最終 key は webhook の EgressInfo.fileResults[0].filename を正として保存する
