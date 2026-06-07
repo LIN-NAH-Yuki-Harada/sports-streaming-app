@@ -362,17 +362,13 @@ function PricingPageInner() {
           </div>
 
           {/* 配信者プラン */}
-          <div
-            className={`rounded-lg border p-5 md:p-6 relative flex flex-col ${
-              hasValidPromo
-                ? "border-[#e63946] bg-[#e63946]/10 shadow-lg shadow-[#e63946]/10"
-                : "border-[#e63946]/40 bg-[#e63946]/5"
-            }`}
-          >
-            <span className="absolute -top-2 right-4 bg-[#e63946] text-white text-[10px] font-bold px-2 py-0.5 rounded">
-              {hasValidPromo ? `${promoState.trialDays}日無料` : "人気"}
-            </span>
-            <p className="text-xs text-[#e63946] mb-1">配信者プラン</p>
+          <div className="rounded-lg border border-white/10 p-5 md:p-6 relative flex flex-col">
+            {hasValidPromo && (
+              <span className="absolute -top-2 right-4 bg-white/15 text-white text-[10px] font-bold px-2 py-0.5 rounded">
+                {promoState.trialDays}日無料
+              </span>
+            )}
+            <p className="text-xs text-gray-400 mb-1">配信者プラン</p>
             <p className="text-2xl font-black">
               ¥300<span className="text-sm font-normal text-gray-400">/月</span>
             </p>
@@ -396,7 +392,7 @@ function PricingPageInner() {
               <button
                 onClick={() => handleSubscribe("broadcaster")}
                 disabled={loadingPlan !== null || authLoading}
-                className="mt-5 w-full rounded-md bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold py-2.5 transition disabled:opacity-50"
+                className="mt-5 w-full rounded-md bg-white/10 hover:bg-white/15 text-white text-xs font-semibold py-2.5 transition disabled:opacity-50"
               >
                 {loadingPlan === "broadcaster"
                   ? "処理中..."
@@ -412,19 +408,19 @@ function PricingPageInner() {
             )}
           </div>
 
-          {/* チームプラン */}
-          <div
-            className={`rounded-lg border p-5 md:p-6 flex flex-col ${
-              hasValidPromo
-                ? "border-white/40 bg-white/10"
-                : "border-white/20 bg-white/5"
-            }`}
-          >
-            <p className="text-xs text-white mb-1">チームプラン</p>
+          {/* チームプラン（イチオシ） */}
+          <div className="rounded-lg border border-[#e63946] bg-[#e63946]/5 shadow-lg shadow-[#e63946]/10 p-5 md:p-6 relative flex flex-col">
+            <span className="absolute -top-2 right-4 bg-[#e63946] text-white text-[10px] font-bold px-2 py-0.5 rounded">
+              {hasValidPromo ? `${promoState.trialDays}日無料` : "人気"}
+            </span>
+            <p className="text-xs text-[#e63946] font-semibold mb-1">チームプラン</p>
             <p className="text-2xl font-black">
               ¥500<span className="text-sm font-normal text-gray-400">/月</span>
             </p>
             <p className="text-xs text-gray-400 mt-1">チーム代表・コーチ向け・記録運用</p>
+            <p className="mt-2 text-[11px] text-[#e63946] font-semibold leading-relaxed">
+              迷ったらこちら。配信者プランの全機能込みで、断然お得。
+            </p>
             <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-400 flex-1">
               <li>✓ 配信者プランの全機能</li>
               <li>✓ チーム作成・メンバー招待</li>
@@ -447,7 +443,7 @@ function PricingPageInner() {
               <button
                 onClick={() => handleSubscribe("team")}
                 disabled={loadingPlan !== null || authLoading}
-                className="mt-5 w-full rounded-md bg-white hover:bg-gray-200 text-black text-xs font-semibold py-2.5 transition disabled:opacity-50"
+                className="mt-5 w-full rounded-md bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold py-2.5 transition disabled:opacity-50"
               >
                 {loadingPlan === "team"
                   ? "処理中..."
