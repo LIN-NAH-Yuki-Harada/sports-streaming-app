@@ -80,7 +80,7 @@ type RVFCHandle = number;
  * 追記する。背景時は描画ループが止まるので背景滞在中は表示が固定されるが、
  * フォアグラウンド時（シェアシート表示直後など）は毎フレーム更新される。
  */
-function drawSharingOverlay(
+export function drawSharingOverlay(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
