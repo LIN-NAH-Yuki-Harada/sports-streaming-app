@@ -337,18 +337,15 @@ function BroadcastPageInner() {
 
   const pointLabel = getPointLabel();
 
-  // スコアボード焼き込み（発熱対策 Phase 1-A・2026-06-08）:
-  // 当面は全プラン ON を既定に戻す（hotfix 2026-06-08）。
-  // 理由: 焼き込み OFF の生配信経路（BroadcasterRenderer）には、LINE 共有時の接続維持
-  // （Safari バックグラウンド中に canvas の最終フレーム＝「URL 共有中」案内を出し続けて
-  // WebRTC publish を切らさない仕組み・sharingStartRef）が未実装。共有でカメラ track が
-  // 止まり「配信者の接続を待っています」になる不具合があるため、生配信経路のハードニング
-  // 完了まで既定 OFF 化は保留する。
-  // `?burn=0` でのテスト（視聴側オーバーレイ・フェイク全画面の確認）は引き続き可能。
-  // ※ Phase 1-A の本命（プランで OFF 既定化）は、生配信経路に共有キープアライブを
-  //   実装してから再投入する。
+  // スコアボード焼き込み（発熱対策・2026-06-08 既定 OFF 化）:
+  // 既定を「焼き込みOFF（生配信）」にする。スマホは合成せずカメラ生映像を送るだけ＝
+  // 発熱が下がり画質も向上する。スコアは
+  //   - 自社プレイヤー: 視聴側 CSS オーバーレイ（+ iPhone フェイク全画面）
+  //   - YouTube: LiveKit Cloud 側でサーバー合成（live/start の 1-D 経路）
+  // で表示する。共有時の publish 断は useShareKeepalive で保護済み（生配信経路にも実装）。
+  // 緊急ロールバックは `?burn=1` で焼き込みON（合成→配信）に戻せる。
   const burnParam = searchParams.get("burn");
-  const burnScoreboard = burnParam !== "0";
+  const burnScoreboard = burnParam === "1";
   const broadcastResolutionRef = useRef<ReturnType<typeof pickBroadcastResolution> | null>(null);
   if (broadcastResolutionRef.current === null) {
     broadcastResolutionRef.current = pickBroadcastResolution();
