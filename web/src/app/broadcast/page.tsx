@@ -338,14 +338,17 @@ function BroadcastPageInner() {
   const pointLabel = getPointLabel();
 
   // スコアボード焼き込み（発熱対策 Phase 1-A・2026-06-08）:
-  // 焼き込み（毎フレーム canvas 合成 → 再エンコード）は発熱の主因のため、原則 OFF にして
-  // 視聴側 CSS オーバーレイ + iPhone フェイク全画面でスコアを見せる方針へ転換。
-  // 例外: ¥500 チームプランは YouTube Live 同時配信でスコアを映像に乗せる必要があるため
-  // 当面 ON を維持（Phase 1-D でサーバー側焼き込みに移行後、ここも OFF 化予定）。
-  // `?burn=1` / `?burn=0` で明示上書き可（テスト・緊急ロールバック用）。
+  // 当面は全プラン ON を既定に戻す（hotfix 2026-06-08）。
+  // 理由: 焼き込み OFF の生配信経路（BroadcasterRenderer）には、LINE 共有時の接続維持
+  // （Safari バックグラウンド中に canvas の最終フレーム＝「URL 共有中」案内を出し続けて
+  // WebRTC publish を切らさない仕組み・sharingStartRef）が未実装。共有でカメラ track が
+  // 止まり「配信者の接続を待っています」になる不具合があるため、生配信経路のハードニング
+  // 完了まで既定 OFF 化は保留する。
+  // `?burn=0` でのテスト（視聴側オーバーレイ・フェイク全画面の確認）は引き続き可能。
+  // ※ Phase 1-A の本命（プランで OFF 既定化）は、生配信経路に共有キープアライブを
+  //   実装してから再投入する。
   const burnParam = searchParams.get("burn");
-  const burnScoreboard =
-    burnParam === "1" ? true : burnParam === "0" ? false : profile?.plan === "team";
+  const burnScoreboard = burnParam !== "0";
   const broadcastResolutionRef = useRef<ReturnType<typeof pickBroadcastResolution> | null>(null);
   if (broadcastResolutionRef.current === null) {
     broadcastResolutionRef.current = pickBroadcastResolution();
