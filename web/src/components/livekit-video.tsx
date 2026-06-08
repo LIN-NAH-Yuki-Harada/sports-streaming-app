@@ -14,6 +14,7 @@ import { Track, ConnectionState, AudioPresets } from "livekit-client";
 import { CompositeBroadcasterRenderer } from "@/components/composite-broadcaster-renderer";
 import { BroadcastHealthBadges } from "@/components/broadcast-health-badges";
 import { useAudioCompressor } from "@/lib/use-audio-compressor";
+import { useShareKeepalive } from "@/lib/use-share-keepalive";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import type { BroadcastResolution } from "@/lib/user-agent";
 
@@ -45,9 +46,15 @@ export function useReconnectDuration(connectionState: ConnectionState): number {
 function BroadcasterRenderer({
   onConnected,
   onDisconnected,
+  startSharingRef,
+  endSharingRef,
 }: {
   onConnected?: () => void;
   onDisconnected?: () => void;
+  // 共有キープアライブ（発熱対策 Phase 1-A）。生配信経路でも LINE 共有時に配信が
+  // 切れないよう、共有中だけ canvas の「📱URL共有中」トラックに差し替える。
+  startSharingRef?: React.MutableRefObject<((deadlineMs?: number) => void) | null>;
+  endSharingRef?: React.MutableRefObject<(() => void) | null>;
 }) {
   const connectionState = useConnectionState();
   const tracks = useTracks([Track.Source.Camera]);
@@ -55,6 +62,18 @@ function BroadcasterRenderer({
   const viewerCount = Math.max(0, participants.length - 1); // 自分を除く
   const prevState = useRef(connectionState);
   const reconnectSeconds = useReconnectDuration(connectionState);
+
+  // 共有キープアライブの実装を親（broadcast/page.tsx）の ref に橋渡しする。
+  // 合成経路（CompositeBroadcasterRenderer）と同じ contract。
+  const { startSharing, endSharing } = useShareKeepalive();
+  useEffect(() => {
+    if (startSharingRef) startSharingRef.current = startSharing;
+    if (endSharingRef) endSharingRef.current = endSharing;
+    return () => {
+      if (startSharingRef) startSharingRef.current = null;
+      if (endSharingRef) endSharingRef.current = null;
+    };
+  }, [startSharingRef, endSharingRef, startSharing, endSharing]);
 
   // 配信者マイクに音割れ防止コンプレッサーをアタッチ（応援の歓声でクリッピングする問題対策）
   // 5/04 BAND 化により無効化:
@@ -474,6 +493,8 @@ export function LiveKitBroadcaster({
         <BroadcasterRenderer
           onConnected={onConnected}
           onDisconnected={onDisconnected}
+          startSharingRef={startSharingRef}
+          endSharingRef={endSharingRef}
         />
       </LiveKitRoom>
     </div>
