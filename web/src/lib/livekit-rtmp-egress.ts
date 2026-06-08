@@ -197,6 +197,61 @@ export async function startRtmpEgress(
 }
 
 /**
+ * RTMP push を **カスタムテンプレート合成** で開始する（発熱対策 Phase 1-D）。
+ *
+ * 焼き込みOFF（生配信）の配信者は、スコアを映像に焼き込まずカメラ生映像だけを publish する
+ * （＝スマホ無負荷・冷たい）。YouTube にはスコア入り映像を出したいので、合成を LiveKit Cloud
+ * 側で行う:
+ *   RoomCompositeEgress + customBaseUrl で自前テンプレート `/egress-template` を読み込ませ、
+ *   LiveKit Cloud の Chrome が「カメラ映像 ＋ スコアボード（Supabase Realtime）」を合成 →
+ *   その画面を RTMP で YouTube へ push する。
+ *
+ * 通常の RTMP（startRtmpEgress）は TrackComposite（生 track 直送り）なので、スコアを
+ * 重ねられない。本関数は必ず RoomComposite（仮想 Chrome 合成）を使う。
+ *
+ * @param roomName LiveKit ルーム名（= share_code）
+ * @param broadcastId テンプレートに渡す broadcast id（スコア取得・描画に使用）
+ * @param rtmpIngestUrl YouTube ingest URL
+ * @param streamKey YouTube stream key
+ */
+export async function startRtmpEgressWithScoreboardTemplate(
+  roomName: string,
+  broadcastId: string,
+  rtmpIngestUrl: string,
+  streamKey: string,
+): Promise<string> {
+  const trimmedUrl = rtmpIngestUrl.replace(/\/+$/, "");
+  const fullUrl = `${trimmedUrl}/${streamKey}`;
+
+  const streamOutput = new StreamOutput({
+    protocol: StreamProtocol.RTMP,
+    urls: [fullUrl],
+  });
+
+  const siteUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com"
+  ).replace(/\/+$/, "");
+  const customBaseUrl = `${siteUrl}/egress-template?broadcastId=${broadcastId}`;
+
+  const info = await getEgressClient().startRoomCompositeEgress(
+    roomName,
+    streamOutput,
+    {
+      layout: "single-speaker",
+      encodingOptions: RTMP_HIGH_QUALITY_ENCODING,
+      customBaseUrl,
+      audioOnly: false,
+      videoOnly: false,
+    },
+  );
+  console.log(
+    `[rtmp-egress] スコア合成テンプレート RoomCompositeEgress 開始 ` +
+      `(egressId=${info.egressId}, broadcastId=${broadcastId})`,
+  );
+  return info.egressId;
+}
+
+/**
  * RTMP push 中の Egress を停止する。
  *
  * 既存 livekit-egress.ts の停止処理と同じく EgressClient.stopEgress を呼ぶだけ。

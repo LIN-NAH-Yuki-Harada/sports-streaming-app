@@ -621,7 +621,15 @@ function BroadcastPageInner() {
       : isArchiveEnabled()
         ? "/api/livekit/egress/start"
         : null;
-    if (archiveStartPath && burnScoreboard && broadcastRef.current) {
+    // Live 中継（新パイプライン）は焼き込み有無に関わらず起動する（発熱対策 Phase 1-D）:
+    //   - 焼き込みON  → live/start 内で TrackComposite（焼き込み済み track 直送り）
+    //   - 焼き込みOFF → live/start 内で RoomComposite + スコア合成テンプレートで YouTube へ
+    // 旧アーカイブ（egress/start・録画→アップロード）は従来どおり焼き込みパスのみ対象。
+    if (
+      archiveStartPath &&
+      broadcastRef.current &&
+      (useLivePipeline || burnScoreboard)
+    ) {
       const broadcastId = broadcastRef.current.id;
       (async () => {
         try {

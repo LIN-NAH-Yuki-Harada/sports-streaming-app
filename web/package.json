@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.21",
+    "@livekit/egress-sdk": "^0.2.1",
     "@stripe/stripe-js": "^9.7.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.2",

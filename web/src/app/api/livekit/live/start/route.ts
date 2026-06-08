@@ -6,7 +6,10 @@ import {
   transitionToComplete,
 } from "@/lib/youtube-live";
 import { getOAuthClientForProfile } from "@/lib/youtube-upload";
-import { startRtmpEgress } from "@/lib/livekit-rtmp-egress";
+import {
+  startRtmpEgress,
+  startRtmpEgressWithScoreboardTemplate,
+} from "@/lib/livekit-rtmp-egress";
 import { assertRtmpEgressEnv } from "@/lib/livekit-egress";
 import { getAdminClient, getUser } from "@/lib/supabase-admin";
 
@@ -77,7 +80,7 @@ export async function POST(request: Request) {
   const { data: broadcast, error: bErr } = await admin
     .from("broadcasts")
     .select(
-      "id, share_code, broadcaster_id, status, sport, home_team, away_team, tournament, venue, started_at, live_egress_id",
+      "id, share_code, broadcaster_id, status, sport, home_team, away_team, tournament, venue, started_at, live_egress_id, scoreboard_burned_in",
     )
     .eq("id", broadcastId)
     .single();
@@ -228,12 +231,24 @@ export async function POST(request: Request) {
   // TrackCompositeEgress で配信者の publish track を引くために使う。
   let egressId: string;
   try {
-    egressId = await startRtmpEgress(
-      broadcast.share_code,
-      user.id,
-      rtmpUrl,
-      streamKey,
-    );
+    if (broadcast.scoreboard_burned_in === false) {
+      // 焼き込みOFF（生配信）: スマホはスコアを焼かないので、LiveKit Cloud 側で
+      // カメラ＋スコアを合成（RoomComposite + customBaseUrl テンプレート）して YouTube へ。
+      egressId = await startRtmpEgressWithScoreboardTemplate(
+        broadcast.share_code,
+        broadcast.id,
+        rtmpUrl,
+        streamKey,
+      );
+    } else {
+      // 焼き込みON（従来）: スコアは映像に焼き込み済みなので TrackComposite 直送り。
+      egressId = await startRtmpEgress(
+        broadcast.share_code,
+        user.id,
+        rtmpUrl,
+        streamKey,
+      );
+    }
   } catch (err) {
     await safeTransitionToComplete(liveBroadcastId, oauth2Client);
     const message = err instanceof Error ? err.message : "Unknown error";
