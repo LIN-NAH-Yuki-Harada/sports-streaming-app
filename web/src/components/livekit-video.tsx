@@ -472,9 +472,16 @@ export function LiveKitBroadcaster({
             channelCount: 2,
           },
           publishDefaults: {
-            simulcast: true,
+            // 2026-06-08: simulcast OFF に変更（発熱対策 Phase 1-A の安定化）。
+            // simulcast ON（720p/360p/180p の3段階同時エンコード）は変動の大きい 4G 上りで
+            // 高レイヤーの送出失敗→ドロップ→再試行を繰り返し（thrashing）、ジャミジャミ
+            // （ブロックノイズ）+ カクつきが数分続いて収束が異常に遅い症状が出る。
+            // 焼き込み（合成）経路は同じ理由で既に simulcast OFF。生配信経路も 1 段階固定に
+            // 揃えて、レイヤーの取り合いを無くし収束を速くする + エンコーダ負荷（=発熱）も削減。
+            simulcast: false,
             videoCodec: "h264",
             videoEncoding: {
+              // 単層 2.5Mbps。変動下で更に不安定なら 2.0Mbps（合成経路の実績値）へ下げる。
               maxBitrate: 2_500_000,
               maxFramerate: 30,
             },
