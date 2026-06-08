@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "LIVE SPOtCH 配信",
+    "slug": "mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.linnah.spotch",
+      "infoPlist": {
+        "NSCameraUsageDescription": "試合をライブ配信するためにカメラを使用します",
+        "NSMicrophoneUsageDescription": "試合音声を配信するためにマイクを使用します"
+      }
+    },
+    "android": {
+      "package": "com.linnah.spotch",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-dev-client",
+      [
+        "@livekit/react-native-expo-plugin",
+        {
+          "android": { "audioType": "communication" },
+          "ios": { "enableMultitaskingCameraAccess": false }
+        }
+      ],
+      "@config-plugins/react-native-webrtc"
+    ]
+  }
+}
