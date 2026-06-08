@@ -7,20 +7,32 @@
  * その合成を **配信スマホではなく LiveKit Cloud の Chrome（Egress）側でやる**ため、
  * このページを RoomComposite Egress の customBaseUrl テンプレートとして読み込ませる。
  *
- * 構成（最終形）:
- *   - 背景: LiveKit ルームの配信者カメラ映像（フルスクリーン）
+ * 構成:
+ *   - 背景: LiveKit ルームの配信者カメラ映像（フルスクリーン <video>）＋ 音声（<audio>）
  *   - 前面: スコアボード（Supabase Realtime で更新・drawScoreboard で焼き込み版と同じ絵）
- *   → Egress がこのページを録画/RTMP push するので、スマホ無負荷でスコア入り映像になる。
+ *   → Egress がこのページ（映像＋音声＋スコア）を録画/RTMP push するので、スマホ無負荷で
+ *     スコア入り映像が YouTube に出る。
  *
- * 本コミット（PoC 第1段）: まず「Egress Chrome が Supabase Realtime からスコアを受け取り
- * drawScoreboard で描けるか」を単体検証できる形にする。カメラ映像レイヤーと Egress 起動
- * シグナリング（EgressHelper）は次段で追加する。
- * 単体テスト: ブラウザで /egress-template?broadcastId=<id> を開き、配信のスコアを変更すると
- * リアルタイムで反映されることを確認する（背景は黒・カメラ無し）。
+ * 起動の流れ（Egress 実行時）:
+ *   LiveKit が customBaseUrl?broadcastId=...&url=<ws>&token=<recorder token>&layout=... を開く。
+ *   EgressHelper から url/token を取り、recorder として room に connect → トラック subscribe →
+ *   描画準備ができたら EgressHelper.startRecording()。配信者退室で自動終了。
+ *
+ * 単体テスト（url/token が無いとき）: room には繋がず、スコアボードのみ黒背景に描画する
+ * （Realtime 反映の確認用）。/egress-template?broadcastId=<id> をブラウザで開けば見える。
  */
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import {
+  Room,
+  RoomEvent,
+  Track,
+  type RemoteTrack,
+  type RemoteTrackPublication,
+  type RemoteParticipant,
+} from "livekit-client";
+import EgressHelper from "@livekit/egress-sdk";
 import { createClient } from "@/lib/supabase";
 import { BROADCAST_PUBLIC_COLUMNS, type Broadcast } from "@/lib/database";
 import { drawScoreboard, type ScoreboardState } from "@/lib/scoreboard-canvas";
@@ -42,6 +54,8 @@ function EgressTemplateInner() {
 
   const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // 配信情報の初回取得
   useEffect(() => {
@@ -86,8 +100,60 @@ function EgressTemplateInner() {
     };
   }, [broadcastId]);
 
+  // LiveKit ルーム接続（Egress 実行時のみ。url/token は EgressHelper が query から取る）。
+  useEffect(() => {
+    let url = "";
+    let token = "";
+    try {
+      url = EgressHelper.getLiveKitURL();
+      token = EgressHelper.getAccessToken();
+    } catch {
+      // 単体テスト（egress 外）では url/token が無い → room 接続はスキップしてスコアのみ描画。
+      return;
+    }
+    if (!url || !token) return;
+
+    const room = new Room({ adaptiveStream: false, dynacast: false });
+
+    const attach = (track: RemoteTrack) => {
+      if (track.kind === Track.Kind.Video && videoRef.current) {
+        track.attach(videoRef.current);
+      } else if (track.kind === Track.Kind.Audio && audioRef.current) {
+        track.attach(audioRef.current);
+      }
+    };
+
+    room.on(
+      RoomEvent.TrackSubscribed,
+      (track: RemoteTrack, _pub: RemoteTrackPublication, _p: RemoteParticipant) => {
+        attach(track);
+      },
+    );
+
+    (async () => {
+      try {
+        await room.connect(url, token);
+        EgressHelper.setRoom(room);
+        // 既に publish 済みのトラックも attach（接続前に来ていた分）。
+        room.remoteParticipants.forEach((p) => {
+          p.trackPublications.forEach((pub) => {
+            if (pub.track) attach(pub.track);
+          });
+        });
+        // 描画パイプライン（canvas/video）が整ったら録画開始を通知。
+        EgressHelper.startRecording();
+      } catch (e) {
+        console.error("[egress-template] room 接続失敗:", e);
+      }
+    })();
+
+    return () => {
+      room.disconnect();
+    };
+  }, []);
+
   // 描画ループ: スコア変更 or 経過時間（毎秒）で drawScoreboard を再描画。
-  // 背景は透明にしてカメラ映像（将来レイヤー）が透ける状態にする。
+  // 背景は透明にしてカメラ映像（<video>）が透ける。
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -138,7 +204,24 @@ function EgressTemplateInner() {
         overflow: "hidden",
       }}
     >
-      {/* TODO(1-D 次段): ここに LiveKit ルームの配信者カメラ映像を全面表示する。 */}
+      {/* 配信者カメラ映像（Egress 実行時に LiveKit から attach される） */}
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "contain",
+          backgroundColor: "#000",
+        }}
+      />
+      {/* 配信者音声（Egress がページ音声を録る。muted にしない） */}
+      <audio ref={audioRef} autoPlay />
+      {/* スコアボード（前面・背景透明） */}
       <canvas
         ref={canvasRef}
         width={EGRESS_W}
