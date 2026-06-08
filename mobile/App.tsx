@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useKeepAwake } from "expo-keep-awake";
 import {
   AudioSession,
   LiveKitRoom,
@@ -41,6 +42,8 @@ export default function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [shareCode, setShareCode] = useState<string | null>(null);
+  // 配信終了処理の二重実行ガード（停止ボタン と onDisconnected が両方発火しうるため）
+  const endedRef = useRef(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -63,9 +66,19 @@ export default function App() {
     if (error) setMessage("ログイン失敗: " + error.message);
   }, [email, password]);
 
+  // 配信レコードを終了状態に戻す（失敗時/停止時のゴースト残り防止）
+  const cleanupBroadcast = useCallback(async (code: string | null) => {
+    if (!code) return;
+    await supabase
+      .from("broadcasts")
+      .update({ status: "ended", ended_at: new Date().toISOString() })
+      .eq("share_code", code);
+  }, []);
+
   const handleStart = useCallback(async () => {
     setBusy(true);
     setMessage(null);
+    let createdCode: string | null = null;
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const session = sessionData.session;
@@ -94,6 +107,7 @@ export default function App() {
         setBusy(false);
         return;
       }
+      createdCode = code;
 
       const res = await fetch(SITE_URL + "/api/livekit/token", {
         method: "POST",
@@ -111,33 +125,39 @@ export default function App() {
       const json = await res.json();
       if (!res.ok || !json.token) {
         setMessage("トークン取得エラー: " + (json.error ?? res.status));
+        await cleanupBroadcast(createdCode).catch(() => {});
         setBusy(false);
         return;
       }
 
       await AudioSession.startAudioSession();
+      endedRef.current = false;
       setToken(json.token);
       setShareCode(code);
       setPhase("live");
     } catch (e) {
       setMessage("開始エラー: " + (e instanceof Error ? e.message : String(e)));
+      await AudioSession.stopAudioSession().catch(() => {});
+      await cleanupBroadcast(createdCode).catch(() => {});
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [cleanupBroadcast]);
 
-  const handleStop = useCallback(async () => {
-    await AudioSession.stopAudioSession().catch(() => {});
-    if (shareCode) {
-      await supabase
-        .from("broadcasts")
-        .update({ status: "ended", ended_at: new Date().toISOString() })
-        .eq("share_code", shareCode);
-    }
-    setToken(null);
-    setShareCode(null);
-    setPhase("ready");
-  }, [shareCode]);
+  // 配信終了（停止ボタン / 接続エラー / 切断 のいずれからも呼ばれる。二重実行は endedRef でガード）
+  const finishLive = useCallback(
+    async (msg: string | null) => {
+      if (endedRef.current) return;
+      endedRef.current = true;
+      await AudioSession.stopAudioSession().catch(() => {});
+      await cleanupBroadcast(shareCode).catch(() => {});
+      setToken(null);
+      setShareCode(null);
+      if (msg) setMessage(msg);
+      setPhase("ready");
+    },
+    [shareCode, cleanupBroadcast]
+  );
 
   if (phase === "checking") {
     return (
@@ -149,8 +169,16 @@ export default function App() {
 
   if (phase === "live" && token) {
     return (
-      <LiveKitRoom serverUrl={LIVEKIT_URL} token={token} connect={true} audio={true} video={true}>
-        <LiveView shareCode={shareCode} onStop={handleStop} />
+      <LiveKitRoom
+        serverUrl={LIVEKIT_URL}
+        token={token}
+        connect={true}
+        audio={true}
+        video={true}
+        onError={(e) => finishLive("配信エラー: " + (e?.message ?? "接続に失敗しました"))}
+        onDisconnected={() => finishLive("配信が切断されました（電波 / 時間切れの可能性）")}
+      >
+        <LiveView shareCode={shareCode} onStop={() => finishLive(null)} />
       </LiveKitRoom>
     );
   }
@@ -202,6 +230,7 @@ export default function App() {
 }
 
 function LiveView({ shareCode, onStop }: { shareCode: string | null; onStop: () => void }) {
+  useKeepAwake(); // 配信中は画面をスリープさせない（長時間の発熱テスト対策）
   const tracks = useTracks([Track.Source.Camera]);
   const cam = tracks.find((t) => isTrackReference(t) && t.participant.isLocal) ?? tracks[0];
 
