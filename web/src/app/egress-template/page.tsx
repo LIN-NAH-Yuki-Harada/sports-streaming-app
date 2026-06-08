@@ -57,6 +57,20 @@ function EgressTemplateInner() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Google Translate のバーが Egress の Chrome に出て映像に写り込むのを防ぐ。
+  // <meta name="google" content="notranslate"> + translate=no で翻訳プロンプトを抑止。
+  useEffect(() => {
+    document.documentElement.setAttribute("translate", "no");
+    const meta = document.createElement("meta");
+    meta.name = "google";
+    meta.content = "notranslate";
+    document.head.appendChild(meta);
+    return () => {
+      meta.remove();
+      document.documentElement.removeAttribute("translate");
+    };
+  }, []);
+
   // 配信情報の初回取得
   useEffect(() => {
     if (!broadcastId) return;

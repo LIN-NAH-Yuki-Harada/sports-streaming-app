@@ -9,6 +9,7 @@ type Variant = "full" | "wide" | "normal" | "text";
 
 function getVariant(pathname: string): Variant {
   if (pathname === "/") return "full"; // LP はフル幅
+  if (pathname.startsWith("/egress-template")) return "full"; // Egress 合成テンプレ（全画面・余白なし）
   if (TEXT_PATHS.some((p) => pathname.startsWith(p))) return "text";
   if (pathname === "/discover") return "wide";
   if (WIDE_PREFIXES.some((p) => pathname.startsWith(p))) return "wide";
