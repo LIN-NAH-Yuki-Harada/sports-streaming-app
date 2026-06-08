@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getBroadcastByCode, type Broadcast } from "@/lib/database";
 import { createClient } from "@/lib/supabase";
 import { LiveKitViewer } from "@/components/livekit-video";
+import { ViewerScoreboardOverlay } from "@/components/viewer-scoreboard-overlay";
 import { Logo } from "@/components/logo";
 import { ShareButtons } from "@/components/share-buttons";
 import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
@@ -20,8 +21,13 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [viewerToken, setViewerToken] = useState<string | null>(null);
   const [isWatching, setIsWatching] = useState(false);
   const [videoPaused, setVideoPaused] = useState(false);
+  // 焼き込み OFF の配信は、スコアが映像に乗っていないので視聴側 CSS オーバーレイで表示する。
+  // その場合 iPhone は「動画ネイティブ全画面」だと HTML オーバーレイが消えるため、
+  // フェイク全画面（CSS）に切り替える（allowVideoFallback=false）。
+  // 焼き込みありの従来配信（既定 true）は従来どおりネイティブ全画面を許可。
+  const scoreboardBurnedIn = broadcast?.scoreboard_burned_in ?? true;
   const { stageRef, isFullscreen, isFakeFullscreen, toggleFullscreen } =
-    useStageFullscreen<HTMLDivElement>();
+    useStageFullscreen<HTMLDivElement>({ allowVideoFallback: scoreboardBurnedIn });
 
   // ステージ内の <video> 要素の一時停止状態を追従。
   // LiveKit 再接続で video 要素が再生成された場合に備えて、現在 attach 済みの要素を
@@ -89,9 +95,12 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     fetchBroadcast();
   }, [code]);
 
-  // 配信経過時間は配信者側で映像に焼き込み済み（scoreboard-canvas.ts）。
-  // 視聴者側 CSS オーバーレイは廃止したのでここでの計算は不要。
-  // （履歴: 2026-04-25 一度 CSS 表示したが、iOS 純正全画面で見えないため焼き込みに統一）
+  // スコア表示の出し分け（発熱対策 Phase 1-A・2026-06-08）:
+  // - 焼き込みあり配信（scoreboard_burned_in=true・従来/¥500）: スコアは映像に焼き込み済み
+  //   → 視聴側オーバーレイ不要。
+  // - 焼き込み OFF 配信（¥300 等）: スコアは映像に乗らない → ViewerScoreboardOverlay を重ねる。
+  //   iPhone 全画面で消えないよう、上で allowVideoFallback=false（フェイク全画面）にしている。
+  // （履歴: 2026-04-25 に一度 CSS を廃止し焼き込みへ統一したが、発熱対策で CSS 経路を再導入）
 
   // リアルタイム更新: Supabase Realtime でスコア変更を受信
   useEffect(() => {
@@ -268,10 +277,15 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       >
         {isWatching && viewerToken && isLive ? (
           // 視聴者が「自社プレイヤーで見る」を選択中（WebRTC、リアルタイム）
-          <LiveKitViewer
-            token={viewerToken}
-            serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
-          />
+          <>
+            <LiveKitViewer
+              token={viewerToken}
+              serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
+            />
+            {/* 焼き込み OFF の配信はスコアを CSS オーバーレイで重ねる（発熱対策 Phase 1-A）。
+                焼き込みありの配信は映像にスコアが乗っているので描画しない（二重表示防止）。 */}
+            {!scoreboardBurnedIn && <ViewerScoreboardOverlay broadcast={broadcast} />}
+          </>
         ) : isLive ? (
           // 配信中 → 自社プレイヤー（WebRTC）が常時デフォルト。
           // 過去（5/10 PR #124）はチームプラン配信を YouTube iframe デフォルトにしていたが、
@@ -437,7 +451,8 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
           </button>
         )}
 
-        {/* 配信時間は映像に焼き込み済み（scoreboard-canvas.ts）。CSS オーバーレイは廃止 */}
+        {/* スコア/経過時間は、焼き込みあり配信では映像内、焼き込み OFF 配信では
+            ViewerScoreboardOverlay（ステージ内に重畳）で表示する。 */}
 
         {/* 右下: コントロール群（視聴中のみ表示） */}
         {isWatching && viewerToken && (
