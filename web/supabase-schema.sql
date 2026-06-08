@@ -146,7 +146,12 @@ create table public.broadcasts (
   period text default '前半',
   status text default 'live' check (status in ('live', 'ended')),
   started_at timestamptz default now(),
-  ended_at timestamptz
+  ended_at timestamptz,
+  -- スコアが映像に焼き込まれているか（発熱対策 Phase 1-A）。
+  -- false の配信は視聴側で CSS オーバーレイ描画 + iPhone フェイク全画面に切替。
+  -- 既定 true = 後方互換（従来どおり焼き込みあり扱い）。
+  -- 詳細: supabase-migration-broadcasts-scoreboard-burned-in.sql
+  scoreboard_burned_in boolean not null default true
 );
 
 alter table public.broadcasts enable row level security;

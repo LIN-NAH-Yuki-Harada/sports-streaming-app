@@ -46,6 +46,9 @@ export type Broadcast = {
   status: "live" | "ended";
   started_at: string;
   ended_at: string | null;
+  // スコアが映像に焼き込まれているか（発熱対策 Phase 1-A）。
+  // false の配信は視聴側で CSS オーバーレイを描画し iPhone はフェイク全画面に切替。
+  scoreboard_burned_in: boolean;
   // YouTube アーカイブ（Sprint A〜C）
   youtube_video_id: string | null;
   youtube_upload_status:
@@ -79,7 +82,7 @@ export type Broadcast = {
 export const BROADCAST_PUBLIC_COLUMNS =
   "id, share_code, broadcaster_id, team_id, sport, home_team, away_team, " +
   "tournament, venue, home_score, away_score, home_sets, away_sets, period, " +
-  "status, started_at, ended_at, youtube_video_id, youtube_upload_status, " +
+  "status, started_at, ended_at, scoreboard_burned_in, youtube_video_id, youtube_upload_status, " +
   "live_youtube_broadcast_id, live_status";
 
 // ===== プロフィール =====
@@ -415,6 +418,9 @@ export async function createBroadcast(params: {
   venue?: string;
   period: string;
   teamId?: string;
+  // スコアを映像に焼き込むか。false の場合は視聴側 CSS オーバーレイで表示する
+  // （発熱対策 Phase 1-A）。未指定時は後方互換で true（焼き込みあり）。
+  scoreboardBurnedIn?: boolean;
 }): Promise<Broadcast | null> {
   const supabase = createClient();
 
@@ -439,6 +445,7 @@ export async function createBroadcast(params: {
         away_score: 0,
         status: "live",
         team_id: params.teamId || null,
+        scoreboard_burned_in: params.scoreboardBurnedIn ?? true,
       })
       .select(BROADCAST_PUBLIC_COLUMNS)
       .single();

@@ -337,9 +337,15 @@ function BroadcastPageInner() {
 
   const pointLabel = getPointLabel();
 
-  // スコアボード焼き込み: 2026-04-25 検証完了後、デフォルト ON に切替（PR #28→#29 経由）。
-  // 緊急時は `?burn=0` で旧経路（LiveKit 自動 publish + 視聴側 CSS オーバーレイ）にロールバック可能。
-  const burnScoreboard = searchParams.get("burn") !== "0";
+  // スコアボード焼き込み（発熱対策 Phase 1-A・2026-06-08）:
+  // 焼き込み（毎フレーム canvas 合成 → 再エンコード）は発熱の主因のため、原則 OFF にして
+  // 視聴側 CSS オーバーレイ + iPhone フェイク全画面でスコアを見せる方針へ転換。
+  // 例外: ¥500 チームプランは YouTube Live 同時配信でスコアを映像に乗せる必要があるため
+  // 当面 ON を維持（Phase 1-D でサーバー側焼き込みに移行後、ここも OFF 化予定）。
+  // `?burn=1` / `?burn=0` で明示上書き可（テスト・緊急ロールバック用）。
+  const burnParam = searchParams.get("burn");
+  const burnScoreboard =
+    burnParam === "1" ? true : burnParam === "0" ? false : profile?.plan === "team";
   const broadcastResolutionRef = useRef<ReturnType<typeof pickBroadcastResolution> | null>(null);
   if (broadcastResolutionRef.current === null) {
     broadcastResolutionRef.current = pickBroadcastResolution();
@@ -526,6 +532,7 @@ function BroadcastPageInner() {
         venue: venue.trim() || undefined,
         period: periods[0],
         teamId: selectedTeamId || undefined,
+        scoreboardBurnedIn: burnScoreboard,
       });
 
       if (broadcast) {
