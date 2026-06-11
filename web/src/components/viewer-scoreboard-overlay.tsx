@@ -60,6 +60,19 @@ export function ViewerScoreboardOverlay({ broadcast }: { broadcast: Broadcast })
             <span className="tabular-nums font-medium">{broadcast.period}</span>
           </div>
         </div>
+        {broadcast.point_label && (
+          <div className="mt-1.5">
+            <span
+              className={`inline-block rounded px-2 py-0.5 text-xs sm:text-sm font-black shadow-lg ${
+                broadcast.point_label === "マッチポイント"
+                  ? "bg-[#e63946] text-white"
+                  : "bg-[#f4a300] text-black"
+              }`}
+            >
+              {broadcast.point_label}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 右上: 大会名 / 競技 */}
