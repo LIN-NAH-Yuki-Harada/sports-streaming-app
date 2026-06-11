@@ -40,6 +40,8 @@ export type Broadcast = {
   home_sets: number;
   away_sets: number;
   set_results: { home: number; away: number }[];
+  // セットポイント/マッチポイント表示（配信者アプリが書き込み・null/未設定で非表示）
+  point_label?: string | null;
   tournament: string | null;
   venue: string | null;
   period: string;
@@ -81,7 +83,7 @@ export type Broadcast = {
 // youtube_video_id / youtube_upload_status は視聴 UI の YouTube iframe 切替判定に使う。
 export const BROADCAST_PUBLIC_COLUMNS =
   "id, share_code, broadcaster_id, team_id, sport, home_team, away_team, " +
-  "tournament, venue, home_score, away_score, home_sets, away_sets, period, " +
+  "tournament, venue, home_score, away_score, home_sets, away_sets, period, point_label, " +
   "status, started_at, ended_at, scoreboard_burned_in, youtube_video_id, youtube_upload_status, " +
   "live_youtube_broadcast_id, live_status";
 
