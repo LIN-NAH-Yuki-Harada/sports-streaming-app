@@ -51,6 +51,7 @@ import {
   sweepGhostBroadcasts,
   startLiveStream,
   stopLiveStream,
+  fetchLiveYoutubeId,
 } from "../lib/broadcasts";
 import {
   type Plan,
@@ -472,6 +473,36 @@ export function BroadcastScreen() {
     }
   }, [phase, plan, trialRemainingAtStart, elapsed, finishLive]);
 
+  // YouTube ID 読み戻し: live/start の応答が電波で届かなくても、サーバーがDBに書く
+  // live_youtube_broadcast_id をポーリングして取得し、共有リンク/表示を確実に出す。
+  useEffect(() => {
+    if (phase !== "live") return;
+    if (!youtubeRequestedRef.current) return;
+    if (liveYoutubeId) return; // 既に取得済み（応答 or 前回ポーリング）
+    const bid = broadcastIdRef.current;
+    if (!bid) return;
+    let cancelled = false;
+    let tries = 0;
+    const id = setInterval(async () => {
+      tries += 1;
+      if (tries > 20) {
+        clearInterval(id);
+        return;
+      } // 最大 ~60 秒
+      const ytId = await fetchLiveYoutubeId(bid).catch(() => null);
+      if (cancelled) return;
+      if (ytId) {
+        clearInterval(id);
+        setLiveYoutubeId(ytId);
+        setYoutubeReadyAt((prev) => prev || Date.now() + 15000);
+      }
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [phase, liveYoutubeId]);
+
   // セット/ゲーム制(バレー/バドミントン/卓球): 「次へ」= 現得点を集計→セット数加算→0-0リセット→次の番号へ
   const handleNextSet = useCallback(() => {
     const r = advanceSet({ homeSets, awaySets, setResults }, homeScore, awayScore);
@@ -524,8 +555,21 @@ export function BroadcastScreen() {
           finishLive("配信エラー: " + (e?.message ?? "接続に失敗しました"));
         }}
         onDisconnected={() => {
-          if (remountingRef.current) return; // 意図的な作り直し中は終了させない
-          finishLive("配信が切断されました（電波 / 時間切れの可能性）");
+          if (remountingRef.current) return; // 既に作り直し中
+          if (endedRef.current) return; // 停止ボタン等で終了処理中の切断は無視
+          // WiFi↔5G切替や瞬断での切断 → すぐ終了せず接続を作り直して同じ配信を再開（視聴URL不変）。
+          // 20秒以内に onConnected が来なければ終了（視聴者を宙ぶらりんにしない）。
+          remountingRef.current = true;
+          setLiveKey((k) => k + 1);
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = setTimeout(() => {
+            if (remountingRef.current) {
+              remountingRef.current = false;
+              finishLive(
+                "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
+              );
+            }
+          }, 20000);
         }}
       >
         <LiveView
@@ -897,17 +941,19 @@ function LiveView({
   const watchUrl = `${SITE_URL}/watch/${shareCode ?? ""}`;
   const share = useCallback(async () => {
     try {
-      // YouTube同時配信が起動済みかつウォームアップ完了後のみ YouTube版リンクを併記する。
+      // YouTube同時配信が起動していれば YouTube リンクを併記する。
+      // YouTube は「配信後そのままアーカイブとして残る」ため、視聴者が後から開いても見られる
+      // ＝見逃しゼロのリンクとして案内する（オーナー要望 2026-06-13）。
       // url と message 両方に URL を入れると iOS で URL が二重になるため message のみ。
       let message = `試合をライブ配信中！\n${watchUrl}`;
-      if (youtubeShareUrl && Date.now() >= youtubeReadyAt) {
-        message += `\n\n📺 YouTube版\n${youtubeShareUrl}`;
+      if (youtubeShareUrl) {
+        message += `\n\n📺 YouTubeでの視聴はこちら（配信後のアーカイブもこちらで確認できます）\n${youtubeShareUrl}`;
       }
       await Share.share({ message });
     } catch {
       // 共有シートを閉じただけ等は無視
     }
-  }, [watchUrl, youtubeShareUrl, youtubeReadyAt]);
+  }, [watchUrl, youtubeShareUrl]);
 
   const confirmStop = useCallback(() => {
     Alert.alert("配信を停止しますか？", "視聴者に配信が終了します。", [

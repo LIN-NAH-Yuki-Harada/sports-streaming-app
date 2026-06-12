@@ -55,9 +55,9 @@ export async function createBroadcast(args: {
 export async function startLiveStream(
   broadcastId: string,
 ): Promise<{ liveBroadcastId: string | null }> {
-  // 弱電波で応答が返らないと配信中ずっと宙ぶらりんになるため 20 秒でタイムアウト
+  // live/start は YouTube broadcast/stream作成→bind→Egress起動で10-20秒かかるため余裕をもって45秒
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 20_000);
+  const t = setTimeout(() => ctrl.abort(), 45_000);
   try {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
@@ -80,6 +80,21 @@ export async function startLiveStream(
   } finally {
     clearTimeout(t);
   }
+}
+
+// 配信の live_youtube_broadcast_id を DB から読む（live/start の応答が電波で届かなくても
+// YouTube IDを確実に取得するため）。live_youtube_broadcast_id はクライアントSELECT可な列。
+export async function fetchLiveYoutubeId(
+  broadcastId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("live_youtube_broadcast_id")
+    .eq("id", broadcastId)
+    .single();
+  if (error || !data) return null;
+  return (data as { live_youtube_broadcast_id: string | null })
+    .live_youtube_broadcast_id;
 }
 
 // YouTube同時配信を停止（Egress停止→YouTube enableAutoStopで自動 complete＝アーカイブ化）。
