@@ -195,7 +195,7 @@ export function BroadcastScreen() {
       } else {
         setTrialRemainingAtStart(0);
       }
-    })();
+    })().catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -394,8 +394,9 @@ export function BroadcastScreen() {
       await AudioSession.stopAudioSession().catch(() => {});
       if (shareCode) await endBroadcast(shareCode).catch(() => {});
       // YouTube同時配信を停止（Egress停止→enableAutoStopでアーカイブ化）。全終了経路を通る finishLive に集約。
+      // await しない（弱電波でも停止UIを固めない）。停止し損ねても webhook/cron/次回開始時の掃除で回収される。
       if (broadcastIdRef.current) {
-        await stopLiveStream(broadcastIdRef.current).catch(() => {});
+        void stopLiveStream(broadcastIdRef.current).catch(() => {});
       }
       liveStartedRef.current = false;
       setLiveYoutubeId(null);
@@ -507,13 +508,15 @@ export function BroadcastScreen() {
             broadcastIdRef.current
           ) {
             liveStartedRef.current = true;
-            startLiveStream(broadcastIdRef.current).then((r) => {
-              if (r.liveBroadcastId) {
-                setLiveYoutubeId(r.liveBroadcastId);
-                // YouTube は RTMP→CDN まで約15-30秒のウォームアップ。早すぎる共有を防ぐ。
-                setYoutubeReadyAt(Date.now() + 20000);
-              }
-            });
+            startLiveStream(broadcastIdRef.current)
+              .then((r) => {
+                if (r.liveBroadcastId) {
+                  setLiveYoutubeId(r.liveBroadcastId);
+                  // YouTube は RTMP→CDN まで約15-30秒のウォームアップ。早すぎる共有を防ぐ。
+                  setYoutubeReadyAt(Date.now() + 20000);
+                }
+              })
+              .catch(() => {});
           }
         }}
         onError={(e) => {

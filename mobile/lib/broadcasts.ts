@@ -55,6 +55,9 @@ export async function createBroadcast(args: {
 export async function startLiveStream(
   broadcastId: string,
 ): Promise<{ liveBroadcastId: string | null }> {
+  // 弱電波で応答が返らないと配信中ずっと宙ぶらりんになるため 20 秒でタイムアウト
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 20_000);
   try {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
@@ -66,6 +69,7 @@ export async function startLiveStream(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ broadcastId }),
+      signal: ctrl.signal,
     });
     const json = (await res.json().catch(() => ({}))) as {
       liveBroadcastId?: string;
@@ -73,6 +77,8 @@ export async function startLiveStream(
     return { liveBroadcastId: json?.liveBroadcastId ?? null };
   } catch {
     return { liveBroadcastId: null };
+  } finally {
+    clearTimeout(t);
   }
 }
 
@@ -80,6 +86,9 @@ export async function startLiveStream(
 // fire-and-forget。停止し損ねても enableAutoStop でYouTube側は最終的にアーカイブ化されるが、
 // Egressが残ると課金が走るので終了経路で確実に呼ぶ。
 export async function stopLiveStream(broadcastId: string): Promise<void> {
+  // 弱電波で停止UIが固まらないよう 15 秒でタイムアウト（呼び出し側も await しない）
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 15_000);
   try {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
@@ -91,9 +100,12 @@ export async function stopLiveStream(broadcastId: string): Promise<void> {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ broadcastId }),
+      signal: ctrl.signal,
     });
   } catch {
-    // fire-and-forget（配信本体は別経路で終了済み）
+    // fire-and-forget（配信本体は別経路で終了済み・Egressはwebhook/cronでも掃除される）
+  } finally {
+    clearTimeout(t);
   }
 }
 
