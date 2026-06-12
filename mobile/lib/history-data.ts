@@ -29,6 +29,8 @@ export type HistoryBroadcast = {
   away_score: number;
   home_sets: number;
   away_sets: number;
+  // 各セットの最終得点（バレー等）。列GRANT未適用環境では空配列でフォールバック。
+  set_results: { home: number; away: number }[];
   period: string;
   status: "live" | "ended";
   started_at: string;
@@ -44,6 +46,26 @@ export type HistoryBroadcast = {
   live_youtube_broadcast_id: string | null;
   live_status: "pending" | "creating" | "live" | "ended" | "failed" | null;
 };
+
+// set_results は列レベル GRANT が別途必要（supabase-migration-broadcasts-set-results-grant.sql）。
+// メインの履歴クエリに混ぜると未GRANT環境で 42501 になり履歴全体が壊れるため、
+// 別クエリで取得し、失敗（未GRANT等）時は空配列のまま素通りさせる（セット別非表示）。
+async function attachSetResults(
+  rows: HistoryBroadcast[],
+): Promise<HistoryBroadcast[]> {
+  if (rows.length === 0) return rows;
+  const ids = rows.map((r) => r.id);
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("id, set_results")
+    .in("id", ids);
+  if (error || !data) return rows; // 未GRANT/通信失敗時はセット別なしで返す
+  const map = new Map<string, { home: number; away: number }[]>();
+  for (const r of data as { id: string; set_results: unknown }[]) {
+    map.set(r.id, Array.isArray(r.set_results) ? (r.set_results as { home: number; away: number }[]) : []);
+  }
+  return rows.map((r) => ({ ...r, set_results: map.get(r.id) ?? [] }));
+}
 
 // 自分が配信した「終了済み」配信を新しい順で取得。
 // Web の getBroadcastHistory と同じ条件（broadcaster_id=自分 + status=ended + started_at DESC）。
@@ -64,7 +86,11 @@ export async function fetchMyHistory(
     console.error("配信履歴取得エラー:", error.message);
     return [];
   }
-  return (data ?? []) as unknown as HistoryBroadcast[];
+  const rows = (data ?? []).map((r) => ({
+    ...(r as object),
+    set_results: [],
+  })) as unknown as HistoryBroadcast[];
+  return attachSetResults(rows);
 }
 
 // 指定チームの「終了済み」配信を新しい順で取得。
@@ -85,7 +111,11 @@ export async function fetchTeamHistory(
     console.error("チーム配信履歴取得エラー:", error.message);
     return [];
   }
-  return (data ?? []) as unknown as HistoryBroadcast[];
+  const rows = (data ?? []).map((r) => ({
+    ...(r as object),
+    set_results: [],
+  })) as unknown as HistoryBroadcast[];
+  return attachSetResults(rows);
 }
 
 // 履歴タブのフィルタチップ用に、自分の所属チームを取得（共有 lib/teams.ts を再利用）。

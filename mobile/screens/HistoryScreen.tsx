@@ -10,7 +10,6 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
-import { SITE_URL } from "../config";
 import { type MyTeam } from "../lib/teams";
 import {
   type HistoryBroadcast,
@@ -218,15 +217,14 @@ function HistoryCard({
   const setBased = bc.home_sets > 0 || bc.away_sets > 0;
   const ytUrl = youtubeWatchUrl(bc);
 
-  // 視聴は当面 Web（自社プレイヤー）に飛ばす
-  const openWatch = useCallback(() => {
-    // 他画面と同様、URL を開けない場合の reject を握って未処理 reject を防ぐ。
-    Linking.openURL(`${SITE_URL}/watch/${bc.share_code}`).catch(() => {});
-  }, [bc.share_code]);
-
+  // アーカイブ視聴は YouTube（限定公開）のみ。終了済み配信の自社プレイヤー(Web)は
+  // 実体が無く再生できないため「Webで見る」は廃止（オーナー指示 2026-06-12）。
   const openYouTube = useCallback(() => {
     if (ytUrl) Linking.openURL(ytUrl).catch(() => {});
   }, [ytUrl]);
+
+  // バレー等のセット制で、各セットの最終得点が取れていれば内訳を表示する。
+  const showSetBreakdown = setBased && bc.set_results.length > 0;
 
   return (
     <View style={styles.card}>
@@ -248,28 +246,44 @@ function HistoryCard({
           </View>
         </View>
 
-        {/* スコア / セット数（セット制はセット数を黄色で） */}
-        <View style={styles.scoreBox}>
-          <Text style={[styles.scoreNum, setBased && styles.setNum]}>
-            {setBased ? bc.home_sets : bc.home_score}
-          </Text>
-          <Text style={styles.scoreDash}>-</Text>
-          <Text style={[styles.scoreNum, setBased && styles.setNum]}>
-            {setBased ? bc.away_sets : bc.away_score}
-          </Text>
-        </View>
+        {/* スコア表示:
+            ・セット制でセット内訳がある → [取得セット数] [各セットの得点を縦並び] [取得セット数]
+            ・セット制で内訳なし → セット数のみ（黄色）
+            ・それ以外 → 得点 */}
+        {showSetBreakdown ? (
+          <View style={styles.setScoreBox}>
+            <Text style={styles.setWinNum}>{bc.home_sets}</Text>
+            <View style={styles.setList}>
+              {bc.set_results.map((s, i) => (
+                <Text key={i} style={styles.setLine}>
+                  {s.home}-{s.away}
+                </Text>
+              ))}
+            </View>
+            <Text style={styles.setWinNum}>{bc.away_sets}</Text>
+          </View>
+        ) : (
+          <View style={styles.scoreBox}>
+            <Text style={[styles.scoreNum, setBased && styles.setNum]}>
+              {setBased ? bc.home_sets : bc.home_score}
+            </Text>
+            <Text style={styles.scoreDash}>-</Text>
+            <Text style={[styles.scoreNum, setBased && styles.setNum]}>
+              {setBased ? bc.away_sets : bc.away_score}
+            </Text>
+          </View>
+        )}
       </View>
 
-      {/* アクション: Web視聴 ＋ あれば YouTube アーカイブ */}
+      {/* アクション: YouTube アーカイブ（あれば）＋ 通報・ブロック */}
       <View style={styles.actions}>
-        <Pressable style={styles.watchBtn} onPress={openWatch}>
-          <Text style={styles.watchText}>▶ Webで見る</Text>
-        </Pressable>
         {ytUrl ? (
           <Pressable style={styles.ytBtn} onPress={openYouTube}>
             <Text style={styles.ytText}>YouTubeで見る（限定公開）</Text>
           </Pressable>
-        ) : null}
+        ) : (
+          <Text style={styles.noArchive}>アーカイブなし</Text>
+        )}
         {/* 通報・ブロック（Guideline 1.2） */}
         <Pressable style={styles.reportBtn} hitSlop={8} onPress={onReport}>
           <Text style={styles.reportBtnText}>⋯</Text>
@@ -353,6 +367,34 @@ const styles = StyleSheet.create({
   setNum: { color: "#ffd24a" },
   scoreDash: { color: "#666", fontSize: 12 },
 
+  // セット内訳: [勝セット数] [各セット得点を縦並び] [勝セット数]
+  setScoreBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  setWinNum: {
+    color: "#ffd24a",
+    fontSize: 22,
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
+    minWidth: 18,
+    textAlign: "center",
+  },
+  setList: { alignItems: "center" },
+  setLine: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+    lineHeight: 18,
+  },
+  noArchive: { color: "#666", fontSize: 12 },
+
   actions: {
     flexDirection: "row",
     alignItems: "center",
@@ -363,15 +405,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.06)",
   },
-  watchBtn: {
-    backgroundColor: "#1a1a1a",
-    borderColor: "#444",
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  watchText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   ytBtn: {
     backgroundColor: "rgba(230,57,70,0.12)",
     borderColor: "#e63946",
