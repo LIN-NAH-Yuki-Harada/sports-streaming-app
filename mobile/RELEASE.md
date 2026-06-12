@@ -90,12 +90,36 @@ eas submit -p ios --profile production --latest
 
 ---
 
-## 5. 本番審査で詰まりやすい点（事前メモ）
+## 5. 本番審査で詰まりやすい点（プリフライト監査 2026-06-12 反映）
 
-- **UGCモデレーション方針**: 配信は user generated。通報/ブロック導線の説明を審査メモに用意。
-- **アカウント削除（5.1.1(v)）**: マイページ → 削除導線が必要（実装済み・要動作確認）。
-- **年齢レーティング / 子ども安全**: 子どもが映る前提。Made for Kids 扱いとの整合に注意。
+- **UGCモデレーション（1.2）**: ✅ アプリ内実装済み。Home/履歴カードの「⋯」から通報（理由選択→24時間以内対応の明示）＋ブロック、ブロック済み配信者は非表示、オンボーディングで no-tolerance EULA に明示同意。→ 審査メモに通報フロー・体制・緊急連絡先を記載すること。
+- **Sign in with Apple（4.8）**: ✅ iOS に併設済み（Google を出すアプリの必須要件）。
+- **アカウント削除（5.1.1(v)）**: ✅ アプリ内で完結（マイページ → 削除 → /api/account/delete → signOut）。
+- **アプリ内課金/価格（3.1.1）**: ✅ iOS では価格表示と外部Web決済への誘導CTAを非表示。
+- **年齢レーティング / 子ども安全**: 子どもが映る前提。保護者撮影UGCである旨を審査メモに記載し、年齢レーティング設問に正直に回答。
 - **権限文言**: カメラ/マイクの用途文言は app.json に設定済み。
+
+---
+
+## 6. ★ブロッカー対応で必要な「オーナーの外部作業」（コード以外）
+
+iOS提出ブロッカーのコードは実装済み。以下はオーナーが各サービスの管理画面で行う作業。
+
+### 6-1. Supabase（モデレーション用テーブル）
+- Supabase ダッシュボード → SQL Editor で `web/supabase-migration-moderation.sql` を実行
+  （reports / blocked_users テーブル＋RLS を作成）。これが無いと通報・ブロックが失敗する。
+
+### 6-2. Sign in with Apple（4.8）
+- **Apple Developer**: Certificates, Identifiers & Profiles → App ID `com.linnah.spotch` →
+  Capabilities で **Sign In with Apple** を有効化。
+- **Supabase**: Authentication → Providers → **Apple** を有効化し、
+  Authorized Client IDs に `com.linnah.spotch`（ネイティブの bundle ID）を追加。
+- ※EAS iOS ビルドで新規 pod が WebRTC/modular_headers 構成と干渉しないか実検証（最初の関門）。
+
+### 6-3. App Store Connect（提出時）
+- レビューメモに「通報フロー（⋯→理由選択→送信）・モデレーション体制・24時間以内対応・緊急連絡先」を記載。
+- 年齢レーティング設問は「保護者が撮影する子どものスポーツUGC」前提で回答。
+- Privacy Policy URL（`/privacy`）を設定。
 
 ---
 
