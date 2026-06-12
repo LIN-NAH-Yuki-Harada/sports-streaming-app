@@ -1,0 +1,937 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  AppState,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { useKeepAwake } from "expo-keep-awake";
+import {
+  AudioSession,
+  LiveKitRoom,
+  VideoTrack,
+  useTracks,
+  isTrackReference,
+} from "@livekit/react-native";
+import { Track } from "livekit-client";
+import { supabase } from "../lib/supabase";
+import { LIVEKIT_URL, SITE_URL } from "../config";
+import {
+  SPORTS,
+  type SportKey,
+  sportLabel,
+  sportKeyFromLabel,
+  periodsFor,
+  isSetBased,
+  advanceSet,
+  setUnitLabel,
+  periodLabelForSet,
+  baseballPeriods,
+  nextPeriodIn,
+  volleyballPointLabel,
+  volleyballRuleLabel,
+  VOLLEYBALL_RULE_NAMES,
+  DEFAULT_VOLLEYBALL_RULE,
+  BASEBALL_RULE_NAMES,
+  DEFAULT_BASEBALL_RULE,
+} from "../lib/sports";
+import {
+  createBroadcast,
+  updateScore,
+  endBroadcast,
+  sweepGhostBroadcasts,
+} from "../lib/broadcasts";
+import {
+  type Plan,
+  fetchPlan,
+  fetchTrialUsedSeconds,
+  consumeTrial,
+  FREE_TRIAL_TOTAL_SECONDS,
+} from "../lib/plan";
+import { type MyTeam, fetchMyTeams } from "../lib/teams";
+import { useNavigation } from "@react-navigation/native";
+
+// 配信専用ネイティブアプリ。カメラをネイティブ(ハードエンコーダ)で publish しつつ、
+// 配信者がアプリ内で 競技選択・スコア・ピリオド/セット を操作 → broadcasts 行を UPDATE →
+// 視聴ページ( live-spotch.com/watch/<code> )のスコアボードに Realtime で即反映される。
+// 生映像のみ送る(焼き込みOFF=発熱しない)設計は維持。
+
+type Phase = "ready" | "live";
+
+const SHARE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+function generateShareCode(): string {
+  let s = "";
+  for (let i = 0; i < 8; i++) {
+    s += SHARE_CHARS[Math.floor(Math.random() * SHARE_CHARS.length)];
+  }
+  return s;
+}
+
+// 経過秒を MM:SS / H:MM:SS に整形
+function formatElapsed(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+export function BroadcastScreen() {
+  const navigation = useNavigation<any>();
+  const [phase, setPhase] = useState<Phase>("ready");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [shareCode, setShareCode] = useState<string | null>(null);
+
+  // 試合セットアップ（配信開始前に入力）
+  const [sportKey, setSportKey] = useState<SportKey>("soccer");
+  const [homeTeam, setHomeTeam] = useState("ホーム");
+  const [awayTeam, setAwayTeam] = useState("アウェイ");
+  const [tournament, setTournament] = useState("");
+  // 競技のルール種別（バレー: 小学生6人制/6人制/9人制、野球: カテゴリ別イニング）
+  const [volleyballRuleName, setVolleyballRuleName] = useState(DEFAULT_VOLLEYBALL_RULE);
+  const [baseballRuleName, setBaseballRuleName] = useState(DEFAULT_BASEBALL_RULE);
+
+  // ライブ中のスコア／ピリオド（バレーは home/awayScore = 現在セットの得点）
+  const [homeScore, setHomeScore] = useState(0);
+  const [awayScore, setAwayScore] = useState(0);
+  const [period, setPeriod] = useState("前半");
+  // バレーのセット集計（home_sets / away_sets / set_results に対応）
+  const [homeSets, setHomeSets] = useState(0);
+  const [awaySets, setAwaySets] = useState(0);
+  const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
+
+  // 配信終了処理の二重実行ガード（停止ボタン と onDisconnected が両方発火しうるため）
+  const endedRef = useRef(false);
+  // 配信開始時刻（経過時間タイマー用）と経過秒
+  const liveStartedAtRef = useRef(0);
+  const [elapsed, setElapsed] = useState(0);
+  // 画面ロック復帰時に LiveKit 接続を“作り直す(remount)”ための状態
+  const [liveKey, setLiveKey] = useState(0); // 変えると LiveKitRoom が再マウント＝再接続
+  const bgAtRef = useRef(0); // バックグラウンドに入った時刻
+  const remountingRef = useRef(false); // 意図的な作り直し中は onDisconnected で終了させない
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // プラン＆無料トライアル
+  const [plan, setPlan] = useState<Plan>("free");
+  const [trialRemainingAtStart, setTrialRemainingAtStart] = useState(0);
+  // 所属チーム（配信を紐付けると /discover「配信中の試合」に出る）
+  const [myTeams, setMyTeams] = useState<MyTeam[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  // 前回の配信時間（終了サマリー用）
+  const [lastDurationSec, setLastDurationSec] = useState(0);
+
+  const setBased = isSetBased(sportKey);
+
+  // 競技＋ルール種別に応じた有効ピリオド配列（野球はカテゴリでイニング数が変わる）
+  const activePeriods = useMemo(
+    () => (sportKey === "baseball" ? baseballPeriods(baseballRuleName) : periodsFor(sportKey)),
+    [sportKey, baseballRuleName],
+  );
+
+  // バレーのセット/マッチポイント表示（ライブ中のみ意味を持つ）
+  const pointLabel =
+    sportKey === "volleyball"
+      ? volleyballPointLabel(volleyballRuleName, homeSets, awaySets, homeScore, awayScore)
+      : null;
+
+  // 配信中はタブバーを隠して全画面（戻ったら表示）
+  useEffect(() => {
+    navigation.setOptions({
+      tabBarStyle: phase === "live" ? { display: "none" } : undefined,
+    });
+  }, [phase, navigation]);
+
+  // ready 画面でプランと無料トライアル残量を取得（無料は残時間を表示・使い切りで開始不可）
+  useEffect(() => {
+    if (phase !== "ready") return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      const uid = data.session?.user.id;
+      if (!uid) return;
+      const [p, teams] = await Promise.all([fetchPlan(uid), fetchMyTeams(uid)]);
+      if (cancelled) return;
+      setPlan(p);
+      setMyTeams(teams);
+      if (p === "free") {
+        const used = await fetchTrialUsedSeconds(uid);
+        if (!cancelled) setTrialRemainingAtStart(Math.max(0, FREE_TRIAL_TOTAL_SECONDS - used));
+      } else {
+        setTrialRemainingAtStart(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase]);
+
+  // 競技/ルールを変えたら、最初のピリオドに合わせる（ready 画面で選択時）
+  useEffect(() => {
+    if (phase === "live") return;
+    setPeriod(activePeriods[0]);
+  }, [activePeriods, phase]);
+
+  // ライブ中、スコア/ピリオド/セットの変更を broadcasts 行へ反映（視聴ページに Realtime で届く）
+  useEffect(() => {
+    if (phase !== "live" || !shareCode) return;
+    const patch: Parameters<typeof updateScore>[1] = {
+      home_score: homeScore,
+      away_score: awayScore,
+      period,
+    };
+    if (setBased) {
+      patch.home_sets = homeSets;
+      patch.away_sets = awaySets;
+      patch.set_results = setResults;
+    }
+    updateScore(shareCode, patch);
+    // セット/マッチポイントは別更新に分離（万一 point_label 列が無くても
+    // 得点更新を巻き添えで失敗させない＝過去のリグレッション再発防止）
+    if (sportKey === "volleyball") {
+      updateScore(shareCode, { point_label: pointLabel });
+    }
+  }, [
+    phase,
+    shareCode,
+    homeScore,
+    awayScore,
+    period,
+    homeSets,
+    awaySets,
+    setResults,
+    setBased,
+    sportKey,
+    pointLabel,
+  ]);
+
+  // 配信中の経過時間タイマー（1秒ごと）
+  useEffect(() => {
+    if (phase !== "live") return;
+    const id = setInterval(() => {
+      setElapsed(Math.max(0, Math.floor((Date.now() - liveStartedAtRef.current) / 1000)));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [phase]);
+
+  const handleStart = useCallback(async () => {
+    setBusy(true);
+    setMessage(null);
+    let createdCode: string | null = null;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData.session;
+      if (!session) {
+        setMessage("セッションがありません。再ログインしてください。");
+        setBusy(false);
+        return;
+      }
+
+      // 無料プランで体験時間（10分）を使い切っている場合は開始させない
+      if (plan === "free" && trialRemainingAtStart <= 0) {
+        setMessage(
+          "無料体験（10分）は終了しています。続けるには有料プランへの登録が必要です。",
+        );
+        setBusy(false);
+        return;
+      }
+
+      // 異常終了で残った自分のゴースト配信を先に全終了（二重配信の防止）
+      await sweepGhostBroadcasts(session.user.id).catch(() => {});
+
+      const code = generateShareCode();
+      const initialPeriod = activePeriods[0];
+
+      // スコア・セットを初期化
+      setHomeScore(0);
+      setAwayScore(0);
+      setHomeSets(0);
+      setAwaySets(0);
+      setSetResults([]);
+      setPeriod(initialPeriod);
+
+      const { error: insErr } = await createBroadcast({
+        broadcasterId: session.user.id,
+        shareCode: code,
+        sport: sportLabel(sportKey),
+        homeTeam: homeTeam.trim() || "ホーム",
+        awayTeam: awayTeam.trim() || "アウェイ",
+        tournament: tournament.trim(),
+        teamId: selectedTeamId,
+        initialPeriod,
+      });
+      if (insErr) {
+        setMessage("配信作成エラー: " + insErr);
+        setBusy(false);
+        return;
+      }
+      createdCode = code;
+
+      // 電波が不安定で応答が返らないとボタンが固まるため 15 秒でタイムアウト
+      const ctrl = new AbortController();
+      const timeoutId = setTimeout(() => ctrl.abort(), 15_000);
+      let res: Response;
+      try {
+        res = await fetch(SITE_URL + "/api/livekit/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + session.access_token,
+          },
+          body: JSON.stringify({
+            roomName: code,
+            participantIdentity: session.user.id,
+            participantName: "配信者(アプリ)",
+            role: "broadcaster",
+          }),
+          signal: ctrl.signal,
+        });
+      } catch (e) {
+        const offline =
+          e instanceof Error && e.name === "AbortError"
+            ? "サーバーの応答がありません。電波の良い場所で再度お試しください。"
+            : "通信に失敗しました。電波状況をご確認ください。";
+        setMessage(offline);
+        await endBroadcast(createdCode).catch(() => {});
+        setBusy(false);
+        return;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      const json = await res.json();
+      if (!res.ok || !json.token) {
+        setMessage("トークン取得エラー: " + (json.error ?? res.status));
+        await endBroadcast(createdCode).catch(() => {});
+        setBusy(false);
+        return;
+      }
+
+      await AudioSession.startAudioSession();
+      endedRef.current = false;
+      remountingRef.current = false;
+      bgAtRef.current = 0;
+      liveStartedAtRef.current = Date.now();
+      setElapsed(0);
+      setToken(json.token);
+      setShareCode(code);
+      setPhase("live");
+    } catch (e) {
+      setMessage("開始エラー: " + (e instanceof Error ? e.message : String(e)));
+      await AudioSession.stopAudioSession().catch(() => {});
+      if (createdCode) await endBroadcast(createdCode).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  }, [
+    activePeriods,
+    sportKey,
+    homeTeam,
+    awayTeam,
+    tournament,
+    plan,
+    trialRemainingAtStart,
+    selectedTeamId,
+  ]);
+
+  // 配信終了（停止ボタン / 接続エラー / 切断 のいずれからも呼ばれる。二重実行は endedRef でガード）
+  const finishLive = useCallback(
+    async (msg: string | null) => {
+      if (endedRef.current) return;
+      endedRef.current = true;
+      remountingRef.current = false;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      await AudioSession.stopAudioSession().catch(() => {});
+      if (shareCode) await endBroadcast(shareCode).catch(() => {});
+      // 配信終了サマリー用に配信時間を記録
+      if (liveStartedAtRef.current) {
+        setLastDurationSec(
+          Math.max(0, Math.floor((Date.now() - liveStartedAtRef.current) / 1000)),
+        );
+      }
+      // 無料プラン: 今回消費したトライアル秒をサーバーに加算
+      if (plan === "free" && liveStartedAtRef.current) {
+        const used = Math.max(0, Math.floor((Date.now() - liveStartedAtRef.current) / 1000));
+        if (used > 0) {
+          const { data } = await supabase.auth.getSession();
+          const tok = data.session?.access_token;
+          if (tok) await consumeTrial(tok, used).catch(() => {});
+        }
+      }
+      setToken(null);
+      setShareCode(null);
+      if (msg) setMessage(msg);
+      setPhase("ready");
+    },
+    [shareCode, plan],
+  );
+
+  // 画面ロック/バックグラウンド対応（同じ配信を続ける＝視聴URL不変）:
+  // ・背景化した時刻を記録（共有シートは "inactive" なので発火しない）。
+  // ・復帰("active")時に 90秒以内なら LiveKit 接続を“作り直して(remount)”再開。
+  //   → setLiveKey で LiveKitRoom を再マウント＝サーバーへ確実に再 publish。
+  //   → 作り直し中は remountingRef で onDisconnected を抑止（誤終了防止）。
+  // ・90秒超の離脱、または 15秒以内に onConnected が来なければ終了（視聴者を宙ぶらりんにしない）。
+  useEffect(() => {
+    if (phase !== "live") return;
+    const GRACE_MS = 90_000;
+    const RECONNECT_TIMEOUT_MS = 15_000;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background") {
+        bgAtRef.current = Date.now();
+      } else if (state === "active") {
+        if (bgAtRef.current === 0) return;
+        const awayMs = Date.now() - bgAtRef.current;
+        bgAtRef.current = 0;
+        if (awayMs > GRACE_MS) {
+          finishLive(
+            "長時間の離脱で配信を終了しました。再開するには「配信開始」を押してください。",
+          );
+          return;
+        }
+        // 接続を作り直して同じ配信を再開（視聴URLは変わらない）
+        remountingRef.current = true;
+        setLiveKey((k) => k + 1);
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = setTimeout(() => {
+          if (remountingRef.current) {
+            remountingRef.current = false;
+            finishLive(
+              "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
+            );
+          }
+        }, RECONNECT_TIMEOUT_MS);
+      }
+    });
+    return () => sub.remove();
+  }, [phase, finishLive]);
+
+  // 無料トライアル: 残り時間が 0 になったら自動終了（1秒ごとの elapsed 変化で判定）
+  useEffect(() => {
+    if (phase !== "live" || plan !== "free") return;
+    if (trialRemainingAtStart - elapsed <= 0) {
+      finishLive("無料体験の時間（10分）が終了しました。続けるには有料プランへ。");
+    }
+  }, [phase, plan, trialRemainingAtStart, elapsed, finishLive]);
+
+  // セット/ゲーム制(バレー/バドミントン/卓球): 「次へ」= 現得点を集計→セット数加算→0-0リセット→次の番号へ
+  const handleNextSet = useCallback(() => {
+    const r = advanceSet({ homeSets, awaySets, setResults }, homeScore, awayScore);
+    setHomeSets(r.state.homeSets);
+    setAwaySets(r.state.awaySets);
+    setSetResults(r.state.setResults);
+    setHomeScore(r.nextScore.home);
+    setAwayScore(r.nextScore.away);
+    const gameNumber = r.state.homeSets + r.state.awaySets + 1;
+    setPeriod(periodLabelForSet(sportKey, gameNumber));
+  }, [homeSets, awaySets, setResults, homeScore, awayScore, sportKey]);
+
+  if (phase === "live" && token) {
+    return (
+      <LiveKitRoom
+        key={liveKey}
+        serverUrl={LIVEKIT_URL}
+        token={token}
+        connect={true}
+        audio={true}
+        video={{ facingMode: "environment" }}
+        onConnected={() => {
+          // 再接続（作り直し）成功 → 終了タイマー解除
+          remountingRef.current = false;
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+          }
+        }}
+        onError={(e) => {
+          if (remountingRef.current) return; // 作り直し中の一時エラーは無視
+          finishLive("配信エラー: " + (e?.message ?? "接続に失敗しました"));
+        }}
+        onDisconnected={() => {
+          if (remountingRef.current) return; // 意図的な作り直し中は終了させない
+          finishLive("配信が切断されました（電波 / 時間切れの可能性）");
+        }}
+      >
+        <LiveView
+          shareCode={shareCode}
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          homeScore={homeScore}
+          awayScore={awayScore}
+          period={period}
+          setBased={setBased}
+          unitLabel={setUnitLabel(sportKey)}
+          pointLabel={pointLabel}
+          elapsed={elapsed}
+          trialRemaining={plan === "free" ? Math.max(0, trialRemainingAtStart - elapsed) : null}
+          homeSets={homeSets}
+          awaySets={awaySets}
+          onHome={(d) => setHomeScore((s) => Math.max(0, s + d))}
+          onAway={(d) => setAwayScore((s) => Math.max(0, s + d))}
+          onPeriod={() => setPeriod((p) => nextPeriodIn(activePeriods, p))}
+          onNextSet={handleNextSet}
+          onStop={() => finishLive(null)}
+        />
+      </LiveKitRoom>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.title}>LIVE SPOtCH 配信</Text>
+
+        <View style={styles.form}>
+            <Text style={styles.ready}>試合の情報を入れて配信を開始します。</Text>
+            {lastDurationSec > 0 && (
+              <Text style={styles.summaryText}>
+                ✅ 前回の配信時間: {formatElapsed(lastDurationSec)}
+              </Text>
+            )}
+
+            {myTeams.length > 0 && (
+              <>
+                <Text style={styles.label}>配信するチーム</Text>
+                <View style={styles.sportRow}>
+                  <Pressable
+                    style={[styles.sportChip, selectedTeamId === null && styles.sportChipActive]}
+                    onPress={() => setSelectedTeamId(null)}
+                  >
+                    <Text
+                      style={[
+                        styles.sportChipText,
+                        selectedTeamId === null && styles.sportChipTextActive,
+                      ]}
+                    >
+                      個人配信
+                    </Text>
+                  </Pressable>
+                  {myTeams.map((t) => {
+                    const active = t.id === selectedTeamId;
+                    return (
+                      <Pressable
+                        key={t.id}
+                        style={[styles.sportChip, active && styles.sportChipActive]}
+                        onPress={() => {
+                          setSelectedTeamId(t.id);
+                          setHomeTeam(t.name);
+                          setSportKey(sportKeyFromLabel(t.sport));
+                        }}
+                      >
+                        <Text
+                          style={[styles.sportChipText, active && styles.sportChipTextActive]}
+                        >
+                          {t.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {selectedTeamId !== null && (
+                  <Text style={styles.ruleHint}>
+                    このチームの配信として「配信中の試合」に表示されます
+                  </Text>
+                )}
+              </>
+            )}
+
+            <Text style={styles.label}>競技</Text>
+            <View style={styles.sportRow}>
+              {SPORTS.map((s) => {
+                const active = s.key === sportKey;
+                return (
+                  <Pressable
+                    key={s.key}
+                    style={[styles.sportChip, active && styles.sportChipActive]}
+                    onPress={() => setSportKey(s.key)}
+                  >
+                    <Text style={[styles.sportChipText, active && styles.sportChipTextActive]}>
+                      {s.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {sportKey === "volleyball" && (
+              <>
+                <Text style={styles.label}>バレーのルール</Text>
+                <View style={styles.sportRow}>
+                  {VOLLEYBALL_RULE_NAMES.map((name) => {
+                    const active = name === volleyballRuleName;
+                    return (
+                      <Pressable
+                        key={name}
+                        style={[styles.sportChip, active && styles.sportChipActive]}
+                        onPress={() => setVolleyballRuleName(name)}
+                      >
+                        <Text style={[styles.sportChipText, active && styles.sportChipTextActive]}>
+                          {name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.ruleHint}>{volleyballRuleLabel(volleyballRuleName)}</Text>
+              </>
+            )}
+
+            {sportKey === "baseball" && (
+              <>
+                <Text style={styles.label}>野球のカテゴリ</Text>
+                <View style={styles.sportRow}>
+                  {BASEBALL_RULE_NAMES.map((name) => {
+                    const active = name === baseballRuleName;
+                    return (
+                      <Pressable
+                        key={name}
+                        style={[styles.sportChip, active && styles.sportChipActive]}
+                        onPress={() => setBaseballRuleName(name)}
+                      >
+                        <Text style={[styles.sportChipText, active && styles.sportChipTextActive]}>
+                          {name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+
+            <Text style={styles.label}>ホームチーム</Text>
+            <TextInput
+              style={styles.input}
+              value={homeTeam}
+              onChangeText={setHomeTeam}
+              placeholder="ホームチーム"
+              placeholderTextColor="#666"
+            />
+            <Text style={styles.label}>アウェイチーム</Text>
+            <TextInput
+              style={styles.input}
+              value={awayTeam}
+              onChangeText={setAwayTeam}
+              placeholder="アウェイチーム"
+              placeholderTextColor="#666"
+            />
+            <Text style={styles.label}>大会名（任意）</Text>
+            <TextInput
+              style={styles.input}
+              value={tournament}
+              onChangeText={setTournament}
+              placeholder="〇〇カップ など"
+              placeholderTextColor="#666"
+            />
+
+            <Pressable style={styles.button} onPress={handleStart} disabled={busy}>
+              <Text style={styles.buttonText}>{busy ? "準備中..." : "配信開始"}</Text>
+            </Pressable>
+          </View>
+
+        {message ? <Text style={styles.message}>{message}</Text> : null}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function LiveView({
+  shareCode,
+  homeTeam,
+  awayTeam,
+  homeScore,
+  awayScore,
+  period,
+  setBased,
+  unitLabel,
+  pointLabel,
+  elapsed,
+  trialRemaining,
+  homeSets,
+  awaySets,
+  onHome,
+  onAway,
+  onPeriod,
+  onNextSet,
+  onStop,
+}: {
+  shareCode: string | null;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number;
+  awayScore: number;
+  period: string;
+  setBased: boolean;
+  unitLabel: string;
+  pointLabel: string | null;
+  elapsed: number;
+  trialRemaining: number | null;
+  homeSets: number;
+  awaySets: number;
+  onHome: (d: number) => void;
+  onAway: (d: number) => void;
+  onPeriod: () => void;
+  onNextSet: () => void;
+  onStop: () => void;
+}) {
+  useKeepAwake(); // 配信中は画面をスリープさせない（長時間の発熱テスト対策）
+  const tracks = useTracks([Track.Source.Camera]);
+  const cam = tracks.find((t) => isTrackReference(t) && t.participant.isLocal) ?? tracks[0];
+
+  const watchUrl = `${SITE_URL}/watch/${shareCode ?? ""}`;
+  const share = useCallback(async () => {
+    try {
+      // url と message 両方に URL を入れると iOS で URL が二重になるため message のみ
+      await Share.share({ message: `試合をライブ配信中！\n${watchUrl}` });
+    } catch {
+      // 共有シートを閉じただけ等は無視
+    }
+  }, [watchUrl]);
+
+  const confirmStop = useCallback(() => {
+    Alert.alert("配信を停止しますか？", "視聴者に配信が終了します。", [
+      { text: "キャンセル", style: "cancel" },
+      { text: "停止する", style: "destructive", onPress: onStop },
+    ]);
+  }, [onStop]);
+
+  return (
+    <View style={styles.liveRoot}>
+      {cam && isTrackReference(cam) ? (
+        <VideoTrack trackRef={cam} style={styles.video} objectFit="cover" />
+      ) : (
+        <View style={styles.center}>
+          <ActivityIndicator color="#fff" />
+          <Text style={styles.connecting}>接続中...</Text>
+        </View>
+      )}
+
+      {/* 上: 視聴者に見えているのと同じスコアボードのプレビュー ＋ 停止 */}
+      <SafeAreaView style={styles.topOverlay} pointerEvents="box-none">
+        <View style={styles.topLeftGroup}>
+          <View style={styles.scorePreview}>
+            <Text style={styles.previewTeam} numberOfLines={1}>
+              {homeTeam}
+            </Text>
+            {setBased && <Text style={styles.previewSets}>{homeSets}</Text>}
+            <Text style={styles.previewScore}>
+              {homeScore} - {awayScore}
+            </Text>
+            {setBased && <Text style={styles.previewSets}>{awaySets}</Text>}
+            <Text style={styles.previewTeam} numberOfLines={1}>
+              {awayTeam}
+            </Text>
+            <Text style={styles.previewPeriod}>{period}</Text>
+          </View>
+          {pointLabel ? (
+            <View
+              style={[
+                styles.pointBadge,
+                pointLabel === "マッチポイント" && styles.pointBadgeMatch,
+              ]}
+            >
+              <Text style={styles.pointBadgeText}>{pointLabel}</Text>
+            </View>
+          ) : null}
+        </View>
+        <View style={styles.topRightGroup}>
+          {trialRemaining !== null && (
+            <Text
+              style={[styles.elapsedText, trialRemaining < 60 && styles.trialWarn]}
+            >
+              無料体験 残り {formatElapsed(trialRemaining)}
+            </Text>
+          )}
+          <Text style={styles.elapsedText}>⏱ {formatElapsed(elapsed)}</Text>
+          <Pressable style={styles.stopButton} onPress={confirmStop}>
+            <Text style={styles.stopText}>■ 停止</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+
+      {/* 下: スコア操作パネル */}
+      <SafeAreaView style={styles.controls} pointerEvents="box-none">
+        <View style={styles.teamControl}>
+          <Text style={styles.controlTeamName} numberOfLines={1}>
+            {homeTeam}
+            {setBased ? `（${homeSets}${unitLabel}）` : ""}
+          </Text>
+          <View style={styles.scoreRow}>
+            <Pressable style={styles.minusBtn} onPress={() => onHome(-1)}>
+              <Text style={styles.btnSign}>−</Text>
+            </Pressable>
+            <Text style={styles.controlScore}>{homeScore}</Text>
+            <Pressable style={styles.plusBtn} onPress={() => onHome(1)}>
+              <Text style={styles.btnSign}>＋</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.centerControl}>
+          {setBased ? (
+            <Pressable style={styles.nextSetBtn} onPress={onNextSet}>
+              <Text style={styles.nextSetText}>次の{unitLabel}へ ▸</Text>
+            </Pressable>
+          ) : (
+            <Pressable style={styles.periodBtn} onPress={onPeriod}>
+              <Text style={styles.periodText}>{period} ▸</Text>
+            </Pressable>
+          )}
+          <Pressable style={styles.shareBtn} onPress={share}>
+            <Text style={styles.shareText}>📲 共有</Text>
+          </Pressable>
+          <Text style={styles.codeText}>視聴コード: {shareCode}</Text>
+        </View>
+
+        <View style={styles.teamControl}>
+          <Text style={styles.controlTeamName} numberOfLines={1}>
+            {awayTeam}
+            {setBased ? `（${awaySets}${unitLabel}）` : ""}
+          </Text>
+          <View style={styles.scoreRow}>
+            <Pressable style={styles.minusBtn} onPress={() => onAway(-1)}>
+              <Text style={styles.btnSign}>−</Text>
+            </Pressable>
+            <Text style={styles.controlScore}>{awayScore}</Text>
+            <Pressable style={styles.plusBtn} onPress={() => onAway(1)}>
+              <Text style={styles.btnSign}>＋</Text>
+            </Pressable>
+          </View>
+        </View>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
+  container: { flex: 1, backgroundColor: "#0a0a0a" },
+  scroll: { padding: 24, flexGrow: 1, justifyContent: "center" },
+  title: { color: "#fff", fontSize: 22, fontWeight: "800", textAlign: "center", marginBottom: 20 },
+  form: { gap: 8 },
+  label: { color: "#bbb", fontSize: 13, marginTop: 4 },
+  input: { backgroundColor: "#1a1a1a", color: "#fff", borderRadius: 8, padding: 12, borderWidth: 1, borderColor: "#333" },
+  ready: { color: "#ddd", fontSize: 15, textAlign: "center", marginBottom: 8 },
+  summaryText: { color: "#8fd6a0", fontSize: 13, textAlign: "center", marginBottom: 4 },
+  button: { backgroundColor: "#e63946", borderRadius: 8, padding: 14, alignItems: "center", marginTop: 12 },
+  buttonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  linkButton: { padding: 10, alignItems: "center" },
+  linkText: { color: "#888", fontSize: 13 },
+  message: { color: "#ffb4b4", marginTop: 16, textAlign: "center" },
+
+  sportRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  sportChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: "#444", backgroundColor: "#1a1a1a" },
+  sportChipActive: { backgroundColor: "#e63946", borderColor: "#e63946" },
+  sportChipText: { color: "#ccc", fontSize: 14, fontWeight: "600" },
+  sportChipTextActive: { color: "#fff" },
+  ruleHint: { color: "#9ab", fontSize: 12, marginTop: 2 },
+
+  liveRoot: { flex: 1, backgroundColor: "#000" },
+  video: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  connecting: { color: "#fff", marginTop: 8 },
+
+  topOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    padding: 12,
+  },
+  scorePreview: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexShrink: 1,
+  },
+  previewTeam: { color: "#fff", fontWeight: "700", fontSize: 13, maxWidth: 84 },
+  previewSets: { color: "#ffd24a", fontWeight: "900", fontSize: 14 },
+  previewScore: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 15,
+    backgroundColor: "#e63946",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  previewPeriod: { color: "#ddd", fontSize: 12, marginLeft: 4 },
+  topLeftGroup: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, maxWidth: "82%" },
+  pointBadge: { backgroundColor: "#f4a300", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
+  pointBadgeMatch: { backgroundColor: "#e63946" },
+  pointBadgeText: { color: "#fff", fontWeight: "900", fontSize: 12 },
+  stopButton: {
+    backgroundColor: "rgba(0,0,0,0.7)",
+    borderColor: "#e63946",
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  stopText: { color: "#e63946", fontWeight: "800", fontSize: 13 },
+  topRightGroup: { flexDirection: "row", alignItems: "center", gap: 8 },
+  elapsedText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontVariant: ["tabular-nums"],
+  },
+  trialWarn: { backgroundColor: "#e63946" },
+
+  controls: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    padding: 12,
+    gap: 8,
+  },
+  teamControl: {
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    minWidth: 116,
+  },
+  controlTeamName: { color: "#fff", fontWeight: "700", fontSize: 12, marginBottom: 6, maxWidth: 140 },
+  scoreRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  minusBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#333", alignItems: "center", justifyContent: "center" },
+  plusBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#e63946", alignItems: "center", justifyContent: "center" },
+  btnSign: { color: "#fff", fontSize: 24, fontWeight: "800", lineHeight: 28 },
+  controlScore: { color: "#fff", fontSize: 28, fontWeight: "900", minWidth: 36, textAlign: "center", fontVariant: ["tabular-nums"] },
+  centerControl: { alignItems: "center", gap: 6 },
+  periodBtn: { backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  periodText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  nextSetBtn: { backgroundColor: "#f4a300", borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 },
+  nextSetText: { color: "#1a1a1a", fontWeight: "800", fontSize: 14 },
+  shareBtn: { backgroundColor: "#1d9bf0", borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 },
+  shareText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  codeText: { color: "#bbb", fontSize: 11 },
+});

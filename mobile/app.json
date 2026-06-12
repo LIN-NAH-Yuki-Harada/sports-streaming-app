@@ -2,8 +2,10 @@
   "expo": {
     "name": "LIVE SPOtCH 配信",
     "slug": "mobile",
+    "owner": "live-spotch",
+    "scheme": "spotch",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
@@ -11,8 +13,10 @@
       "bundleIdentifier": "com.linnah.spotch",
       "infoPlist": {
         "NSCameraUsageDescription": "試合をライブ配信するためにカメラを使用します",
-        "NSMicrophoneUsageDescription": "試合音声を配信するためにマイクを使用します"
-      }
+        "NSMicrophoneUsageDescription": "試合音声を配信するためにマイクを使用します",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bitcode": false
     },
     "android": {
       "package": "com.linnah.spotch",
@@ -22,7 +26,17 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -32,11 +46,36 @@
       [
         "@livekit/react-native-expo-plugin",
         {
-          "android": { "audioType": "communication" },
-          "ios": { "enableMultitaskingCameraAccess": false }
+          "android": {
+            "audioType": "communication"
+          },
+          "ios": {
+            "enableMultitaskingCameraAccess": false
+          }
         }
       ],
-      "@config-plugins/react-native-webrtc"
-    ]
+      "@config-plugins/react-native-webrtc",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.777091676817-uan980uhrntr8lur8f4qg44f8jok20kf"
+        }
+      ],
+      "./plugins/withGoogleSignInModularHeaders.js",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "62a4b92f-149d-46a2-adfa-dbb55555f0bf"
+      }
+    }
   }
 }
