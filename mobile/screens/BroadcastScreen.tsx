@@ -279,7 +279,11 @@ export function BroadcastScreen() {
 
       // 電波が不安定で応答が返らないとボタンが固まるため 15 秒でタイムアウト
       const ctrl = new AbortController();
-      const timeoutId = setTimeout(() => ctrl.abort(), 15_000);
+      let timedOut = false; // abort 理由を明示（e.name 判定に依存しない）
+      const timeoutId = setTimeout(() => {
+        timedOut = true;
+        ctrl.abort();
+      }, 15_000);
       let res: Response;
       try {
         res = await fetch(SITE_URL + "/api/livekit/token", {
@@ -296,12 +300,12 @@ export function BroadcastScreen() {
           }),
           signal: ctrl.signal,
         });
-      } catch (e) {
-        const offline =
-          e instanceof Error && e.name === "AbortError"
+      } catch {
+        setMessage(
+          timedOut
             ? "サーバーの応答がありません。電波の良い場所で再度お試しください。"
-            : "通信に失敗しました。電波状況をご確認ください。";
-        setMessage(offline);
+            : "通信に失敗しました。電波状況をご確認ください。",
+        );
         await endBroadcast(createdCode).catch(() => {});
         setBusy(false);
         return;

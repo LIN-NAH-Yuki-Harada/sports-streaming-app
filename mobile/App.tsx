@@ -52,13 +52,29 @@ export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
 
   useEffect(() => {
-    AsyncStorage.getItem("onboarded_v1").then((v) => setOnboarded(v === "1"));
+    // reject ハンドラを必ず付ける: AsyncStorage がネイティブ層で失敗(破損/容量)しても
+    // onboarded を null のまま固定させない（→ スプラッシュ永久残留を防ぐ）。
+    AsyncStorage.getItem("onboarded_v1").then(
+      (v) => setOnboarded(v === "1"),
+      () => setOnboarded(false),
+    );
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    // 同上: getSession が reject しても session を undefined のまま固定させない。
+    supabase.auth.getSession().then(
+      ({ data }) => setSession(data.session),
+      () => setSession(null),
+    );
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // 保険: 何らかの理由で ready にならなくても 8 秒でネイティブスプラッシュを必ず剥がす
+  // （無反応スプラッシュに閉じ込めない）。
+  useEffect(() => {
+    const t = setTimeout(() => SplashScreen.hideAsync().catch(() => {}), 8000);
+    return () => clearTimeout(t);
   }, []);
 
   const ready = onboarded !== null && session !== undefined;

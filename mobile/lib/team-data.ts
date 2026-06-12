@@ -91,15 +91,22 @@ export async function fetchMyFullTeams(): Promise<FullTeam[]> {
   const token = await getAccessToken();
   if (!token) return [];
 
-  const res = await fetch(`${SITE_URL}/api/teams`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    console.error("チーム一覧取得エラー:", json?.error ?? res.status);
+  // 会場の弱電波が中心ユースケースのため、オフライン/DNS/TLS 失敗で fetch が throw しても
+  // 未処理 reject にせず空配列で返す（createTeam/joinTeamByCode と同じ防御）。
+  try {
+    const res = await fetch(`${SITE_URL}/api/teams`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error("チーム一覧取得エラー:", json?.error ?? res.status);
+      return [];
+    }
+    return (json.teams ?? []) as FullTeam[];
+  } catch (e) {
+    console.error("チーム一覧取得の通信エラー:", e);
     return [];
   }
-  return (json.teams ?? []) as FullTeam[];
 }
 
 /**

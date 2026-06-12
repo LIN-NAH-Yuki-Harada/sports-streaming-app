@@ -172,11 +172,12 @@ function HistoryCard({ bc }: { bc: HistoryBroadcast }) {
 
   // 視聴は当面 Web（自社プレイヤー）に飛ばす
   const openWatch = useCallback(() => {
-    Linking.openURL(`${SITE_URL}/watch/${bc.share_code}`);
+    // 他画面と同様、URL を開けない場合の reject を握って未処理 reject を防ぐ。
+    Linking.openURL(`${SITE_URL}/watch/${bc.share_code}`).catch(() => {});
   }, [bc.share_code]);
 
   const openYouTube = useCallback(() => {
-    if (ytUrl) Linking.openURL(ytUrl);
+    if (ytUrl) Linking.openURL(ytUrl).catch(() => {});
   }, [ytUrl]);
 
   return (

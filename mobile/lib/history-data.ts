@@ -111,12 +111,14 @@ export function sportEmoji(sport: string): string {
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 export function dateGroupLabel(iso: string): string {
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "日付不明"; // 不正な started_at でも落とさない
   return `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
 }
 
 // started_at を「HH:MM」形式の時刻表示に整形。
 export function timeLabel(iso: string): string {
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "--:--";
   const hh = d.getHours().toString().padStart(2, "0");
   const mm = d.getMinutes().toString().padStart(2, "0");
   return `${hh}:${mm}`;

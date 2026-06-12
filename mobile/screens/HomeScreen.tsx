@@ -105,9 +105,12 @@ export function HomeScreen() {
     useCallback(() => {
       let active = true;
       setLoading(true);
-      load().finally(() => {
-        if (active) setLoading(false);
-      });
+      // load() 内の fetch/クエリが弱電波で throw しても画面を落とさない最終防衛。
+      load()
+        .catch((e) => console.error("ホーム読み込みエラー:", e))
+        .finally(() => {
+          if (active) setLoading(false);
+        });
       return () => {
         active = false;
       };
