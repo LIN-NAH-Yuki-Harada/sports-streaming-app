@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -17,15 +18,18 @@ import {
   type MyProfile,
   fetchMyProfile,
   PLAN_LABELS,
+  PLAN_LABELS_NO_PRICE,
 } from "../lib/mypage-data";
 
 // マイページ（配信専用ネイティブアプリ）。
 // プロフィール / 現在のプラン / YouTube 連携状態 を「表示」する。
-// ★ プラン変更・YouTube 連携/解除・退会の「実操作」はアプリ内に持たず Web へ誘導する
-//   （Apple のアプリ内課金ポリシー回避のため、アプリ内に課金 UI を置かない方針）。
-// ログアウトのみアプリ内で完結（supabase.auth.signOut）。
+// ★ プラン変更・YouTube 連携/解除は Web へ誘導（アプリ内に課金 UI を置かない方針）。
+//   iOS では Apple 3.1.1 対応で価格表示・外部決済への誘導CTAを出さない。
+// ★ 退会（アカウント削除）は Apple 5.1.1(v) 対応でアプリ内から完結（/api/account/delete）。
+// ログアウトもアプリ内で完結（supabase.auth.signOut）。
 
 const APP_VERSION = "1.0.0";
+const IS_IOS = Platform.OS === "ios";
 
 export function MyPageScreen() {
   const [loading, setLoading] = useState(true);
@@ -79,24 +83,54 @@ export function MyPageScreen() {
     ]);
   }, []);
 
-  // 退会は不可逆かつ決済解約も伴うため、アプリ内では確認のうえ Web のマイページへ誘導する。
+  // 退会（アカウント削除）: Apple 5.1.1(v) 対応でアプリ内から開始・完了まで完結する。
+  // /api/account/delete（PR #163 で堅牢化済み・Bearer トークンから本人を導出して
+  // Stripe 解約＋自分の配信/所属/プロフィール/authユーザーを削除）を直接叩く。
+  const [deleting, setDeleting] = useState(false);
+  const doDelete = useCallback(async () => {
+    setDeleting(true);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) {
+        Alert.alert("エラー", "セッションがありません。再ログインしてください。");
+        return;
+      }
+      const res = await fetch(`${SITE_URL}/api/account/delete`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        Alert.alert("削除に失敗しました", j?.error ?? `エラー (${res.status})`);
+        return;
+      }
+      // 成功 → サインアウト（App.tsx の onAuthStateChange がログイン画面へ戻す）
+      await supabase.auth.signOut().catch(() => {});
+      Alert.alert("退会が完了しました", "ご利用ありがとうございました。");
+    } catch {
+      Alert.alert("通信エラー", "電波状況をご確認のうえ、再度お試しください。");
+    } finally {
+      setDeleting(false);
+    }
+  }, []);
+
   const handleDelete = useCallback(() => {
     Alert.alert(
       "アカウントを削除（退会）",
-      "退会手続きはWebのマイページからAdministratorが行います。ブラウザを開きますか？",
+      "アカウントと配信データが完全に削除され、元に戻せません。有料プランは自動的に解約されます。削除しますか？",
       [
         { text: "キャンセル", style: "cancel" },
-        {
-          text: "Webで手続き",
-          style: "destructive",
-          onPress: () => openWeb("/mypage"),
-        },
+        { text: "削除する", style: "destructive", onPress: doDelete },
       ],
     );
-  }, [openWeb]);
+  }, [doDelete]);
 
-  // プラン表示名（取得前は無料プラン表記をプレースホルダに）
-  const planLabel = PLAN_LABELS[profile?.plan ?? "free"];
+  // プラン表示名（取得前は無料プラン表記をプレースホルダに）。
+  // iOS は 3.1.1 対応で金額なしラベルを使う。
+  const planLabel = (IS_IOS ? PLAN_LABELS_NO_PRICE : PLAN_LABELS)[
+    profile?.plan ?? "free"
+  ];
   const displayName = profile?.display_name || email || "ユーザー";
   const initial = (profile?.display_name || email || "U")
     .charAt(0)
@@ -144,18 +178,24 @@ export function MyPageScreen() {
                 </Text>
               ) : null}
               <Text style={styles.cardNote}>
-                プランの変更・解約・お支払いはWebのマイページから行えます。
+                {IS_IOS
+                  ? "プランの確認・変更はWebのマイページから行えます。"
+                  : "プランの変更・解約・お支払いはWebのマイページから行えます。"}
               </Text>
-              <Pressable
-                style={styles.webButton}
-                onPress={() => openWeb("/mypage")}
-              >
-                <Text style={styles.webButtonText}>
-                  {profile?.plan === "free"
-                    ? "プランを選ぶ（Webへ）"
-                    : "プラン管理（Webへ）"}
-                </Text>
-              </Pressable>
+              {/* iOS の無料プランでは外部Web決済への誘導CTAを出さない（3.1.1）。
+                  既存有料ユーザーの管理導線（Web契約の確認/解約）は出してよい。 */}
+              {IS_IOS && profile?.plan === "free" ? null : (
+                <Pressable
+                  style={styles.webButton}
+                  onPress={() => openWeb("/mypage")}
+                >
+                  <Text style={styles.webButtonText}>
+                    {profile?.plan === "free"
+                      ? "プランを選ぶ（Webへ）"
+                      : "プラン管理（Webへ）"}
+                  </Text>
+                </Pressable>
+              )}
             </View>
 
             {/* YouTube 連携（状態表示のみ。連携/解除は Web へ） */}
@@ -241,9 +281,15 @@ export function MyPageScreen() {
               <Text style={styles.logoutText}>ログアウト</Text>
             </Pressable>
 
-            {/* アカウント削除（退会）→ Web 誘導 */}
-            <Pressable style={styles.deleteButton} onPress={handleDelete}>
-              <Text style={styles.deleteText}>アカウントを削除（退会）</Text>
+            {/* アカウント削除（退会）→ アプリ内で完結（Apple 5.1.1(v)） */}
+            <Pressable
+              style={styles.deleteButton}
+              onPress={handleDelete}
+              disabled={deleting}
+            >
+              <Text style={styles.deleteText}>
+                {deleting ? "削除しています…" : "アカウントを削除（退会）"}
+              </Text>
             </Pressable>
           </>
         )}

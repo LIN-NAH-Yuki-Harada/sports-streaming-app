@@ -257,7 +257,7 @@ export function TeamScreen() {
         {subTab === "create" && (
           <View style={styles.section}>
             <Text style={styles.help}>
-              チームの作成はチームプラン（¥500/月）の特典です。
+              チームの作成はチームプランの特典です。
             </Text>
 
             <Text style={styles.label}>チーム名 *</Text>

@@ -89,3 +89,12 @@ export const PLAN_LABELS: Record<Plan, string> = {
   broadcaster: "配信者プラン（¥300/月）",
   team: "チームプラン（¥500/月）",
 };
+
+// iOS 表示用の価格なしラベル（App Store Guideline 3.1.1: アプリ内でデジタル
+// サブスクの価格表示＋外部Web決済への誘導はリジェクト要因になりうるため、
+// iOS ビルドでは金額を出さない）。Android では PLAN_LABELS を使う。
+export const PLAN_LABELS_NO_PRICE: Record<Plan, string> = {
+  free: "無料プラン",
+  broadcaster: "配信者プラン",
+  team: "チームプラン",
+};
