@@ -263,6 +263,14 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   }
 
   const isLive = broadcast.status === "live";
+  // 終了後のYouTubeアーカイブ動画ID。youtube_video_id は egress_ended webhook が
+  // コピーするまで遅延するため、live配信が正常終了(live_status='ended')していれば
+  // live_youtube_broadcast_id（=同じ動画ID）をフォールバックに使い、即アーカイブ誘導する。
+  const archiveYoutubeId =
+    broadcast.youtube_video_id ??
+    (broadcast.live_status === "ended"
+      ? broadcast.live_youtube_broadcast_id
+      : null);
 
   return (
     <div className="min-h-screen bg-black flex flex-col">
@@ -322,7 +330,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               </a>
             )}
           </div>
-        ) : broadcast.youtube_video_id ? (
+        ) : archiveYoutubeId ? (
           // 配信終了 + YouTube アーカイブあり
           // ※ Made for Kids 配信のアーカイブは iframe 埋め込みが拒否されるため、
           //   YouTube で開くリンクをメインの導線として置く（iframe での再生失敗を回避）。
@@ -340,7 +348,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               </p>
             </div>
             <a
-              href={`https://www.youtube.com/watch?v=${broadcast.youtube_video_id}`}
+              href={`https://www.youtube.com/watch?v=${archiveYoutubeId}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-5 py-2.5 rounded-md transition"
