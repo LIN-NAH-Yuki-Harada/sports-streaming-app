@@ -105,9 +105,11 @@ eas submit -p ios --profile production --latest
 
 iOS提出ブロッカーのコードは実装済み。以下はオーナーが各サービスの管理画面で行う作業。
 
-### 6-1. Supabase（モデレーション用テーブル）
-- Supabase ダッシュボード → SQL Editor で `web/supabase-migration-moderation.sql` を実行
-  （reports / blocked_users テーブル＋RLS を作成）。これが無いと通報・ブロックが失敗する。
+### 6-1. Supabase（SQL Editor で実行・どちらも追加のみで安全）
+- `web/supabase-migration-moderation.sql` … reports / blocked_users テーブル＋RLS。
+  これが無いと通報・ブロックが失敗する。
+- `web/supabase-migration-broadcasts-set-results-grant.sql` … 履歴のセット別スコア表示用に
+  set_results 列をクライアントへ開放。未適用でも履歴は正常動作するが、セット別内訳は出ない。
 
 ### 6-2. Sign in with Apple（4.8）
 - **Apple Developer**: Certificates, Identifiers & Profiles → App ID `com.linnah.spotch` →
