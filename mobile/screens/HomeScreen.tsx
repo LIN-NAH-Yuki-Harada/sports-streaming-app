@@ -23,6 +23,11 @@ import {
   type HomeBroadcast,
   type HomeSchedule,
 } from "../lib/home-data";
+import { fetchBlockedIds } from "../lib/moderation";
+import {
+  ModerationMenu,
+  type ModerationTarget,
+} from "../components/ModerationMenu";
 
 // ホームタブ。視聴者・配信者の両方が使う入り口。
 // (a) 共有コード視聴: コード入力 → 自社プレイヤー(Web)を Linking で開く。
@@ -67,6 +72,10 @@ export function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // モデレーション（通報・ブロック）。ブロック済み配信者はカードから除外する。
+  const [blockedIds, setBlockedIds] = useState<string[]>([]);
+  const [modTarget, setModTarget] = useState<ModerationTarget | null>(null);
+
   // Realtime チャンネルの解放用 ref（再購読時に前のを必ず外す）。
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -91,12 +100,15 @@ export function HomeScreen() {
     // 所属チームを先に取得し、その team_id 群で LIVE / 予定を引く。
     const myTeams = await fetchMyTeams(userId);
     const teamIds = myTeams.map((t) => t.id);
-    const [liveRows, scheduleRows] = await Promise.all([
+    const [liveRows, scheduleRows, blocked] = await Promise.all([
       fetchMyLiveBroadcasts(userId, teamIds),
       fetchUpcomingSchedules(teamIds, 20),
+      fetchBlockedIds(userId),
     ]);
     setTeams(myTeams);
-    setLive(liveRows);
+    setBlockedIds(blocked);
+    // ブロック済み配信者の配信は表示しない（Guideline 1.2 のフィルタ）。
+    setLive(liveRows.filter((b) => !blocked.includes(b.broadcaster_id)));
     setSchedules(scheduleRows);
   }, []);
 
@@ -252,6 +264,21 @@ export function HomeScreen() {
                     <View style={styles.liveBadge}>
                       <Text style={styles.liveBadgeText}>LIVE</Text>
                     </View>
+                    {/* 通報・ブロック（Guideline 1.2）。カードのタップ(視聴)とは独立。 */}
+                    <Pressable
+                      style={styles.reportBtn}
+                      hitSlop={8}
+                      onPress={() =>
+                        setModTarget({
+                          broadcastId: b.id,
+                          broadcasterId: b.broadcaster_id,
+                          shareCode: b.share_code,
+                          label: `${b.home_team} vs ${b.away_team}`,
+                        })
+                      }
+                    >
+                      <Text style={styles.reportBtnText}>⋯</Text>
+                    </Pressable>
                   </View>
                   <View style={styles.liveBottomRow}>
                     <Text style={styles.liveScore}>
@@ -344,6 +371,20 @@ export function HomeScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* 通報・ブロックメニュー（Guideline 1.2） */}
+      <ModerationMenu
+        visible={modTarget !== null}
+        target={modTarget}
+        currentUserId={uid}
+        onClose={() => setModTarget(null)}
+        onBlocked={(blockedId) => {
+          setBlockedIds((prev) =>
+            prev.includes(blockedId) ? prev : [...prev, blockedId],
+          );
+          setLive((prev) => prev.filter((b) => b.broadcaster_id !== blockedId));
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -355,6 +396,10 @@ const styles = StyleSheet.create({
 
   sectionTitle: { color: "#ddd", fontSize: 15, fontWeight: "700" },
   sectionGap: { marginTop: 28 },
+
+  // 通報・ブロック トリガー（カード右上）
+  reportBtn: { paddingHorizontal: 6, paddingVertical: 2, marginLeft: 4 },
+  reportBtnText: { color: "#888", fontSize: 18, fontWeight: "800", lineHeight: 18 },
 
   // 共有コード入力
   codeRow: { flexDirection: "row", gap: 8, marginTop: 10 },

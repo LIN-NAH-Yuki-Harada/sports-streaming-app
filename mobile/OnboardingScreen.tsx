@@ -39,6 +39,11 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
           title="子どもの安全のために"
           body="お子さんだけが長く映り続けないよう、ときどきベンチや観客席も映してください（配信プラットフォームの方針です）。"
         />
+        <Section
+          emoji="🚫"
+          title="不適切なコンテンツは一切許容しません"
+          body="嫌がらせ・わいせつ・暴力など不適切なコンテンツや迷惑行為は禁止です。見かけた配信は各画面の「⋯」から通報・ブロックでき、通報には24時間以内に対応します。違反者は利用を停止します。"
+        />
 
         <View style={styles.links}>
           <Pressable onPress={() => Linking.openURL(`${SITE_URL}/terms`)}>
@@ -54,7 +59,8 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
           <Text style={styles.buttonText}>同意して始める</Text>
         </Pressable>
         <Text style={styles.note}>
-          「同意して始める」を押すと、利用規約とプライバシーポリシーに同意したものとみなします。
+          「同意して始める」を押すと、利用規約・プライバシーポリシー、および
+          不適切なコンテンツ・迷惑行為を一切許容しない方針に同意したものとみなします。
         </Text>
       </ScrollView>
     </SafeAreaView>

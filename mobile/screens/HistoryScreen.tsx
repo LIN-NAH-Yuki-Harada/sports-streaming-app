@@ -23,6 +23,11 @@ import {
   timeLabel,
   youtubeWatchUrl,
 } from "../lib/history-data";
+import { fetchBlockedIds } from "../lib/moderation";
+import {
+  ModerationMenu,
+  type ModerationTarget,
+} from "../components/ModerationMenu";
 
 // 配信履歴タブ。過去の配信（status=ended）を日付グループで一覧表示する。
 // ・self  = 自分が配信したもの（broadcaster_id=自分）
@@ -39,6 +44,8 @@ export function HistoryScreen() {
   const [groups, setGroups] = useState<HistoryGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [count, setCount] = useState(0);
+  const [uid, setUid] = useState<string | null>(null);
+  const [modTarget, setModTarget] = useState<ModerationTarget | null>(null);
 
   // 所属チーム一覧（フィルタチップ用）を初回取得
   useEffect(() => {
@@ -61,19 +68,24 @@ export function HistoryScreen() {
     (async () => {
       setLoading(true);
       const { data } = await supabase.auth.getSession();
-      const uid = data.session?.user.id;
+      const userId = data.session?.user.id ?? null;
       if (cancelled) return;
-      if (!uid) {
+      setUid(userId);
+      if (!userId) {
         setGroups([]);
         setCount(0);
         setLoading(false);
         return;
       }
-      const items =
-        filter === "self" ? await fetchMyHistory(uid) : await fetchTeamHistory(filter);
+      const [items, blocked] = await Promise.all([
+        filter === "self" ? fetchMyHistory(userId) : fetchTeamHistory(filter),
+        fetchBlockedIds(userId),
+      ]);
       if (cancelled) return;
-      setGroups(groupByDate(items));
-      setCount(items.length);
+      // ブロック済み配信者の履歴は表示しない（Guideline 1.2 のフィルタ）。
+      const visible = items.filter((bc) => !blocked.includes(bc.broadcaster_id));
+      setGroups(groupByDate(visible));
+      setCount(visible.length);
       setLoading(false);
     })();
     return () => {
@@ -120,12 +132,42 @@ export function HistoryScreen() {
             <View key={group.date} style={styles.group}>
               <Text style={styles.groupDate}>{group.date}</Text>
               {group.items.map((bc) => (
-                <HistoryCard key={bc.id} bc={bc} />
+                <HistoryCard
+                  key={bc.id}
+                  bc={bc}
+                  onReport={() =>
+                    setModTarget({
+                      broadcastId: bc.id,
+                      broadcasterId: bc.broadcaster_id,
+                      shareCode: bc.share_code,
+                      label: `${bc.home_team} vs ${bc.away_team}`,
+                    })
+                  }
+                />
               ))}
             </View>
           ))}
         </ScrollView>
       )}
+
+      {/* 通報・ブロックメニュー（Guideline 1.2） */}
+      <ModerationMenu
+        visible={modTarget !== null}
+        target={modTarget}
+        currentUserId={uid}
+        onClose={() => setModTarget(null)}
+        onBlocked={(blockedId) => {
+          // ブロックした配信者の履歴を即時に一覧から除く。
+          setGroups((prev) =>
+            prev
+              .map((g) => ({
+                ...g,
+                items: g.items.filter((b) => b.broadcaster_id !== blockedId),
+              }))
+              .filter((g) => g.items.length > 0),
+          );
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -165,7 +207,13 @@ function EmptyState({ isTeamFilter }: { isTeamFilter: boolean }) {
   );
 }
 
-function HistoryCard({ bc }: { bc: HistoryBroadcast }) {
+function HistoryCard({
+  bc,
+  onReport,
+}: {
+  bc: HistoryBroadcast;
+  onReport: () => void;
+}) {
   // セットありの競技（バレー等）はセット数を、それ以外は得点を表示
   const setBased = bc.home_sets > 0 || bc.away_sets > 0;
   const ytUrl = youtubeWatchUrl(bc);
@@ -222,6 +270,10 @@ function HistoryCard({ bc }: { bc: HistoryBroadcast }) {
             <Text style={styles.ytText}>YouTubeで見る（限定公開）</Text>
           </Pressable>
         ) : null}
+        {/* 通報・ブロック（Guideline 1.2） */}
+        <Pressable style={styles.reportBtn} hitSlop={8} onPress={onReport}>
+          <Text style={styles.reportBtnText}>⋯</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -229,6 +281,13 @@ function HistoryCard({ bc }: { bc: HistoryBroadcast }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0a0a0a" },
+  reportBtn: {
+    marginLeft: "auto",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    alignSelf: "center",
+  },
+  reportBtnText: { color: "#777", fontSize: 18, fontWeight: "800", lineHeight: 18 },
   title: {
     color: "#fff",
     fontSize: 22,
