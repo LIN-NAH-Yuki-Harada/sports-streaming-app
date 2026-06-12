@@ -147,6 +147,27 @@ export function BroadcastScreen() {
 
   const setBased = isSetBased(sportKey);
 
+  // finishLive から「最新の得点状態」を参照するための ref（毎レンダー更新・依存配列を膨らませない）。
+  // 終了時に、未確定の最終セット得点を set_results へ記録するのに使う。
+  const liveScoreRef = useRef({
+    setBased,
+    homeScore,
+    awayScore,
+    homeSets,
+    awaySets,
+    setResults,
+    period,
+  });
+  liveScoreRef.current = {
+    setBased,
+    homeScore,
+    awayScore,
+    homeSets,
+    awaySets,
+    setResults,
+    period,
+  };
+
   // 競技＋ルール種別に応じた有効ピリオド配列（野球はカテゴリでイニング数が変わる）
   const activePeriods = useMemo(
     () => (sportKey === "baseball" ? baseballPeriods(baseballRuleName) : periodsFor(sportKey)),
@@ -393,6 +414,35 @@ export function BroadcastScreen() {
         reconnectTimerRef.current = null;
       }
       await AudioSession.stopAudioSession().catch(() => {});
+      // 終了時に「現時点の得点」を最終確定として記録する（全競技・オーナー要望 2026-06-13）。
+      const ls = liveScoreRef.current;
+      if (shareCode) {
+        if (ls.setBased) {
+          // セット制（バレー/バドミントン/卓球）: 最終セットは「次のセットへ」を押さず終了するのが
+          // 普通で、そのままだと最後のセット得点が set_results に記録されない。現在のセット得点を
+          // 確定してセット数・内訳に反映する。
+          if (ls.homeScore > 0 || ls.awayScore > 0) {
+            const r = advanceSet(
+              { homeSets: ls.homeSets, awaySets: ls.awaySets, setResults: ls.setResults },
+              ls.homeScore,
+              ls.awayScore,
+            );
+            await updateScore(shareCode, {
+              home_sets: r.state.homeSets,
+              away_sets: r.state.awaySets,
+              set_results: r.state.setResults,
+            }).catch(() => {});
+          }
+        } else {
+          // 非セット制（サッカー/バスケ/野球等）: 直前のライブ更新が電波で失敗していても
+          // 最終スコアが残るよう、終了時に現在の得点・ピリオドを書き直す。
+          await updateScore(shareCode, {
+            home_score: ls.homeScore,
+            away_score: ls.awayScore,
+            period: ls.period,
+          }).catch(() => {});
+        }
+      }
       if (shareCode) await endBroadcast(shareCode).catch(() => {});
       // YouTube同時配信を停止（Egress停止→enableAutoStopでアーカイブ化）。全終了経路を通る finishLive に集約。
       // await しない（弱電波でも停止UIを固めない）。停止し損ねても webhook/cron/次回開始時の掃除で回収される。
