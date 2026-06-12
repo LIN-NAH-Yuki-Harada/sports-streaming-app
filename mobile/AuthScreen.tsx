@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import {
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -14,8 +15,13 @@ import {
   isSuccessResponse,
   isErrorWithCode,
 } from "@react-native-google-signin/google-signin";
+import * as AppleAuthentication from "expo-apple-authentication";
 import { supabase } from "./lib/supabase";
 import { SITE_URL, GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from "./config";
+
+// Google などの第三者ログインを提供する iOS アプリは、App Store Guideline 4.8 により
+// Sign in with Apple の併設が必須。iOS でのみ Apple ボタンを表示する。
+const IS_IOS = Platform.OS === "ios";
 
 // Google ネイティブログインの初期化（モジュール読み込み時に一度だけ）。
 // webClientId は idToken 取得に必須、iosClientId は iOS のアカウントシート表示に必須。
@@ -84,6 +90,38 @@ export function AuthScreen() {
     );
   }, [email]);
 
+  // Sign in with Apple（iOS のみ・Guideline 4.8）。identityToken → Supabase セッション。
+  const handleApple = useCallback(async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      if (credential.identityToken) {
+        const { error } = await supabase.auth.signInWithIdToken({
+          provider: "apple",
+          token: credential.identityToken,
+        });
+        if (error) setMessage("Appleログイン失敗: " + error.message);
+      } else {
+        setMessage("Appleログインに失敗しました（トークンなし）。");
+      }
+    } catch (e) {
+      // ユーザーがキャンセルした場合は無言で戻す
+      if ((e as { code?: string })?.code === "ERR_REQUEST_CANCELED") {
+        // no-op
+      } else {
+        setMessage("Appleログインでエラーが発生しました。");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   // Google ネイティブログイン。アカウント選択シート → idToken → Supabase セッション。
   const handleGoogle = useCallback(async () => {
     setBusy(true);
@@ -118,6 +156,20 @@ export function AuthScreen() {
         <Text style={styles.sub}>{authMode === "login" ? "ログイン" : "新規登録"}</Text>
 
         <View style={styles.form}>
+          {/* Sign in with Apple（iOS のみ・Guideline 4.8 で Google と同等の視認性で併設） */}
+          {IS_IOS ? (
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={
+                AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+              }
+              buttonStyle={
+                AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+              }
+              cornerRadius={8}
+              style={styles.appleButton}
+              onPress={handleApple}
+            />
+          ) : null}
           <Pressable
             style={styles.googleButton}
             onPress={handleGoogle}
@@ -206,6 +258,7 @@ const styles = StyleSheet.create({
   linkButton: { padding: 10, alignItems: "center" },
   linkText: { color: "#888", fontSize: 13 },
   message: { color: "#ffb4b4", marginTop: 16, textAlign: "center" },
+  appleButton: { height: 48, marginBottom: 8 },
   googleButton: { backgroundColor: "#fff", borderRadius: 8, padding: 14, alignItems: "center" },
   googleButtonText: { color: "#1a1a1a", fontSize: 16, fontWeight: "700" },
   divider: { flexDirection: "row", alignItems: "center", marginVertical: 10, gap: 10 },
