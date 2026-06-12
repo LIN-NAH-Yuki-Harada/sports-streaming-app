@@ -8,6 +8,7 @@ import { LiveKitViewer } from "@/components/livekit-video";
 import { ViewerScoreboardOverlay } from "@/components/viewer-scoreboard-overlay";
 import { Logo } from "@/components/logo";
 import { ShareButtons } from "@/components/share-buttons";
+import { LiveReactions } from "@/components/live-reactions";
 import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
 
 const SITE_URL =
@@ -487,6 +488,9 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             </button>
           </div>
         )}
+
+        {/* ライブ応援スタンプ（❤️/👍・配信中のみ・全視聴者と配信者にリアルタイム共有） */}
+        {isLive && <LiveReactions shareCode={broadcast.share_code} />}
       </div>
 
       {/* 試合情報（映像下部） */}
