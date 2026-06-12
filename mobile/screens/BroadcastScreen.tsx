@@ -49,6 +49,8 @@ import {
   updateScore,
   endBroadcast,
   sweepGhostBroadcasts,
+  startLiveStream,
+  stopLiveStream,
 } from "../lib/broadcasts";
 import {
   type Plan,
@@ -58,6 +60,7 @@ import {
   FREE_TRIAL_TOTAL_SECONDS,
 } from "../lib/plan";
 import { type MyTeam, fetchMyTeams } from "../lib/teams";
+import { fetchMyProfile } from "../lib/mypage-data";
 import { useNavigation } from "@react-navigation/native";
 
 // 配信専用ネイティブアプリ。カメラをネイティブ(ハードエンコーダ)で publish しつつ、
@@ -131,6 +134,16 @@ export function BroadcastScreen() {
   // 前回の配信時間（終了サマリー用）
   const [lastDurationSec, setLastDurationSec] = useState(0);
 
+  // YouTube同時配信＋自動アーカイブ（チームプラン＋YouTube連携済みのとき）。
+  // broadcasts.id(UUID) を live/start・live/stop のボディに使う（share_codeではない）。
+  const broadcastIdRef = useRef<string | null>(null);
+  const liveStartedRef = useRef(false); // live/start を初回接続で1回だけ呼ぶガード
+  const youtubeRequestedRef = useRef(false); // この配信で同時配信ONを選んだか
+  const [youtubeEligible, setYoutubeEligible] = useState(false); // トグル表示条件
+  const [youtubeLiveOn, setYoutubeLiveOn] = useState(true); // トグル状態（既定ON）
+  const [liveYoutubeId, setLiveYoutubeId] = useState<string | null>(null); // 起動成功時のYouTube video ID
+  const [youtubeReadyAt, setYoutubeReadyAt] = useState(0); // ウォームアップ完了予定時刻(ms)
+
   const setBased = isSetBased(sportKey);
 
   // 競技＋ルール種別に応じた有効ピリオド配列（野球はカテゴリでイニング数が変わる）
@@ -160,10 +173,22 @@ export function BroadcastScreen() {
       const { data } = await supabase.auth.getSession();
       const uid = data.session?.user.id;
       if (!uid) return;
-      const [p, teams] = await Promise.all([fetchPlan(uid), fetchMyTeams(uid)]);
+      const [p, teams, profile] = await Promise.all([
+        fetchPlan(uid),
+        fetchMyTeams(uid),
+        fetchMyProfile(uid),
+      ]);
       if (cancelled) return;
       setPlan(p);
       setMyTeams(teams);
+      // YouTube同時配信は「チームプラン＋YouTube連携済み(channel_id)＋連携ON」のときだけ。
+      // youtube_refresh_token はクライアントから読めない機密列のため、連携済みの代理指標として
+      // youtube_channel_id 非null を使う（連携時に同時に書かれる）。最終判定はサーバー側 live/start。
+      setYoutubeEligible(
+        p === "team" &&
+          !!profile?.youtube_channel_id &&
+          profile?.youtube_live_enabled === true,
+      );
       if (p === "free") {
         const used = await fetchTrialUsedSeconds(uid);
         if (!cancelled) setTrialRemainingAtStart(Math.max(0, FREE_TRIAL_TOTAL_SECONDS - used));
@@ -260,7 +285,7 @@ export function BroadcastScreen() {
       setSetResults([]);
       setPeriod(initialPeriod);
 
-      const { error: insErr } = await createBroadcast({
+      const created = await createBroadcast({
         broadcasterId: session.user.id,
         shareCode: code,
         sport: sportLabel(sportKey),
@@ -270,12 +295,19 @@ export function BroadcastScreen() {
         teamId: selectedTeamId,
         initialPeriod,
       });
-      if (insErr) {
-        setMessage("配信作成エラー: " + insErr);
+      if (created.error) {
+        setMessage("配信作成エラー: " + created.error);
         setBusy(false);
         return;
       }
       createdCode = code;
+      // YouTube同時配信用に broadcasts.id(UUID) を保持。条件を満たし、かつトグルONなら起動予約。
+      broadcastIdRef.current = created.id ?? null;
+      liveStartedRef.current = false;
+      youtubeRequestedRef.current =
+        youtubeEligible && youtubeLiveOn && !!created.id;
+      setLiveYoutubeId(null);
+      setYoutubeReadyAt(0);
 
       // 電波が不安定で応答が返らないとボタンが固まるため 15 秒でタイムアウト
       const ctrl = new AbortController();
@@ -345,6 +377,8 @@ export function BroadcastScreen() {
     plan,
     trialRemainingAtStart,
     selectedTeamId,
+    youtubeEligible,
+    youtubeLiveOn,
   ]);
 
   // 配信終了（停止ボタン / 接続エラー / 切断 のいずれからも呼ばれる。二重実行は endedRef でガード）
@@ -359,6 +393,13 @@ export function BroadcastScreen() {
       }
       await AudioSession.stopAudioSession().catch(() => {});
       if (shareCode) await endBroadcast(shareCode).catch(() => {});
+      // YouTube同時配信を停止（Egress停止→enableAutoStopでアーカイブ化）。全終了経路を通る finishLive に集約。
+      if (broadcastIdRef.current) {
+        await stopLiveStream(broadcastIdRef.current).catch(() => {});
+      }
+      liveStartedRef.current = false;
+      setLiveYoutubeId(null);
+      setYoutubeReadyAt(0);
       // 配信終了サマリー用に配信時間を記録
       if (liveStartedAtRef.current) {
         setLastDurationSec(
@@ -458,6 +499,22 @@ export function BroadcastScreen() {
             clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
           }
+          // YouTube同時配信を起動（初回接続のみ・publish確立後）。fire-and-forget。
+          // remount=背景復帰の作り直しでは liveStartedRef が true のため呼ばない（live_egress_idで冪等だが二重防止）。
+          if (
+            youtubeRequestedRef.current &&
+            !liveStartedRef.current &&
+            broadcastIdRef.current
+          ) {
+            liveStartedRef.current = true;
+            startLiveStream(broadcastIdRef.current).then((r) => {
+              if (r.liveBroadcastId) {
+                setLiveYoutubeId(r.liveBroadcastId);
+                // YouTube は RTMP→CDN まで約15-30秒のウォームアップ。早すぎる共有を防ぐ。
+                setYoutubeReadyAt(Date.now() + 20000);
+              }
+            });
+          }
         }}
         onError={(e) => {
           if (remountingRef.current) return; // 作り直し中の一時エラーは無視
@@ -487,6 +544,8 @@ export function BroadcastScreen() {
           onPeriod={() => setPeriod((p) => nextPeriodIn(activePeriods, p))}
           onNextSet={handleNextSet}
           onStop={() => finishLive(null)}
+          youtubeShareUrl={liveYoutubeId ? `https://youtu.be/${liveYoutubeId}` : null}
+          youtubeReadyAt={youtubeReadyAt}
         />
       </LiveKitRoom>
     );
@@ -551,6 +610,31 @@ export function BroadcastScreen() {
                     このチームの配信として「配信中の試合」に表示されます
                   </Text>
                 )}
+              </>
+            )}
+
+            {/* YouTube同時配信トグル（チームプラン＋YouTube連携済みのときだけ表示） */}
+            {youtubeEligible && (
+              <>
+                <Text style={styles.label}>YouTube同時配信</Text>
+                <Pressable
+                  style={[styles.ytToggle, youtubeLiveOn && styles.ytToggleOn]}
+                  onPress={() => setYoutubeLiveOn((v) => !v)}
+                >
+                  <Text
+                    style={[
+                      styles.ytToggleText,
+                      youtubeLiveOn && styles.ytToggleTextOn,
+                    ]}
+                  >
+                    {youtubeLiveOn
+                      ? "📺 ON — YouTubeにも同時配信＋自動アーカイブ"
+                      : "OFF — 自社プレイヤーのみ"}
+                  </Text>
+                </Pressable>
+                <Text style={styles.ruleHint}>
+                  連携済みのYouTubeチャンネルに限定公開でライブ配信され、終了後はそのままアーカイブとして残ります。
+                </Text>
               </>
             )}
 
@@ -769,6 +853,8 @@ function LiveView({
   onPeriod,
   onNextSet,
   onStop,
+  youtubeShareUrl,
+  youtubeReadyAt,
 }: {
   shareCode: string | null;
   homeTeam: string;
@@ -788,20 +874,37 @@ function LiveView({
   onPeriod: () => void;
   onNextSet: () => void;
   onStop: () => void;
+  youtubeShareUrl: string | null; // YouTube同時配信が起動していれば https://youtu.be/<id>
+  youtubeReadyAt: number; // ウォームアップ完了予定時刻(ms)。これを過ぎるまでYouTubeリンクは共有しない
 }) {
   useKeepAwake(); // 配信中は画面をスリープさせない（長時間の発熱テスト対策）
   const tracks = useTracks([Track.Source.Camera]);
   const cam = tracks.find((t) => isTrackReference(t) && t.participant.isLocal) ?? tracks[0];
 
+  // YouTube が準備中（ウォームアップ中）かどうかを1秒ごとに判定。
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    if (!youtubeShareUrl) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    setNow(Date.now());
+    return () => clearInterval(id);
+  }, [youtubeShareUrl]);
+  const youtubeWarming = !!youtubeShareUrl && now < youtubeReadyAt;
+
   const watchUrl = `${SITE_URL}/watch/${shareCode ?? ""}`;
   const share = useCallback(async () => {
     try {
-      // url と message 両方に URL を入れると iOS で URL が二重になるため message のみ
-      await Share.share({ message: `試合をライブ配信中！\n${watchUrl}` });
+      // YouTube同時配信が起動済みかつウォームアップ完了後のみ YouTube版リンクを併記する。
+      // url と message 両方に URL を入れると iOS で URL が二重になるため message のみ。
+      let message = `試合をライブ配信中！\n${watchUrl}`;
+      if (youtubeShareUrl && Date.now() >= youtubeReadyAt) {
+        message += `\n\n📺 YouTube版\n${youtubeShareUrl}`;
+      }
+      await Share.share({ message });
     } catch {
       // 共有シートを閉じただけ等は無視
     }
-  }, [watchUrl]);
+  }, [watchUrl, youtubeShareUrl, youtubeReadyAt]);
 
   const confirmStop = useCallback(() => {
     Alert.alert("配信を停止しますか？", "視聴者に配信が終了します。", [
@@ -850,6 +953,11 @@ function LiveView({
           ) : null}
         </View>
         <View style={styles.topRightGroup}>
+          {youtubeShareUrl ? (
+            <Text style={[styles.elapsedText, styles.youtubeStatus]}>
+              {youtubeWarming ? "📺 YouTube準備中…" : "📺 YouTube同時配信中"}
+            </Text>
+          ) : null}
           {trialRemaining !== null && (
             <Text
               style={[styles.elapsedText, trialRemaining < 60 && styles.trialWarn]}
@@ -943,6 +1051,18 @@ const styles = StyleSheet.create({
   sportChipText: { color: "#ccc", fontSize: 14, fontWeight: "600" },
   sportChipTextActive: { color: "#fff" },
   ruleHint: { color: "#9ab", fontSize: 12, marginTop: 2 },
+  ytToggle: {
+    borderWidth: 1,
+    borderColor: "#444",
+    backgroundColor: "#1a1a1a",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  ytToggleOn: { backgroundColor: "rgba(230,57,70,0.15)", borderColor: "#e63946" },
+  ytToggleText: { color: "#ccc", fontSize: 14, fontWeight: "600" },
+  ytToggleTextOn: { color: "#fff" },
 
   liveRoot: { flex: 1, backgroundColor: "#000" },
   video: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
@@ -999,6 +1119,7 @@ const styles = StyleSheet.create({
   },
   stopText: { color: "#e63946", fontWeight: "800", fontSize: 13 },
   topRightGroup: { flexDirection: "row", alignItems: "center", gap: 8 },
+  youtubeStatus: { color: "#ff6b6b", fontWeight: "700" },
   elapsedText: {
     color: "#fff",
     fontWeight: "700",

@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { SITE_URL } from "../config";
 
 // broadcasts テーブル用のデータ層ヘルパー（React Native 専用・DOM/Node API 不使用）。
 // Web 版（web/src/lib/database.ts）の挙動・カラム名と完全に一致させること。
@@ -6,6 +7,9 @@ import { supabase } from "./supabase";
 
 // 配信レコードを新規作成（status=live で開始）。
 // カラム名は Web の createBroadcast / App.tsx の insert と完全一致させる。
+// 戻り値に broadcasts.id(UUID) を返す（YouTube同時配信 live/start のボディに必要）。
+// ※ id は BROADCAST_PUBLIC_COLUMNS に含まれ列GRANT済みなので .select("id") は通る
+//   （引数なし .select() は 42501 になるので必ず列を明示する）。
 export async function createBroadcast(args: {
   broadcasterId: string;
   shareCode: string;
@@ -15,28 +19,82 @@ export async function createBroadcast(args: {
   tournament: string;
   teamId?: string | null;
   initialPeriod: string;
-}): Promise<{ error?: string }> {
-  const { error } = await supabase.from("broadcasts").insert({
-    broadcaster_id: args.broadcasterId,
-    share_code: args.shareCode,
-    sport: args.sport,
-    home_team: args.homeTeam,
-    away_team: args.awayTeam,
-    // 大会名は空なら null（Web 版に合わせる）
-    tournament: args.tournament || null,
-    team_id: args.teamId ?? null,
-    period: args.initialPeriod,
-    home_score: 0,
-    away_score: 0,
-    home_sets: 0,
-    away_sets: 0,
-    status: "live",
-    // 発熱対策で焼き込みは既定 OFF（生配信・サーバー合成）
-    scoreboard_burned_in: false,
-  });
+}): Promise<{ id?: string; error?: string }> {
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .insert({
+      broadcaster_id: args.broadcasterId,
+      share_code: args.shareCode,
+      sport: args.sport,
+      home_team: args.homeTeam,
+      away_team: args.awayTeam,
+      // 大会名は空なら null（Web 版に合わせる）
+      tournament: args.tournament || null,
+      team_id: args.teamId ?? null,
+      period: args.initialPeriod,
+      home_score: 0,
+      away_score: 0,
+      home_sets: 0,
+      away_sets: 0,
+      status: "live",
+      // 発熱対策で焼き込みは既定 OFF（生配信・サーバー合成）
+      scoreboard_burned_in: false,
+    })
+    .select("id")
+    .single();
 
   if (error) return { error: error.message };
-  return {};
+  return { id: (data as { id: string } | null)?.id };
+}
+
+// YouTube同時配信＋自動アーカイブを起動（fire-and-forget・配信を止めない付加機能）。
+// サーバー(/api/livekit/live/start)が YouTube broadcast/stream作成→bind→LiveKit Cloud Egress起動を
+// 全部やる（スコア合成もサーバー側Chrome＝端末は無負荷）。前提（本番フラグ NEXT_PUBLIC_LIVE_ARCHIVE /
+// 配信者のYouTube連携 / profiles.youtube_live_enabled）が揃わない時は 200 {skipped} で何も起きない。
+// 戻り値 liveBroadcastId: 起動成功時は YouTube video ID（共有用 https://youtu.be/{id}）。skip/失敗時 null。
+export async function startLiveStream(
+  broadcastId: string,
+): Promise<{ liveBroadcastId: string | null }> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return { liveBroadcastId: null };
+    const res = await fetch(`${SITE_URL}/api/livekit/live/start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ broadcastId }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      liveBroadcastId?: string;
+    };
+    return { liveBroadcastId: json?.liveBroadcastId ?? null };
+  } catch {
+    return { liveBroadcastId: null };
+  }
+}
+
+// YouTube同時配信を停止（Egress停止→YouTube enableAutoStopで自動 complete＝アーカイブ化）。
+// fire-and-forget。停止し損ねても enableAutoStop でYouTube側は最終的にアーカイブ化されるが、
+// Egressが残ると課金が走るので終了経路で確実に呼ぶ。
+export async function stopLiveStream(broadcastId: string): Promise<void> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return;
+    await fetch(`${SITE_URL}/api/livekit/live/stop`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ broadcastId }),
+    });
+  } catch {
+    // fire-and-forget（配信本体は別経路で終了済み）
+  }
 }
 
 // ライブ中のスコア / ピリオド更新。share_code で対象行を特定する。
