@@ -9,6 +9,7 @@ import { ViewerScoreboardOverlay } from "@/components/viewer-scoreboard-overlay"
 import { Logo } from "@/components/logo";
 import { ShareButtons } from "@/components/share-buttons";
 import { LiveReactions } from "@/components/live-reactions";
+import { AdSlot } from "@/components/ad-slot";
 import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
 
 const SITE_URL =
@@ -358,11 +359,20 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               </svg>
               YouTube で視聴する
             </a>
+            {/* ブランクタイムCM枠（アーカイブ導線画面）。フラグOFF/在庫なし時は非表示。 */}
+            <div className="w-full pt-1">
+              <AdSlot placement="archive_pre" sport={broadcast.sport} />
+            </div>
           </div>
         ) : (
           <div className="text-center px-6 max-w-md">
             <p className="text-sm text-gray-400">この配信は終了しました</p>
             <p className="text-[10px] text-gray-600 mt-1 mb-5">ご視聴ありがとうございました</p>
+
+            {/* ブランクタイムCM枠（postroll）。フラグOFF/在庫なし時は何も描画しない。 */}
+            <div className="mb-6">
+              <AdSlot placement="postroll" sport={broadcast.sport} />
+            </div>
 
             {/* 明示的な「ホームへ戻る」ボタン（LP 宣伝の前に配置して戻り導線を分かりやすく） */}
             <Link
