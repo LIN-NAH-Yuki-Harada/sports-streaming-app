@@ -136,6 +136,11 @@ export async function updateScore(
     away_sets: number;
     set_results: unknown;
     point_label: string | null;
+    // 野球カウント（甲子園風 B/S/O＋走者）
+    balls: number;
+    strikes: number;
+    outs: number;
+    runners: { first: boolean; second: boolean; third: boolean };
   }>,
 ): Promise<void> {
   await supabase.from("broadcasts").update(patch).eq("share_code", shareCode);

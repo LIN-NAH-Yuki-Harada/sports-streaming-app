@@ -226,6 +226,71 @@ export function baseballPeriods(ruleName: string): string[] {
   return generateBaseballPeriods(rule ? rule.innings : 9);
 }
 
+// ============================================================================
+// 野球カウント状態機械（甲子園TV中継風の B/S/O＋走者）。純TS・副作用なし。
+// イニング/表裏は既存の period 文字列（"3回裏"等）を流用し、3アウト時に呼び出し側で
+// period を進める。ここでは B/S/O と走者のみを担う。
+// 自動: 3ストライク→三振(アウト+1, B/S=0) / 3アウト→攻守交代(全クリア・thirdOut通知)
+// 手動: 走者進塁、得点、フォアボール後の走者処理
+// ============================================================================
+export type BaseballRunners = { first: boolean; second: boolean; third: boolean };
+export type BaseballCount = {
+  balls: number; // 0..3
+  strikes: number; // 0..2
+  outs: number; // 0..2
+  runners: BaseballRunners;
+};
+
+export function emptyBaseballCount(): BaseballCount {
+  return {
+    balls: 0,
+    strikes: 0,
+    outs: 0,
+    runners: { first: false, second: false, third: false },
+  };
+}
+
+/** ボール+1。4球目（=フォアボール）でボール/ストライクを0に戻す（走者進塁は手動）。 */
+export function addBall(c: BaseballCount): BaseballCount {
+  if (c.balls >= 3) return { ...c, balls: 0, strikes: 0 }; // フォアボール→打者交代
+  return { ...c, balls: c.balls + 1 };
+}
+
+/** アウト+1（B/Sリセット）。3アウトで thirdOut=true＝攻守交代（呼び出し側で period 前進）。 */
+export function recordOut(c: BaseballCount): {
+  count: BaseballCount;
+  thirdOut: boolean;
+} {
+  const outs = c.outs + 1;
+  if (outs >= 3) {
+    // 攻守交代: B/S/O・走者を全クリア
+    return { count: emptyBaseballCount(), thirdOut: true };
+  }
+  return { count: { ...c, balls: 0, strikes: 0, outs }, thirdOut: false };
+}
+
+/** ストライク+1。3球目（=三振）でアウト+1＋B/S=0。3アウトなら thirdOut=true。 */
+export function addStrike(c: BaseballCount): {
+  count: BaseballCount;
+  thirdOut: boolean;
+} {
+  if (c.strikes >= 2) return recordOut({ ...c, balls: 0, strikes: 0 });
+  return { count: { ...c, strikes: c.strikes + 1 }, thirdOut: false };
+}
+
+/** 走者（一二三塁）のトグル（手動進塁/帰塁）。 */
+export function toggleRunner(
+  c: BaseballCount,
+  base: keyof BaseballRunners,
+): BaseballCount {
+  return { ...c, runners: { ...c.runners, [base]: !c.runners[base] } };
+}
+
+/** 打者交代（ボール/ストライクのみ0・アウト/走者は維持）。誤操作のやり直し用。 */
+export function resetCountForNewBatter(c: BaseballCount): BaseballCount {
+  return { ...c, balls: 0, strikes: 0 };
+}
+
 /** 与えられたピリオド配列を循環して「次のピリオド」を返す（ルール可変の野球用） */
 export function nextPeriodIn(periods: string[], current: string): string {
   if (periods.length === 0) return current;

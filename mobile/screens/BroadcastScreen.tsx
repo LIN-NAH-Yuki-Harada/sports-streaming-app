@@ -44,6 +44,13 @@ import {
   DEFAULT_VOLLEYBALL_RULE,
   BASEBALL_RULE_NAMES,
   DEFAULT_BASEBALL_RULE,
+  type BaseballCount,
+  type BaseballRunners,
+  emptyBaseballCount,
+  addBall,
+  addStrike,
+  recordOut,
+  toggleRunner,
 } from "../lib/sports";
 import {
   createBroadcast,
@@ -112,6 +119,8 @@ export function BroadcastScreen() {
   const [homeScore, setHomeScore] = useState(0);
   const [awayScore, setAwayScore] = useState(0);
   const [period, setPeriod] = useState("前半");
+  // 野球カウント（甲子園風 B/S/O＋走者・ライブ中のみ意味を持つ）
+  const [baseball, setBaseball] = useState<BaseballCount>(emptyBaseballCount());
   // バレーのセット集計（home_sets / away_sets / set_results に対応）
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
@@ -304,12 +313,13 @@ export function BroadcastScreen() {
       const code = generateShareCode();
       const initialPeriod = activePeriods[0];
 
-      // スコア・セットを初期化
+      // スコア・セット・野球カウントを初期化
       setHomeScore(0);
       setAwayScore(0);
       setHomeSets(0);
       setAwaySets(0);
       setSetResults([]);
+      setBaseball(emptyBaseballCount());
       setPeriod(initialPeriod);
 
       const created = await createBroadcast({
@@ -570,6 +580,37 @@ export function BroadcastScreen() {
     setPeriod(periodLabelForSet(sportKey, gameNumber));
   }, [homeSets, awaySets, setResults, homeScore, awayScore, sportKey]);
 
+  // 野球カウント操作（B/S/O＋走者）。3アウト時はイニング(period)を自動で前進。
+  const advanceInning = useCallback(() => {
+    setPeriod((p) => nextPeriodIn(activePeriods, p));
+  }, [activePeriods]);
+  const onBall = useCallback(() => setBaseball((c) => addBall(c)), []);
+  const onStrike = useCallback(() => {
+    const { count, thirdOut } = addStrike(baseball);
+    setBaseball(count);
+    if (thirdOut) advanceInning();
+  }, [baseball, advanceInning]);
+  const onOut = useCallback(() => {
+    const { count, thirdOut } = recordOut(baseball);
+    setBaseball(count);
+    if (thirdOut) advanceInning();
+  }, [baseball, advanceInning]);
+  const onRunner = useCallback(
+    (base: keyof BaseballRunners) => setBaseball((c) => toggleRunner(c, base)),
+    [],
+  );
+
+  // 野球カウントをライブで broadcasts へ反映（視聴者スコアボードに即時）。
+  useEffect(() => {
+    if (phase !== "live" || sportKey !== "baseball" || !shareCode) return;
+    updateScore(shareCode, {
+      balls: baseball.balls,
+      strikes: baseball.strikes,
+      outs: baseball.outs,
+      runners: baseball.runners,
+    });
+  }, [phase, sportKey, shareCode, baseball]);
+
   if (phase === "live" && token) {
     return (
       <LiveKitRoom
@@ -643,12 +684,21 @@ export function BroadcastScreen() {
           awaySets={awaySets}
           onHome={(d) => setHomeScore((s) => Math.max(0, s + d))}
           onAway={(d) => setAwayScore((s) => Math.max(0, s + d))}
-          onPeriod={() => setPeriod((p) => nextPeriodIn(activePeriods, p))}
+          onPeriod={() => {
+            setPeriod((p) => nextPeriodIn(activePeriods, p));
+            // 野球はイニング手動変更でカウントもリセット
+            if (sportKey === "baseball") setBaseball(emptyBaseballCount());
+          }}
           onNextSet={handleNextSet}
           onStop={() => finishLive(null)}
           youtubeShareUrl={liveYoutubeId ? `https://youtu.be/${liveYoutubeId}` : null}
           youtubeReadyAt={youtubeReadyAt}
           scoreSteps={sportKey === "basketball" ? [1, 2, 3] : [1]}
+          baseballCount={sportKey === "baseball" ? baseball : null}
+          onBall={onBall}
+          onStrike={onStrike}
+          onOut={onOut}
+          onRunner={onRunner}
         />
       </LiveKitRoom>
     );
@@ -959,6 +1009,11 @@ function LiveView({
   youtubeShareUrl,
   youtubeReadyAt,
   scoreSteps,
+  baseballCount,
+  onBall,
+  onStrike,
+  onOut,
+  onRunner,
 }: {
   shareCode: string | null;
   homeTeam: string;
@@ -980,7 +1035,12 @@ function LiveView({
   onStop: () => void;
   youtubeShareUrl: string | null; // YouTube同時配信が起動していれば https://youtu.be/<id>
   youtubeReadyAt: number; // ウォームアップ完了予定時刻(ms)。これを過ぎるまでYouTubeリンクは共有しない
-  scoreSteps: number[]; // 得点ボタンの加点ステップ（通常[1]・バスケ[1,2,3]）
+  scoreSteps: number[]; // 得点ボタンの加点ステップ（通常[1]・バスケ[1,2,3]・野球[1,2,3,4]）
+  baseballCount: BaseballCount | null; // 野球のときのみ B/S/O＋走者
+  onBall: () => void;
+  onStrike: () => void;
+  onOut: () => void;
+  onRunner: (base: keyof BaseballRunners) => void;
 }) {
   useKeepAwake(); // 配信中は画面をスリープさせない（長時間の発熱テスト対策）
   const tracks = useTracks([Track.Source.Camera]);
@@ -1078,6 +1138,44 @@ function LiveView({
           </Pressable>
         </View>
       </SafeAreaView>
+
+      {/* 野球: B/S/O カウント＋走者ダイヤ（甲子園TV中継風・下部スコア操作の上に配置） */}
+      {baseballCount ? (
+        <View style={styles.baseballPanel} pointerEvents="box-none">
+          <View style={styles.bsoRow}>
+            <Pressable style={styles.bsoBtn} hitSlop={6} onPress={onBall}>
+              <Text style={styles.bsoLabel}>B</Text>
+              <Text style={styles.bsoValue}>{baseballCount.balls}</Text>
+            </Pressable>
+            <Pressable style={styles.bsoBtn} hitSlop={6} onPress={onStrike}>
+              <Text style={styles.bsoLabel}>S</Text>
+              <Text style={styles.bsoValue}>{baseballCount.strikes}</Text>
+            </Pressable>
+            <Pressable style={styles.bsoBtn} hitSlop={6} onPress={onOut}>
+              <Text style={[styles.bsoLabel, styles.bsoOutLabel]}>O</Text>
+              <Text style={styles.bsoValue}>{baseballCount.outs}</Text>
+            </Pressable>
+            {/* 走者ダイヤ（タップで進塁/帰塁・二塁=上/三塁=左/一塁=右） */}
+            <View style={styles.diamond}>
+              <Pressable
+                style={[styles.base, styles.baseSecond, baseballCount.runners.second && styles.baseOn]}
+                hitSlop={8}
+                onPress={() => onRunner("second")}
+              />
+              <Pressable
+                style={[styles.base, styles.baseThird, baseballCount.runners.third && styles.baseOn]}
+                hitSlop={8}
+                onPress={() => onRunner("third")}
+              />
+              <Pressable
+                style={[styles.base, styles.baseFirst, baseballCount.runners.first && styles.baseOn]}
+                hitSlop={8}
+                onPress={() => onRunner("first")}
+              />
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       {/* 下: スコア操作パネル */}
       <SafeAreaView style={styles.controls} pointerEvents="box-none">
@@ -1307,6 +1405,42 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   plusStepText: { color: "#fff", fontSize: 15, fontWeight: "800" },
+
+  // 野球 B/S/O＋走者ダイヤ（下部スコア操作の上に重ねる）
+  baseballPanel: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 132,
+    alignItems: "center",
+    paddingHorizontal: 12,
+  },
+  bsoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  bsoBtn: { alignItems: "center", minWidth: 34, paddingVertical: 2 },
+  bsoLabel: { color: "#9fb3c8", fontSize: 11, fontWeight: "800" },
+  bsoOutLabel: { color: "#ff8a8a" },
+  bsoValue: { color: "#fff", fontSize: 22, fontWeight: "900", fontVariant: ["tabular-nums"] },
+  diamond: { width: 46, height: 46, marginLeft: 6 },
+  base: {
+    position: "absolute",
+    width: 14,
+    height: 14,
+    borderWidth: 1.5,
+    borderColor: "#9aa",
+    transform: [{ rotate: "45deg" }],
+  },
+  baseSecond: { top: 1, left: 16 },
+  baseThird: { top: 16, left: 1 },
+  baseFirst: { top: 16, left: 31 },
+  baseOn: { backgroundColor: "#ffd24a", borderColor: "#ffd24a" },
   controlScore: { color: "#fff", fontSize: 28, fontWeight: "900", minWidth: 36, textAlign: "center", fontVariant: ["tabular-nums"] },
   centerControl: { alignItems: "center", gap: 6 },
   periodBtn: { backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
