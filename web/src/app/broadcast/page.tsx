@@ -177,6 +177,13 @@ function BroadcastPageInner() {
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
+  // 野球カウント（甲子園風 B/S/O＋走者・アプリ版と同仕様）
+  const [balls, setBalls] = useState(0);
+  const [strikes, setStrikes] = useState(0);
+  const [outs, setOuts] = useState(0);
+  const [runners, setRunners] = useState<{ first: boolean; second: boolean; third: boolean }>(
+    { first: false, second: false, third: false },
+  );
   // 配信終了後に表示するサマリモーダル用の state（次のアクションへの導線として使う）
   const [endedSummary, setEndedSummary] = useState<{
     durationSec: number;
@@ -489,6 +496,64 @@ function BroadcastPageInner() {
     setPeriodIndex(clamped);
     const newPeriod = periods[clamped] || periods[0];
     saveScoreToDb(homeScore, awayScore, newPeriod);
+    // 野球はイニングが変わったらカウント（B/S/O・走者）をリセット
+    if (sport === "野球") resetBaseballCount();
+  }
+
+  // ── 野球カウント（B/S/O＋走者）。アプリ版 sports.ts と同ロジック ──
+  // カウントは broadcasts に直接 UPDATE（updateBroadcastScore は固定シグネチャのため別経路）。
+  const saveBaseballCountToDb = useCallback(
+    (b: number, s: number, o: number, r: { first: boolean; second: boolean; third: boolean }) => {
+      if (!broadcastRef.current) return;
+      const supabase = createClient();
+      supabase
+        .from("broadcasts")
+        .update({ balls: b, strikes: s, outs: o, runners: r })
+        .eq("id", broadcastRef.current.id)
+        .then(undefined, () => {});
+    },
+    [],
+  );
+  function resetBaseballCount() {
+    const empty = { first: false, second: false, third: false };
+    setBalls(0);
+    setStrikes(0);
+    setOuts(0);
+    setRunners(empty);
+    saveBaseballCountToDb(0, 0, 0, empty);
+  }
+  function addBallW() {
+    const nb = balls >= 3 ? 0 : balls + 1; // 4球目=フォアボール→B/Sリセット
+    const ns = balls >= 3 ? 0 : strikes;
+    setBalls(nb);
+    setStrikes(ns);
+    saveBaseballCountToDb(nb, ns, outs, runners);
+  }
+  function recordOutW() {
+    const no = outs + 1;
+    if (no >= 3) {
+      // 3アウト＝攻守交代。次イニングへ（changePeriod が野球時にカウントもリセット）
+      changePeriod(periodIndex + 1);
+      return;
+    }
+    setBalls(0);
+    setStrikes(0);
+    setOuts(no);
+    saveBaseballCountToDb(0, 0, no, runners);
+  }
+  function addStrikeW() {
+    if (strikes >= 2) {
+      recordOutW(); // 3ストライク＝三振→アウト
+      return;
+    }
+    const ns = strikes + 1;
+    setStrikes(ns);
+    saveBaseballCountToDb(balls, ns, outs, runners);
+  }
+  function toggleRunnerW(base: "first" | "second" | "third") {
+    const nr = { ...runners, [base]: !runners[base] };
+    setRunners(nr);
+    saveBaseballCountToDb(balls, strikes, outs, nr);
   }
 
   // 配信開始
@@ -739,6 +804,10 @@ function BroadcastPageInner() {
     setHomeSets(0);
     setAwaySets(0);
     setSetResults([]);
+    setBalls(0);
+    setStrikes(0);
+    setOuts(0);
+    setRunners({ first: false, second: false, third: false });
     historyRef.current = [];
     setHistoryLength(0);
     setPeriodIndex(0);
@@ -1166,6 +1235,41 @@ function BroadcastPageInner() {
 
           {/* スコア操作パネル — 縦画面では2段構成 */}
           <div className="absolute bottom-[calc(12px+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-sm rounded-lg px-2 sm:px-3 py-2 max-w-[95vw]">
+            {/* 野球: B/S/O カウント＋走者ダイヤ（甲子園風・タップで+1／3S自動アウト・3アウト自動交代） */}
+            {sport === "野球" && (
+              <div className="flex items-center justify-center gap-3 mb-1.5 pb-1.5 border-b border-white/10">
+                {([
+                  { label: "B", val: balls, on: addBallW },
+                  { label: "S", val: strikes, on: addStrikeW },
+                  { label: "O", val: outs, on: recordOutW },
+                ] as const).map(({ label, val, on }) => (
+                  <button
+                    key={label}
+                    onClick={on}
+                    className="flex flex-col items-center px-1.5 active:scale-90 transition"
+                  >
+                    <span className="text-[9px] font-bold text-gray-400">{label}</span>
+                    <span className="text-base font-black tabular-nums leading-tight">{val}</span>
+                  </button>
+                ))}
+                {/* 走者ダイヤ（二塁=上/三塁=左/一塁=右・タップで進塁/帰塁） */}
+                <div className="relative" style={{ width: 24, height: 24 }}>
+                  {([
+                    { base: "second", style: { top: 1, left: 8 } },
+                    { base: "third", style: { top: 9, left: 0 } },
+                    { base: "first", style: { top: 9, left: 16 } },
+                  ] as const).map(({ base, style }) => (
+                    <button
+                      key={base}
+                      onClick={() => toggleRunnerW(base)}
+                      className={runners[base] ? "absolute bg-yellow-400" : "absolute bg-white/20"}
+                      style={{ width: 9, height: 9, transform: "rotate(45deg)", ...style }}
+                      aria-label={`${base} runner`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
             {/* スコア行 */}
             <div className="flex items-center justify-center gap-2 sm:gap-3">
               <div className="flex items-center gap-1">
