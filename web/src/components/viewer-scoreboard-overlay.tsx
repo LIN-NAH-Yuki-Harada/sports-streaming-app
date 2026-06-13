@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { Broadcast } from "@/lib/database";
 
 /**
@@ -26,6 +26,7 @@ export function ViewerScoreboardOverlay({ broadcast }: { broadcast: Broadcast })
 
   const showSets = broadcast.home_sets > 0 || broadcast.away_sets > 0;
   const tournamentLabel = broadcast.tournament || broadcast.sport;
+  const isBaseball = broadcast.sport === "野球";
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[2]">
@@ -73,6 +74,16 @@ export function ViewerScoreboardOverlay({ broadcast }: { broadcast: Broadcast })
             </span>
           </div>
         )}
+
+        {/* 野球: 甲子園TV中継風の B/S/O ＋ 走者ダイヤ */}
+        {isBaseball && (
+          <div className="mt-1.5 inline-flex items-center gap-2.5 bg-black/80 backdrop-blur-sm rounded px-2.5 py-1 shadow-lg">
+            <CountDots label="B" count={broadcast.balls ?? 0} total={3} color="bg-green-400" />
+            <CountDots label="S" count={broadcast.strikes ?? 0} total={2} color="bg-yellow-400" />
+            <CountDots label="O" count={broadcast.outs ?? 0} total={2} color="bg-red-500" />
+            <RunnerDiamond runners={broadcast.runners} />
+          </div>
+        )}
       </div>
 
       {/* 右上: 大会名 / 競技 */}
@@ -99,6 +110,57 @@ export function ViewerScoreboardOverlay({ broadcast }: { broadcast: Broadcast })
         </div>
       )}
     </div>
+  );
+}
+
+/** 野球の B/S/O カウントを「ラベル＋点灯ドット」で表示（甲子園テロップ風）。 */
+function CountDots({
+  label,
+  count,
+  total,
+  color,
+}: {
+  label: string;
+  count: number;
+  total: number;
+  color: string;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="text-[9px] sm:text-[10px] font-bold text-gray-300">{label}</span>
+      <span className="inline-flex gap-0.5">
+        {Array.from({ length: total }).map((_, i) => (
+          <span
+            key={i}
+            className={`inline-block w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full ${
+              i < count ? color : "bg-white/20"
+            }`}
+          />
+        ))}
+      </span>
+    </span>
+  );
+}
+
+/** 走者ダイヤ（二塁=上 / 三塁=左 / 一塁=右）。塁上に走者がいれば点灯。 */
+function RunnerDiamond({
+  runners,
+}: {
+  runners?: { first?: boolean; second?: boolean; third?: boolean } | null;
+}) {
+  const r = runners ?? {};
+  const base = (on: boolean | undefined, style: CSSProperties) => (
+    <span
+      className={`absolute ${on ? "bg-yellow-400" : "bg-white/20"}`}
+      style={{ width: 8, height: 8, transform: "rotate(45deg)", ...style }}
+    />
+  );
+  return (
+    <span className="relative inline-block" style={{ width: 22, height: 22 }}>
+      {base(r.second, { top: 1, left: 7 })}
+      {base(r.third, { top: 8, left: 0 })}
+      {base(r.first, { top: 8, left: 14 })}
+    </span>
   );
 }
 
