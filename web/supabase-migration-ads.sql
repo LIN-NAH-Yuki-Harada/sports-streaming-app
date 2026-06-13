@@ -47,3 +47,15 @@ ALTER TABLE public.ad_impressions ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS ad_campaigns_active_idx ON public.ad_campaigns (active);
 CREATE INDEX IF NOT EXISTS ad_creatives_campaign_idx ON public.ad_creatives (campaign_id);
 CREATE INDEX IF NOT EXISTS ad_impressions_campaign_idx ON public.ad_impressions (campaign_id, created_at DESC);
+
+-- ============================================
+-- CM素材の Storage バケット（管理画面からの入稿先）
+-- 公開読み取り（CMは公開素材）。アップロードは管理API(service_role)のみ＝RLSバイパス。
+-- ============================================
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('ad-creatives', 'ad-creatives', true)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "ad-creatives public read" ON storage.objects;
+CREATE POLICY "ad-creatives public read" ON storage.objects
+  FOR SELECT USING (bucket_id = 'ad-creatives');
