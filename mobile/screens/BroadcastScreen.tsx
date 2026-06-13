@@ -37,7 +37,8 @@ import {
   periodLabelForSet,
   baseballPeriods,
   nextPeriodIn,
-  volleyballPointLabel,
+  setSportRule,
+  setSportPointLabel,
   volleyballRuleLabel,
   VOLLEYBALL_RULE_NAMES,
   DEFAULT_VOLLEYBALL_RULE,
@@ -174,11 +175,14 @@ export function BroadcastScreen() {
     [sportKey, baseballRuleName],
   );
 
-  // バレーのセット/マッチポイント表示（ライブ中のみ意味を持つ）
-  const pointLabel =
-    sportKey === "volleyball"
-      ? volleyballPointLabel(volleyballRuleName, homeSets, awaySets, homeScore, awayScore)
+  // セット/マッチ(ゲーム)ポイント表示（バレー/バドミントン/卓球・ライブ中のみ意味を持つ）
+  const pointLabel = (() => {
+    if (!setBased) return null;
+    const rule = setSportRule(sportKey, volleyballRuleName);
+    return rule
+      ? setSportPointLabel(sportKey, rule, homeSets, awaySets, homeScore, awayScore)
       : null;
+  })();
 
   // 配信中はタブバーを隠して全画面（戻ったら表示）
   useEffect(() => {
@@ -243,9 +247,10 @@ export function BroadcastScreen() {
       patch.set_results = setResults;
     }
     updateScore(shareCode, patch);
-    // セット/マッチポイントは別更新に分離（万一 point_label 列が無くても
-    // 得点更新を巻き添えで失敗させない＝過去のリグレッション再発防止）
-    if (sportKey === "volleyball") {
+    // セット/マッチ(ゲーム)ポイントは別更新に分離（万一 point_label 列が無くても
+    // 得点更新を巻き添えで失敗させない＝過去のリグレッション再発防止）。
+    // バレーだけでなくバドミントン/卓球も対象。
+    if (setBased) {
       updateScore(shareCode, { point_label: pointLabel });
     }
   }, [
@@ -643,6 +648,7 @@ export function BroadcastScreen() {
           onStop={() => finishLive(null)}
           youtubeShareUrl={liveYoutubeId ? `https://youtu.be/${liveYoutubeId}` : null}
           youtubeReadyAt={youtubeReadyAt}
+          scoreSteps={sportKey === "basketball" ? [1, 2, 3] : [1]}
         />
       </LiveKitRoom>
     );
@@ -952,6 +958,7 @@ function LiveView({
   onStop,
   youtubeShareUrl,
   youtubeReadyAt,
+  scoreSteps,
 }: {
   shareCode: string | null;
   homeTeam: string;
@@ -973,6 +980,7 @@ function LiveView({
   onStop: () => void;
   youtubeShareUrl: string | null; // YouTube同時配信が起動していれば https://youtu.be/<id>
   youtubeReadyAt: number; // ウォームアップ完了予定時刻(ms)。これを過ぎるまでYouTubeリンクは共有しない
+  scoreSteps: number[]; // 得点ボタンの加点ステップ（通常[1]・バスケ[1,2,3]）
 }) {
   useKeepAwake(); // 配信中は画面をスリープさせない（長時間の発熱テスト対策）
   const tracks = useTracks([Track.Source.Camera]);
@@ -1079,14 +1087,30 @@ function LiveView({
             {setBased ? `（${homeSets}${unitLabel}）` : ""}
           </Text>
           <View style={styles.scoreRow}>
-            <Pressable style={styles.minusBtn} onPress={() => onHome(-1)}>
+            <Pressable style={styles.minusBtn} hitSlop={6} onPress={() => onHome(-1)}>
               <Text style={styles.btnSign}>−</Text>
             </Pressable>
             <Text style={styles.controlScore}>{homeScore}</Text>
-            <Pressable style={styles.plusBtn} onPress={() => onHome(1)}>
-              <Text style={styles.btnSign}>＋</Text>
-            </Pressable>
+            {scoreSteps.length === 1 ? (
+              <Pressable style={styles.plusBtn} hitSlop={6} onPress={() => onHome(1)}>
+                <Text style={styles.btnSign}>＋</Text>
+              </Pressable>
+            ) : null}
           </View>
+          {scoreSteps.length > 1 ? (
+            <View style={styles.plusStepRow}>
+              {scoreSteps.map((s) => (
+                <Pressable
+                  key={s}
+                  style={styles.plusStepBtn}
+                  hitSlop={4}
+                  onPress={() => onHome(s)}
+                >
+                  <Text style={styles.plusStepText}>+{s}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.centerControl}>
@@ -1111,14 +1135,30 @@ function LiveView({
             {setBased ? `（${awaySets}${unitLabel}）` : ""}
           </Text>
           <View style={styles.scoreRow}>
-            <Pressable style={styles.minusBtn} onPress={() => onAway(-1)}>
+            <Pressable style={styles.minusBtn} hitSlop={6} onPress={() => onAway(-1)}>
               <Text style={styles.btnSign}>−</Text>
             </Pressable>
             <Text style={styles.controlScore}>{awayScore}</Text>
-            <Pressable style={styles.plusBtn} onPress={() => onAway(1)}>
-              <Text style={styles.btnSign}>＋</Text>
-            </Pressable>
+            {scoreSteps.length === 1 ? (
+              <Pressable style={styles.plusBtn} hitSlop={6} onPress={() => onAway(1)}>
+                <Text style={styles.btnSign}>＋</Text>
+              </Pressable>
+            ) : null}
           </View>
+          {scoreSteps.length > 1 ? (
+            <View style={styles.plusStepRow}>
+              {scoreSteps.map((s) => (
+                <Pressable
+                  key={s}
+                  style={styles.plusStepBtn}
+                  hitSlop={4}
+                  onPress={() => onAway(s)}
+                >
+                  <Text style={styles.plusStepText}>+{s}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </View>
       </SafeAreaView>
 
@@ -1252,9 +1292,21 @@ const styles = StyleSheet.create({
   },
   controlTeamName: { color: "#fff", fontWeight: "700", fontSize: 12, marginBottom: 6, maxWidth: 140 },
   scoreRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  minusBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#333", alignItems: "center", justifyContent: "center" },
-  plusBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#e63946", alignItems: "center", justifyContent: "center" },
-  btnSign: { color: "#fff", fontSize: 24, fontWeight: "800", lineHeight: 28 },
+  minusBtn: { width: 44, height: 48, borderRadius: 22, backgroundColor: "#333", alignItems: "center", justifyContent: "center" },
+  plusBtn: { width: 56, height: 48, borderRadius: 24, backgroundColor: "#e63946", alignItems: "center", justifyContent: "center" },
+  btnSign: { color: "#fff", fontSize: 26, fontWeight: "800", lineHeight: 30 },
+  // バスケの +1/+2/+3（スコア行の下に横並び）
+  plusStepRow: { flexDirection: "row", gap: 6, marginTop: 6, justifyContent: "center" },
+  plusStepBtn: {
+    minWidth: 40,
+    height: 38,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    backgroundColor: "#e63946",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  plusStepText: { color: "#fff", fontSize: 15, fontWeight: "800" },
   controlScore: { color: "#fff", fontSize: 28, fontWeight: "900", minWidth: 36, textAlign: "center", fontVariant: ["tabular-nums"] },
   centerControl: { alignItems: "center", gap: 6 },
   periodBtn: { backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },

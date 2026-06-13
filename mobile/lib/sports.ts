@@ -256,17 +256,46 @@ export function volleyballPointLabel(
 ): "マッチポイント" | "セットポイント" | null {
   const rule = VOLLEYBALL_RULES[ruleName];
   if (!rule) return null;
+  const label = setSportPointLabel("volleyball", rule, homeSets, awaySets, homeScore, awayScore);
+  return label as "マッチポイント" | "セットポイント" | null;
+}
+
+// バドミントン/卓球の既定ルール（v1はルール選択なし＝既定値）。VolleyballRule と同型。
+// バドミントン: 3ゲームマッチ(2先取)・21点。卓球: 5ゲームマッチ(3先取)・11点。
+const BADMINTON_RULE: VolleyballRule = { setsToWin: 2, setPoint: 21, finalSetPoint: 21 };
+const TABLE_TENNIS_RULE: VolleyballRule = { setsToWin: 3, setPoint: 11, finalSetPoint: 11 };
+
+/** セット/ゲーム制の競技に対応するルールを返す（バレーは選択ルール名、バド/卓球は既定）。 */
+export function setSportRule(
+  sport: SportKey,
+  volleyballRuleName: string,
+): VolleyballRule | null {
+  if (sport === "volleyball") return VOLLEYBALL_RULES[volleyballRuleName] ?? null;
+  if (sport === "badminton") return BADMINTON_RULE;
+  if (sport === "table_tennis") return TABLE_TENNIS_RULE;
+  return null;
+}
+
+/**
+ * セット/ゲーム制の「セット(ゲーム)ポイント / マッチポイント」判定（バレー/バド/卓球 共通）。
+ * 表示語はバレー=「セットポイント」、バド/卓球=「ゲームポイント」。
+ */
+export function setSportPointLabel(
+  sport: SportKey,
+  rule: VolleyballRule,
+  homeSets: number,
+  awaySets: number,
+  homeScore: number,
+  awayScore: number,
+): "マッチポイント" | "セットポイント" | "ゲームポイント" | null {
   const { setsToWin, setPoint, finalSetPoint } = rule;
   const isFinalSet = homeSets + awaySets >= setsToWin * 2 - 2;
   const targetScore = isFinalSet ? finalSetPoint : setPoint;
-  const homeAtSetPoint = homeScore >= targetScore - 1 && homeScore > awayScore;
-  const awayAtSetPoint = awayScore >= targetScore - 1 && awayScore > homeScore;
-  if (!homeAtSetPoint && !awayAtSetPoint) return null;
-  if (
-    (homeAtSetPoint && homeSets >= setsToWin - 1) ||
-    (awayAtSetPoint && awaySets >= setsToWin - 1)
-  ) {
+  const homeAt = homeScore >= targetScore - 1 && homeScore > awayScore;
+  const awayAt = awayScore >= targetScore - 1 && awayScore > homeScore;
+  if (!homeAt && !awayAt) return null;
+  if ((homeAt && homeSets >= setsToWin - 1) || (awayAt && awaySets >= setsToWin - 1)) {
     return "マッチポイント";
   }
-  return "セットポイント";
+  return sport === "volleyball" ? "セットポイント" : "ゲームポイント";
 }
