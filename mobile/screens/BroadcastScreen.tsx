@@ -381,9 +381,22 @@ export function BroadcastScreen() {
       } finally {
         clearTimeout(timeoutId);
       }
-      const json = await res.json();
-      if (!res.ok || !json.token) {
-        setMessage("トークン取得エラー: " + (json.error ?? res.status));
+      // サーバー側が落ちている等で JSON 以外（Vercel の 402/503 プレーンテキスト等）が
+      // 返ると res.json() が "JSON Parse error" で落ちるため、安全にパースして
+      // 利用者にはわかりやすい日本語を出す。
+      let json: { token?: string; error?: string } | null = null;
+      try {
+        json = await res.json();
+      } catch {
+        json = null;
+      }
+      if (!res.ok || !json?.token) {
+        const maintenance = res.status === 402 || res.status === 503 || json === null;
+        setMessage(
+          maintenance
+            ? "ただいまサーバーに接続できません（メンテナンス中の可能性）。少し時間をおいて再度お試しください。"
+            : "トークン取得エラー: " + (json?.error ?? "HTTP " + res.status),
+        );
         await endBroadcast(createdCode).catch(() => {});
         setBusy(false);
         return;
