@@ -23,6 +23,11 @@ import {
   createTeam,
   joinTeamByCode,
 } from "../lib/team-data";
+import {
+  ModerationMenu,
+  type ModerationTarget,
+} from "../components/ModerationMenu";
+import { fetchBlockedIds } from "../lib/moderation";
 
 // チームタブ。画面内サブタブ（ローカル state）で
 //   マイチーム / 招待コードで参加 / 新規作成 を切り替える。
@@ -336,6 +341,16 @@ function TeamDetail({
     myMembership?.role === "owner" || myMembership?.role === "admin";
   const inviteCode = team.invite_code;
 
+  // メンバー表示名も UGC のため通報・ブロック導線を持つ（Guideline 1.2）。
+  const [modTarget, setModTarget] = useState<ModerationTarget | null>(null);
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!userId) return;
+    fetchBlockedIds(userId)
+      .then((ids) => setBlockedIds(new Set(ids)))
+      .catch(() => {});
+  }, [userId]);
+
   // 招待コードを LINE 等で共有（Web の招待メッセージ文面に準拠）
   const shareInvite = useCallback(async () => {
     if (!inviteCode) return;
@@ -394,6 +409,7 @@ function TeamDetail({
         <Text style={styles.label}>メンバー</Text>
         <View style={styles.section}>
           {[...team.team_members]
+            .filter((m) => m.user_id === userId || !blockedIds.has(m.user_id))
             .sort((a, b) => {
               const order = { owner: 0, admin: 1, member: 2 };
               return order[a.role] - order[b.role];
@@ -411,6 +427,18 @@ function TeamDetail({
                     {isMe ? "（自分）" : ""}
                   </Text>
                   <Text style={styles.memberRole}>{ROLE_LABELS[m.role]}</Text>
+                  {!isMe ? (
+                    <Pressable
+                      onPress={() =>
+                        setModTarget({ broadcasterId: m.user_id, label: dn })
+                      }
+                      hitSlop={8}
+                      style={styles.memberModBtn}
+                      accessibilityLabel="このメンバーを通報・ブロック"
+                    >
+                      <Text style={styles.memberModBtnText}>⋯</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               );
             })}
@@ -430,6 +458,17 @@ function TeamDetail({
           </Text>
         </Pressable>
       </ScrollView>
+
+      {/* 通報・ブロックメニュー（Guideline 1.2・メンバー表示名もUGCのため） */}
+      <ModerationMenu
+        visible={modTarget !== null}
+        target={modTarget}
+        currentUserId={userId}
+        onClose={() => setModTarget(null)}
+        onBlocked={(blockedId) =>
+          setBlockedIds((prev) => new Set(prev).add(blockedId))
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -455,6 +494,8 @@ const styles = StyleSheet.create({
   tabChipTextActive: { color: "#fff" },
 
   section: { gap: 10, marginTop: 4 },
+  memberModBtn: { paddingHorizontal: 8, paddingVertical: 2 },
+  memberModBtnText: { color: "#888", fontSize: 18, fontWeight: "700" },
   message: { color: "#8fd6a0", fontSize: 13, marginBottom: 8 },
   help: { color: "#bbb", fontSize: 13, lineHeight: 19, marginBottom: 4 },
   dim: { color: "#888", fontSize: 13 },

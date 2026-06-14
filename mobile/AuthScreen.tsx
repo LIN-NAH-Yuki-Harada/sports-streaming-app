@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import {
+  Linking,
   Platform,
   Pressable,
   SafeAreaView,
@@ -240,6 +241,22 @@ export function AuthScreen() {
         </View>
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
+
+        {/* 規約・プライバシーへの常設リンク（認証画面・5.1.4）。購入導線ではないので身軽モデルと無矛盾。 */}
+        <View style={styles.policyWrap}>
+          <Text style={styles.policyNote}>
+            続行すると、利用規約・プライバシーポリシーに同意したものとみなします。
+          </Text>
+          <View style={styles.policyRow}>
+            <Pressable onPress={() => Linking.openURL(`${SITE_URL}/terms`)}>
+              <Text style={styles.policyLink}>利用規約</Text>
+            </Pressable>
+            <Text style={styles.policyDot}>・</Text>
+            <Pressable onPress={() => Linking.openURL(`${SITE_URL}/privacy`)}>
+              <Text style={styles.policyLink}>プライバシーポリシー</Text>
+            </Pressable>
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -264,4 +281,9 @@ const styles = StyleSheet.create({
   divider: { flexDirection: "row", alignItems: "center", marginVertical: 10, gap: 10 },
   dividerLine: { flex: 1, height: 1, backgroundColor: "#333" },
   dividerText: { color: "#666", fontSize: 12 },
+  policyWrap: { marginTop: 24, alignItems: "center", gap: 4 },
+  policyNote: { color: "#777", fontSize: 11, textAlign: "center" },
+  policyRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  policyLink: { color: "#9ab", fontSize: 12, textDecorationLine: "underline" },
+  policyDot: { color: "#555", fontSize: 12 },
 });

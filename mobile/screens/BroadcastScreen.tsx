@@ -5,6 +5,7 @@ import {
   Animated,
   AppState,
   Easing,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -302,8 +303,11 @@ export function BroadcastScreen() {
 
       // 無料プランで体験時間（10分）を使い切っている場合は開始させない
       if (plan === "free" && trialRemainingAtStart <= 0) {
+        // iOS は購入を促す表現を出さない（Apple 3.1.1・身軽モデル）。Webへ誘導する文言も置かない。
         setMessage(
-          "無料体験（10分）は終了しています。続けるには有料プランへの登録が必要です。",
+          Platform.OS === "ios"
+            ? "無料体験（10分）の時間に達しました。引き続きのご利用は Web 版（live-spotch.com）でご確認ください。"
+            : "無料体験（10分）は終了しています。続けるには有料プランへの登録が必要です。",
         );
         setBusy(false);
         return;
@@ -558,7 +562,11 @@ export function BroadcastScreen() {
   useEffect(() => {
     if (phase !== "live" || plan !== "free") return;
     if (trialRemainingAtStart - elapsed <= 0) {
-      finishLive("無料体験の時間（10分）が終了しました。続けるには有料プランへ。");
+      finishLive(
+        Platform.OS === "ios"
+          ? "無料体験の時間（10分）が終了しました。引き続きのご利用は Web 版（live-spotch.com）でご確認ください。"
+          : "無料体験の時間（10分）が終了しました。続けるには有料プランへ。",
+      );
     }
   }, [phase, plan, trialRemainingAtStart, elapsed, finishLive]);
 
