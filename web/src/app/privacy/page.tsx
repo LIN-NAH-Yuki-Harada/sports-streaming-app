@@ -120,7 +120,7 @@ export default function PrivacyPage() {
           <div className="mt-2 bg-[#111] border border-white/5 rounded-md px-4 py-3">
             <p className="text-xs text-gray-400">LIVE SPOtCH運営事務局</p>
             <p className="text-xs text-gray-500 mt-1">
-              メール: live.spotch@gmail.com
+              メール: lin.nah.yuki@gmail.com
             </p>
             <p className="text-xs text-gray-500 mt-0.5">
               <a href="/contact" className="text-[#e63946] hover:underline">お問い合わせフォーム</a>
