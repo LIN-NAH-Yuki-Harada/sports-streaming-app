@@ -29,7 +29,11 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   // 焼き込みありの従来配信（既定 true）は従来どおりネイティブ全画面を許可。
   const scoreboardBurnedIn = broadcast?.scoreboard_burned_in ?? true;
   const { stageRef, isFullscreen, isFakeFullscreen, toggleFullscreen } =
-    useStageFullscreen<HTMLDivElement>({ allowVideoFallback: scoreboardBurnedIn });
+    useStageFullscreen<HTMLDivElement>({
+      allowVideoFallback: scoreboardBurnedIn,
+      // Android 視聴者は端末を横にしたら自動で没入横画面に（iOS は既存挙動を維持）。
+      autoLandscapeFullscreen: isWatching,
+    });
 
   // ステージ内の <video> 要素の一時停止状態を追従。
   // LiveKit 再接続で video 要素が再生成された場合に備えて、現在 attach 済みの要素を
