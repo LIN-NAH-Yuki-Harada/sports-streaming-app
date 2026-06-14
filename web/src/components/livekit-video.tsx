@@ -17,6 +17,7 @@ import { useAudioCompressor } from "@/lib/use-audio-compressor";
 import { useShareKeepalive } from "@/lib/use-share-keepalive";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import type { BroadcastResolution } from "@/lib/user-agent";
+import { pickCameraCaptureResolution } from "@/lib/user-agent";
 
 // Reconnecting 状態の経過秒数を計測するフック
 export function useReconnectDuration(connectionState: ConnectionState): number {
@@ -461,7 +462,8 @@ export function LiveKitBroadcaster({
           dynacast: true,
           videoCaptureDefaults: {
             facingMode: "environment",
-            resolution: { width: 1280, height: 720, frameRate: 30 },
+            // 配信開始時の端末の向きに合わせて要求（Android のみ縦横入替・iOS/PCは1280x720固定）。
+            resolution: pickCameraCaptureResolution(),
           },
           audioCaptureDefaults: {
             // 5/05 RAW 化: 上の焼き込みパスと同じ理由で OS 側音声処理を全 OFF
