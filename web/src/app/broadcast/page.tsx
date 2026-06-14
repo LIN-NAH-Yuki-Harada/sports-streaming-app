@@ -847,6 +847,41 @@ function BroadcastPageInner() {
           });
         }
 
+        // 終了時に進行中セットの得点を最終確定として set_results に記録する
+        // （バレーのみ＝Web の set 制競技。オーナー要望 2026-06-13・アプリ版 finishLive と同じ思想）。
+        // 「次のセットへ」を押さず終了するのが普通なので、これが無いと最後のセット得点が失われる。
+        // セット数は勝利点（通常/最終セット）＋2点差を満たした時だけ加算し、未達なら
+        // スコアだけ記録（途中終了でセット数が過剰加算されないように）。
+        // ※ homeScore 等はリセット前の値を closure で参照している（setHomeScore(0) は当該描画の const を変えない）。
+        if (
+          sport === "バレー" &&
+          vbRule &&
+          endedBroadcastId &&
+          (homeScore > 0 || awayScore > 0)
+        ) {
+          const finalSetResults = [...setResults, { home: homeScore, away: awayScore }];
+          const isFinalSet = homeSets + awaySets >= vbRule.setsToWin * 2 - 2;
+          const target = isFinalSet ? vbRule.finalSetPoint : vbRule.setPoint;
+          const setWon =
+            Math.max(homeScore, awayScore) >= target &&
+            Math.abs(homeScore - awayScore) >= 2;
+          let fHomeSets = homeSets;
+          let fAwaySets = awaySets;
+          if (setWon) {
+            if (homeScore > awayScore) fHomeSets = homeSets + 1;
+            else if (awayScore > homeScore) fAwaySets = awaySets + 1;
+          }
+          await updateBroadcastScore(
+            endedBroadcastId,
+            homeScore,
+            awayScore,
+            currentPeriod,
+            fHomeSets,
+            fAwaySets,
+            finalSetResults,
+          ).catch(() => {});
+        }
+
         if (endedBroadcastId) {
           const success = await endBroadcast(endedBroadcastId);
           if (!success) {
