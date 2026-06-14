@@ -77,3 +77,31 @@ export function buildExternalBrowserUrl(currentUrl: string, platform: Platform):
 export function pickBroadcastResolution(): BroadcastResolution {
   return { width: 1280, height: 720, frameRate: 30 };
 }
+
+// 生配信（カメラ直 publish）のカメラ要求解像度を、配信開始時の端末の向きに合わせて返す。
+//
+// 背景: ブラウザ配信で「Android だと横向きが反映されない」というクレーム。原因は電波/画質では
+// なく getUserMedia の向きの扱い。iOS Safari は端末の向きに追従して縦横が入れ替わるが、Android
+// Chrome は常に横(1280x720)を要求すると向きに追従しにくい。そこで Android のときだけ、配信開始時
+// の物理的な向きに合わせて縦横を入れ替えた寸法を要求する。
+//
+// 安全性:
+//  - iOS / PC は従来どおり 1280x720（＝挙動・constraints とも不変、回帰リスクゼロ）。
+//  - 値は livekit-client 側で ideal に変換されるため、取得不可なら端末既定にフォールバック
+//    （黒画面にならない）。画素数は縦横同じ＝エンコーダ負荷・発熱は不変。
+export function pickCameraCaptureResolution(): BroadcastResolution {
+  const landscape: BroadcastResolution = { width: 1280, height: 720, frameRate: 30 };
+  if (typeof navigator === "undefined" || typeof window === "undefined") {
+    return landscape;
+  }
+  if (detectInAppBrowser().platform !== "android") {
+    return landscape; // iOS / PC は現状維持
+  }
+  const isPortrait =
+    typeof window.matchMedia === "function"
+      ? window.matchMedia("(orientation: portrait)").matches
+      : window.innerHeight > window.innerWidth;
+  return isPortrait
+    ? { width: 720, height: 1280, frameRate: 30 }
+    : landscape;
+}
