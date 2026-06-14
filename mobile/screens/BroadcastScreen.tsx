@@ -39,6 +39,7 @@ import {
   nextPeriodIn,
   setSportRule,
   setSportPointLabel,
+  isSetWon,
   volleyballRuleLabel,
   VOLLEYBALL_RULE_NAMES,
   DEFAULT_VOLLEYBALL_RULE,
@@ -156,6 +157,8 @@ export function BroadcastScreen() {
   const [youtubeReadyAt, setYoutubeReadyAt] = useState(0); // ウォームアップ完了予定時刻(ms)
 
   const setBased = isSetBased(sportKey);
+  // セット制（バレー/バド/卓球）の有効ルール。表示と終了時のセット勝利判定に使う。
+  const activeSetRule = setBased ? setSportRule(sportKey, volleyballRuleName) : null;
 
   // finishLive から「最新の得点状態」を参照するための ref（毎レンダー更新・依存配列を膨らませない）。
   // 終了時に、未確定の最終セット得点を set_results へ記録するのに使う。
@@ -167,6 +170,7 @@ export function BroadcastScreen() {
     awaySets,
     setResults,
     period,
+    rule: activeSetRule,
   });
   liveScoreRef.current = {
     setBased,
@@ -176,6 +180,7 @@ export function BroadcastScreen() {
     awaySets,
     setResults,
     period,
+    rule: activeSetRule,
   };
 
   // 競技＋ルール種別に応じた有効ピリオド配列（野球はカテゴリでイニング数が変わる）
@@ -186,11 +191,8 @@ export function BroadcastScreen() {
 
   // セット/マッチ(ゲーム)ポイント表示（バレー/バドミントン/卓球・ライブ中のみ意味を持つ）
   const pointLabel = (() => {
-    if (!setBased) return null;
-    const rule = setSportRule(sportKey, volleyballRuleName);
-    return rule
-      ? setSportPointLabel(sportKey, rule, homeSets, awaySets, homeScore, awayScore)
-      : null;
+    if (!setBased || !activeSetRule) return null;
+    return setSportPointLabel(sportKey, activeSetRule, homeSets, awaySets, homeScore, awayScore);
   })();
 
   // 配信中はタブバーを隠して全画面（戻ったら表示）
@@ -448,17 +450,26 @@ export function BroadcastScreen() {
         if (ls.setBased) {
           // セット制（バレー/バドミントン/卓球）: 最終セットは「次のセットへ」を押さず終了するのが
           // 普通で、そのままだと最後のセット得点が set_results に記録されない。現在のセット得点を
-          // 確定してセット数・内訳に反映する。
+          // 確定して内訳に追記する。セット数は勝利点（通常/最終セット）＋2点差を満たした時だけ加算
+          // （途中終了で未達なら据え置き＝過剰加算を防止。Web版 handleEnd と同じ思想）。
           if (ls.homeScore > 0 || ls.awayScore > 0) {
-            const r = advanceSet(
-              { homeSets: ls.homeSets, awaySets: ls.awaySets, setResults: ls.setResults },
-              ls.homeScore,
-              ls.awayScore,
-            );
+            const finalSetResults = [
+              ...ls.setResults,
+              { home: ls.homeScore, away: ls.awayScore },
+            ];
+            let fHomeSets = ls.homeSets;
+            let fAwaySets = ls.awaySets;
+            if (
+              ls.rule &&
+              isSetWon(ls.rule, ls.homeSets, ls.awaySets, ls.homeScore, ls.awayScore)
+            ) {
+              if (ls.homeScore > ls.awayScore) fHomeSets = ls.homeSets + 1;
+              else if (ls.awayScore > ls.homeScore) fAwaySets = ls.awaySets + 1;
+            }
             await updateScore(shareCode, {
-              home_sets: r.state.homeSets,
-              away_sets: r.state.awaySets,
-              set_results: r.state.setResults,
+              home_sets: fHomeSets,
+              away_sets: fAwaySets,
+              set_results: finalSetResults,
             }).catch(() => {});
           }
         } else {

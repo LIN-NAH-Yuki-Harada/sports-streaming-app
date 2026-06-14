@@ -342,6 +342,27 @@ export function setSportRule(
 }
 
 /**
+ * 現在のセット得点が「セット勝利条件（勝利点＋2点差）」を満たしているか。
+ * 途中終了時に、その最終セットをセット獲得数に加算してよいかの判定に使う
+ * （未達ならスコアだけ set_results に残しセット数は据え置き＝過剰加算を防ぐ）。
+ */
+export function isSetWon(
+  rule: VolleyballRule,
+  homeSets: number,
+  awaySets: number,
+  homeScore: number,
+  awayScore: number,
+): boolean {
+  const { setsToWin, setPoint, finalSetPoint } = rule;
+  const isFinalSet = homeSets + awaySets >= setsToWin * 2 - 2;
+  const target = isFinalSet ? finalSetPoint : setPoint;
+  return (
+    Math.max(homeScore, awayScore) >= target &&
+    Math.abs(homeScore - awayScore) >= 2
+  );
+}
+
+/**
  * セット/ゲーム制の「セット(ゲーム)ポイント / マッチポイント」判定（バレー/バド/卓球 共通）。
  * 表示語はバレー=「セットポイント」、バド/卓球=「ゲームポイント」。
  */
