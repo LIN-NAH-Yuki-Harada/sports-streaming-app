@@ -281,6 +281,17 @@ export function MyPageScreen() {
               <Text style={styles.linkRowArrow}>→</Text>
             </Pressable>
 
+            {/* 利用規約・プライバシーポリシー（ログイン後も常時到達できるように・法的文書なので
+                外部リンクで問題なし＝身軽モデルと無矛盾） */}
+            <Pressable style={styles.linkRow} onPress={() => openWeb("/terms")}>
+              <Text style={styles.linkRowText}>利用規約</Text>
+              <Text style={styles.linkRowArrow}>→</Text>
+            </Pressable>
+            <Pressable style={styles.linkRow} onPress={() => openWeb("/privacy")}>
+              <Text style={styles.linkRowText}>プライバシーポリシー</Text>
+              <Text style={styles.linkRowArrow}>→</Text>
+            </Pressable>
+
             {/* ログアウト（アプリ内で完結） */}
             <Pressable style={styles.logoutButton} onPress={handleLogout}>
               <Text style={styles.logoutText}>ログアウト</Text>
