@@ -14,6 +14,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useKeepAwake } from "expo-keep-awake";
 import {
@@ -1112,6 +1113,10 @@ function LiveView({
     ]);
   }, [onStop]);
 
+  // 縦持ち時だけ操作UI（特にアウェイ側）が画面外に切れないよう詰める。横持ちは現状維持。
+  const { width: winW, height: winH } = useWindowDimensions();
+  const isPortrait = winH >= winW;
+
   return (
     <View style={styles.liveRoot}>
       {cam && isTrackReference(cam) ? (
@@ -1127,7 +1132,7 @@ function LiveView({
       <SafeAreaView style={styles.topOverlay} pointerEvents="box-none">
         <View style={styles.topLeftGroup}>
           <View style={styles.scorePreview}>
-            <Text style={styles.previewTeam} numberOfLines={1}>
+            <Text style={[styles.previewTeam, isPortrait && styles.previewTeamPortrait]} numberOfLines={1}>
               {homeTeam}
             </Text>
             {setBased && <Text style={styles.previewSets}>{homeSets}</Text>}
@@ -1135,7 +1140,7 @@ function LiveView({
               {homeScore} - {awayScore}
             </Text>
             {setBased && <Text style={styles.previewSets}>{awaySets}</Text>}
-            <Text style={styles.previewTeam} numberOfLines={1}>
+            <Text style={[styles.previewTeam, isPortrait && styles.previewTeamPortrait]} numberOfLines={1}>
               {awayTeam}
             </Text>
             <Text style={styles.previewPeriod}>{period}</Text>
@@ -1153,20 +1158,44 @@ function LiveView({
         </View>
         <View style={styles.topRightGroup}>
           {youtubeShareUrl ? (
-            <Text style={[styles.elapsedText, styles.youtubeStatus]}>
-              {youtubeWarming ? "📺 YouTube準備中…" : "📺 YouTube同時配信中"}
+            <Text
+              style={[
+                styles.elapsedText,
+                styles.youtubeStatus,
+                isPortrait && styles.youtubeStatusPortrait,
+              ]}
+            >
+              {isPortrait
+                ? youtubeWarming
+                  ? "📺…"
+                  : "📺"
+                : youtubeWarming
+                  ? "📺 YouTube準備中…"
+                  : "📺 YouTube同時配信中"}
             </Text>
           ) : null}
           {trialRemaining !== null && (
             <Text
-              style={[styles.elapsedText, trialRemaining < 60 && styles.trialWarn]}
+              style={[
+                styles.elapsedText,
+                trialRemaining < 60 && styles.trialWarn,
+                isPortrait && styles.elapsedTextPortrait,
+              ]}
             >
-              無料体験 残り {formatElapsed(trialRemaining)}
+              {isPortrait ? "残り " : "無料体験 残り "}
+              {formatElapsed(trialRemaining)}
             </Text>
           )}
-          <Text style={styles.elapsedText}>⏱ {formatElapsed(elapsed)}</Text>
-          <Pressable style={styles.stopButton} onPress={confirmStop}>
-            <Text style={styles.stopText}>■ 停止</Text>
+          <Text style={[styles.elapsedText, isPortrait && styles.elapsedTextPortrait]}>
+            ⏱ {formatElapsed(elapsed)}
+          </Text>
+          <Pressable
+            style={[styles.stopButton, isPortrait && styles.stopButtonPortrait]}
+            onPress={confirmStop}
+          >
+            <Text style={[styles.stopText, isPortrait && styles.stopTextPortrait]}>
+              ■ 停止
+            </Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -1210,20 +1239,20 @@ function LiveView({
       ) : null}
 
       {/* 下: スコア操作パネル */}
-      <SafeAreaView style={styles.controls} pointerEvents="box-none">
-        <View style={styles.teamControl}>
-          <Text style={styles.controlTeamName} numberOfLines={1}>
+      <SafeAreaView style={[styles.controls, isPortrait && styles.controlsPortrait]} pointerEvents="box-none">
+        <View style={[styles.teamControl, isPortrait && styles.teamControlPortrait]}>
+          <Text style={[styles.controlTeamName, isPortrait && styles.controlTeamNamePortrait]} numberOfLines={1}>
             {homeTeam}
             {setBased ? `（${homeSets}${unitLabel}）` : ""}
           </Text>
           <View style={styles.scoreRow}>
-            <Pressable style={styles.minusBtn} hitSlop={6} onPress={() => onHome(-1)}>
-              <Text style={styles.btnSign}>−</Text>
+            <Pressable style={[styles.minusBtn, isPortrait && styles.minusBtnPortrait]} hitSlop={6} onPress={() => onHome(-1)}>
+              <Text style={[styles.btnSign, isPortrait && styles.btnSignPortrait]}>−</Text>
             </Pressable>
-            <Text style={styles.controlScore}>{homeScore}</Text>
+            <Text style={[styles.controlScore, isPortrait && styles.controlScorePortrait]}>{homeScore}</Text>
             {scoreSteps.length === 1 ? (
-              <Pressable style={styles.plusBtn} hitSlop={6} onPress={() => onHome(1)}>
-                <Text style={styles.btnSign}>＋</Text>
+              <Pressable style={[styles.plusBtn, isPortrait && styles.plusBtnPortrait]} hitSlop={6} onPress={() => onHome(1)}>
+                <Text style={[styles.btnSign, isPortrait && styles.btnSignPortrait]}>＋</Text>
               </Pressable>
             ) : null}
           </View>
@@ -1259,19 +1288,19 @@ function LiveView({
           <Text style={styles.codeText}>視聴コード: {shareCode}</Text>
         </View>
 
-        <View style={styles.teamControl}>
-          <Text style={styles.controlTeamName} numberOfLines={1}>
+        <View style={[styles.teamControl, isPortrait && styles.teamControlPortrait]}>
+          <Text style={[styles.controlTeamName, isPortrait && styles.controlTeamNamePortrait]} numberOfLines={1}>
             {awayTeam}
             {setBased ? `（${awaySets}${unitLabel}）` : ""}
           </Text>
           <View style={styles.scoreRow}>
-            <Pressable style={styles.minusBtn} hitSlop={6} onPress={() => onAway(-1)}>
-              <Text style={styles.btnSign}>−</Text>
+            <Pressable style={[styles.minusBtn, isPortrait && styles.minusBtnPortrait]} hitSlop={6} onPress={() => onAway(-1)}>
+              <Text style={[styles.btnSign, isPortrait && styles.btnSignPortrait]}>−</Text>
             </Pressable>
-            <Text style={styles.controlScore}>{awayScore}</Text>
+            <Text style={[styles.controlScore, isPortrait && styles.controlScorePortrait]}>{awayScore}</Text>
             {scoreSteps.length === 1 ? (
-              <Pressable style={styles.plusBtn} hitSlop={6} onPress={() => onAway(1)}>
-                <Text style={styles.btnSign}>＋</Text>
+              <Pressable style={[styles.plusBtn, isPortrait && styles.plusBtnPortrait]} hitSlop={6} onPress={() => onAway(1)}>
+                <Text style={[styles.btnSign, isPortrait && styles.btnSignPortrait]}>＋</Text>
               </Pressable>
             ) : null}
           </View>
@@ -1482,4 +1511,20 @@ const styles = StyleSheet.create({
   shareBtn: { backgroundColor: "#1d9bf0", borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 },
   shareText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   codeText: { color: "#bbb", fontSize: 11 },
+
+  // ===== 縦持ち時の詰めスタイル（横持ちは無変更。アウェイ側が画面外に切れないよう小型化） =====
+  // 下部スコア操作
+  controlsPortrait: { paddingHorizontal: 6, gap: 4 },
+  teamControlPortrait: { minWidth: 84, paddingHorizontal: 4 },
+  controlTeamNamePortrait: { fontSize: 11, maxWidth: 92, marginBottom: 4 },
+  minusBtnPortrait: { width: 38, height: 44, borderRadius: 19 },
+  plusBtnPortrait: { width: 46, height: 44, borderRadius: 23 },
+  btnSignPortrait: { fontSize: 22, lineHeight: 26 },
+  controlScorePortrait: { fontSize: 24, minWidth: 26 },
+  // 上部スコアボード/ステータス
+  previewTeamPortrait: { fontSize: 11, maxWidth: 52 },
+  youtubeStatusPortrait: { fontSize: 12, paddingHorizontal: 6 },
+  elapsedTextPortrait: { fontSize: 11, paddingHorizontal: 6, paddingVertical: 4 },
+  stopButtonPortrait: { paddingHorizontal: 8, paddingVertical: 6 },
+  stopTextPortrait: { fontSize: 12 },
 });
