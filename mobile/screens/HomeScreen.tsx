@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Linking,
   Pressable,
   RefreshControl,
   SafeAreaView,
@@ -11,11 +10,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
-import { SITE_URL } from "../config";
 import { fetchMyTeams, type MyTeam } from "../lib/teams";
+import type { RootStackParamList } from "../navigation-types";
 import {
   fetchMyLiveBroadcasts,
   fetchUpcomingSchedules,
@@ -79,12 +79,19 @@ export function HomeScreen() {
   // Realtime チャンネルの解放用 ref（再購読時に前のを必ず外す）。
   const channelRef = useRef<RealtimeChannel | null>(null);
 
-  // 視聴: 自社プレイヤー(Web)の watch URL を外部ブラウザで開く。視聴は当面 Web。
-  const openWatch = useCallback((shareCode: string) => {
-    const c = shareCode.trim();
-    if (!c) return;
-    Linking.openURL(`${SITE_URL}/watch/${c}`).catch(() => {});
-  }, []);
+  // 視聴: アプリ内のネイティブ視聴画面(Watch)を開く。
+  // 以前は Linking で外部 Safari を開いていたが、ブラウザのバーが残り映像が小さくなるため、
+  // LiveKit で直接購読する全画面ネイティブ視聴に切り替えた（Egress 不要・バー無し）。
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const openWatch = useCallback(
+    (shareCode: string) => {
+      const c = shareCode.trim();
+      if (!c) return;
+      navigation.navigate("Watch", { shareCode: c });
+    },
+    [navigation],
+  );
 
   // ホームのデータをまとめて取得する（所属チーム → LIVE/予定 を並列）。
   const load = useCallback(async () => {

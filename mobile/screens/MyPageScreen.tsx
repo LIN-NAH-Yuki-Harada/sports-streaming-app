@@ -179,12 +179,13 @@ export function MyPageScreen() {
               ) : null}
               <Text style={styles.cardNote}>
                 {IS_IOS
-                  ? "プランの確認・変更はWebのマイページから行えます。"
+                  ? "プランの確認・変更は Web 版（live-spotch.com）のマイページから行えます。"
                   : "プランの変更・解約・お支払いはWebのマイページから行えます。"}
               </Text>
-              {/* iOS の無料プランでは外部Web決済への誘導CTAを出さない（3.1.1）。
-                  既存有料ユーザーの管理導線（Web契約の確認/解約）は出してよい。 */}
-              {IS_IOS && profile?.plan === "free" ? null : (
+              {/* iOS は外部Web決済への誘導を一切出さない（Apple 3.1.1 / Netflix・Spotify方式）。
+                  /mypage は ¥価格・Stripe決済を含むページのため、iOS ではタップ可能なボタンを
+                  置かずテキスト案内のみにする。Android は従来どおり Web 管理導線を出す。 */}
+              {IS_IOS ? null : (
                 <Pressable
                   style={styles.webButton}
                   onPress={() => openWeb("/mypage")}
@@ -237,18 +238,22 @@ export function MyPageScreen() {
                 </Text>
               ) : null}
               <Text style={styles.cardNote}>
-                連携・解除・同時配信のON/OFFはWebのマイページから設定できます。
+                連携・解除・同時配信のON/OFFは Web 版（live-spotch.com）のマイページから設定できます。
               </Text>
-              <Pressable
-                style={styles.webButtonGhost}
-                onPress={() => openWeb("/mypage")}
-              >
-                <Text style={styles.webButtonGhostText}>
-                  {youtubeLinked
-                    ? "連携設定を見る（Webへ）"
-                    : "YouTubeと連携する（Webへ）"}
-                </Text>
-              </Pressable>
+              {/* iOS では /mypage（価格・決済を含む）へのタップ導線を出さない（3.1.1）。
+                  Android のみ Web 連携導線を出す。 */}
+              {IS_IOS ? null : (
+                <Pressable
+                  style={styles.webButtonGhost}
+                  onPress={() => openWeb("/mypage")}
+                >
+                  <Text style={styles.webButtonGhostText}>
+                    {youtubeLinked
+                      ? "連携設定を見る（Webへ）"
+                      : "YouTubeと連携する（Webへ）"}
+                  </Text>
+                </Pressable>
+              )}
             </View>
 
             {/* チーム管理 → チームタブ案内 ＋ Web 誘導 */}
@@ -273,6 +278,17 @@ export function MyPageScreen() {
               onPress={() => openWeb("/contact")}
             >
               <Text style={styles.linkRowText}>お問い合わせ</Text>
+              <Text style={styles.linkRowArrow}>→</Text>
+            </Pressable>
+
+            {/* 利用規約・プライバシーポリシー（ログイン後も常時到達できるように・法的文書なので
+                外部リンクで問題なし＝身軽モデルと無矛盾） */}
+            <Pressable style={styles.linkRow} onPress={() => openWeb("/terms")}>
+              <Text style={styles.linkRowText}>利用規約</Text>
+              <Text style={styles.linkRowArrow}>→</Text>
+            </Pressable>
+            <Pressable style={styles.linkRow} onPress={() => openWeb("/privacy")}>
+              <Text style={styles.linkRowText}>プライバシーポリシー</Text>
               <Text style={styles.linkRowArrow}>→</Text>
             </Pressable>
 

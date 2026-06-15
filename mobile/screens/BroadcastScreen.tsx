@@ -5,6 +5,7 @@ import {
   Animated,
   AppState,
   Easing,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -13,6 +14,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useKeepAwake } from "expo-keep-awake";
 import {
@@ -39,6 +41,7 @@ import {
   nextPeriodIn,
   setSportRule,
   setSportPointLabel,
+  isSetWon,
   volleyballRuleLabel,
   VOLLEYBALL_RULE_NAMES,
   DEFAULT_VOLLEYBALL_RULE,
@@ -156,6 +159,8 @@ export function BroadcastScreen() {
   const [youtubeReadyAt, setYoutubeReadyAt] = useState(0); // ウォームアップ完了予定時刻(ms)
 
   const setBased = isSetBased(sportKey);
+  // セット制（バレー/バド/卓球）の有効ルール。表示と終了時のセット勝利判定に使う。
+  const activeSetRule = setBased ? setSportRule(sportKey, volleyballRuleName) : null;
 
   // finishLive から「最新の得点状態」を参照するための ref（毎レンダー更新・依存配列を膨らませない）。
   // 終了時に、未確定の最終セット得点を set_results へ記録するのに使う。
@@ -167,6 +172,7 @@ export function BroadcastScreen() {
     awaySets,
     setResults,
     period,
+    rule: activeSetRule,
   });
   liveScoreRef.current = {
     setBased,
@@ -176,6 +182,7 @@ export function BroadcastScreen() {
     awaySets,
     setResults,
     period,
+    rule: activeSetRule,
   };
 
   // 競技＋ルール種別に応じた有効ピリオド配列（野球はカテゴリでイニング数が変わる）
@@ -186,11 +193,8 @@ export function BroadcastScreen() {
 
   // セット/マッチ(ゲーム)ポイント表示（バレー/バドミントン/卓球・ライブ中のみ意味を持つ）
   const pointLabel = (() => {
-    if (!setBased) return null;
-    const rule = setSportRule(sportKey, volleyballRuleName);
-    return rule
-      ? setSportPointLabel(sportKey, rule, homeSets, awaySets, homeScore, awayScore)
-      : null;
+    if (!setBased || !activeSetRule) return null;
+    return setSportPointLabel(sportKey, activeSetRule, homeSets, awaySets, homeScore, awayScore);
   })();
 
   // 配信中はタブバーを隠して全画面（戻ったら表示）
@@ -300,8 +304,11 @@ export function BroadcastScreen() {
 
       // 無料プランで体験時間（10分）を使い切っている場合は開始させない
       if (plan === "free" && trialRemainingAtStart <= 0) {
+        // iOS は購入を促す表現を出さない（Apple 3.1.1・身軽モデル）。Webへ誘導する文言も置かない。
         setMessage(
-          "無料体験（10分）は終了しています。続けるには有料プランへの登録が必要です。",
+          Platform.OS === "ios"
+            ? "無料体験（10分）の時間に達しました。引き続きのご利用は Web 版（live-spotch.com）でご確認ください。"
+            : "無料体験（10分）は終了しています。続けるには有料プランへの登録が必要です。",
         );
         setBusy(false);
         return;
@@ -381,9 +388,22 @@ export function BroadcastScreen() {
       } finally {
         clearTimeout(timeoutId);
       }
-      const json = await res.json();
-      if (!res.ok || !json.token) {
-        setMessage("トークン取得エラー: " + (json.error ?? res.status));
+      // サーバー側が落ちている等で JSON 以外（Vercel の 402/503 プレーンテキスト等）が
+      // 返ると res.json() が "JSON Parse error" で落ちるため、安全にパースして
+      // 利用者にはわかりやすい日本語を出す。
+      let json: { token?: string; error?: string } | null = null;
+      try {
+        json = await res.json();
+      } catch {
+        json = null;
+      }
+      if (!res.ok || !json?.token) {
+        const maintenance = res.status === 402 || res.status === 503 || json === null;
+        setMessage(
+          maintenance
+            ? "ただいまサーバーに接続できません（メンテナンス中の可能性）。少し時間をおいて再度お試しください。"
+            : "トークン取得エラー: " + (json?.error ?? "HTTP " + res.status),
+        );
         await endBroadcast(createdCode).catch(() => {});
         setBusy(false);
         return;
@@ -435,17 +455,26 @@ export function BroadcastScreen() {
         if (ls.setBased) {
           // セット制（バレー/バドミントン/卓球）: 最終セットは「次のセットへ」を押さず終了するのが
           // 普通で、そのままだと最後のセット得点が set_results に記録されない。現在のセット得点を
-          // 確定してセット数・内訳に反映する。
+          // 確定して内訳に追記する。セット数は勝利点（通常/最終セット）＋2点差を満たした時だけ加算
+          // （途中終了で未達なら据え置き＝過剰加算を防止。Web版 handleEnd と同じ思想）。
           if (ls.homeScore > 0 || ls.awayScore > 0) {
-            const r = advanceSet(
-              { homeSets: ls.homeSets, awaySets: ls.awaySets, setResults: ls.setResults },
-              ls.homeScore,
-              ls.awayScore,
-            );
+            const finalSetResults = [
+              ...ls.setResults,
+              { home: ls.homeScore, away: ls.awayScore },
+            ];
+            let fHomeSets = ls.homeSets;
+            let fAwaySets = ls.awaySets;
+            if (
+              ls.rule &&
+              isSetWon(ls.rule, ls.homeSets, ls.awaySets, ls.homeScore, ls.awayScore)
+            ) {
+              if (ls.homeScore > ls.awayScore) fHomeSets = ls.homeSets + 1;
+              else if (ls.awayScore > ls.homeScore) fAwaySets = ls.awaySets + 1;
+            }
             await updateScore(shareCode, {
-              home_sets: r.state.homeSets,
-              away_sets: r.state.awaySets,
-              set_results: r.state.setResults,
+              home_sets: fHomeSets,
+              away_sets: fAwaySets,
+              set_results: finalSetResults,
             }).catch(() => {});
           }
         } else {
@@ -534,7 +563,11 @@ export function BroadcastScreen() {
   useEffect(() => {
     if (phase !== "live" || plan !== "free") return;
     if (trialRemainingAtStart - elapsed <= 0) {
-      finishLive("無料体験の時間（10分）が終了しました。続けるには有料プランへ。");
+      finishLive(
+        Platform.OS === "ios"
+          ? "無料体験の時間（10分）が終了しました。引き続きのご利用は Web 版（live-spotch.com）でご確認ください。"
+          : "無料体験の時間（10分）が終了しました。続けるには有料プランへ。",
+      );
     }
   }, [phase, plan, trialRemainingAtStart, elapsed, finishLive]);
 
@@ -1080,6 +1113,10 @@ function LiveView({
     ]);
   }, [onStop]);
 
+  // 縦持ち時だけ操作UI（特にアウェイ側）が画面外に切れないよう詰める。横持ちは現状維持。
+  const { width: winW, height: winH } = useWindowDimensions();
+  const isPortrait = winH >= winW;
+
   return (
     <View style={styles.liveRoot}>
       {cam && isTrackReference(cam) ? (
@@ -1095,7 +1132,7 @@ function LiveView({
       <SafeAreaView style={styles.topOverlay} pointerEvents="box-none">
         <View style={styles.topLeftGroup}>
           <View style={styles.scorePreview}>
-            <Text style={styles.previewTeam} numberOfLines={1}>
+            <Text style={[styles.previewTeam, isPortrait && styles.previewTeamPortrait]} numberOfLines={1}>
               {homeTeam}
             </Text>
             {setBased && <Text style={styles.previewSets}>{homeSets}</Text>}
@@ -1103,7 +1140,7 @@ function LiveView({
               {homeScore} - {awayScore}
             </Text>
             {setBased && <Text style={styles.previewSets}>{awaySets}</Text>}
-            <Text style={styles.previewTeam} numberOfLines={1}>
+            <Text style={[styles.previewTeam, isPortrait && styles.previewTeamPortrait]} numberOfLines={1}>
               {awayTeam}
             </Text>
             <Text style={styles.previewPeriod}>{period}</Text>
@@ -1121,20 +1158,44 @@ function LiveView({
         </View>
         <View style={styles.topRightGroup}>
           {youtubeShareUrl ? (
-            <Text style={[styles.elapsedText, styles.youtubeStatus]}>
-              {youtubeWarming ? "📺 YouTube準備中…" : "📺 YouTube同時配信中"}
+            <Text
+              style={[
+                styles.elapsedText,
+                styles.youtubeStatus,
+                isPortrait && styles.youtubeStatusPortrait,
+              ]}
+            >
+              {isPortrait
+                ? youtubeWarming
+                  ? "📺…"
+                  : "📺"
+                : youtubeWarming
+                  ? "📺 YouTube準備中…"
+                  : "📺 YouTube同時配信中"}
             </Text>
           ) : null}
           {trialRemaining !== null && (
             <Text
-              style={[styles.elapsedText, trialRemaining < 60 && styles.trialWarn]}
+              style={[
+                styles.elapsedText,
+                trialRemaining < 60 && styles.trialWarn,
+                isPortrait && styles.elapsedTextPortrait,
+              ]}
             >
-              無料体験 残り {formatElapsed(trialRemaining)}
+              {isPortrait ? "残り " : "無料体験 残り "}
+              {formatElapsed(trialRemaining)}
             </Text>
           )}
-          <Text style={styles.elapsedText}>⏱ {formatElapsed(elapsed)}</Text>
-          <Pressable style={styles.stopButton} onPress={confirmStop}>
-            <Text style={styles.stopText}>■ 停止</Text>
+          <Text style={[styles.elapsedText, isPortrait && styles.elapsedTextPortrait]}>
+            ⏱ {formatElapsed(elapsed)}
+          </Text>
+          <Pressable
+            style={[styles.stopButton, isPortrait && styles.stopButtonPortrait]}
+            onPress={confirmStop}
+          >
+            <Text style={[styles.stopText, isPortrait && styles.stopTextPortrait]}>
+              ■ 停止
+            </Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -1178,20 +1239,20 @@ function LiveView({
       ) : null}
 
       {/* 下: スコア操作パネル */}
-      <SafeAreaView style={styles.controls} pointerEvents="box-none">
-        <View style={styles.teamControl}>
-          <Text style={styles.controlTeamName} numberOfLines={1}>
+      <SafeAreaView style={[styles.controls, isPortrait && styles.controlsPortrait]} pointerEvents="box-none">
+        <View style={[styles.teamControl, isPortrait && styles.teamControlPortrait]}>
+          <Text style={[styles.controlTeamName, isPortrait && styles.controlTeamNamePortrait]} numberOfLines={1}>
             {homeTeam}
             {setBased ? `（${homeSets}${unitLabel}）` : ""}
           </Text>
           <View style={styles.scoreRow}>
-            <Pressable style={styles.minusBtn} hitSlop={6} onPress={() => onHome(-1)}>
-              <Text style={styles.btnSign}>−</Text>
+            <Pressable style={[styles.minusBtn, isPortrait && styles.minusBtnPortrait]} hitSlop={6} onPress={() => onHome(-1)}>
+              <Text style={[styles.btnSign, isPortrait && styles.btnSignPortrait]}>−</Text>
             </Pressable>
-            <Text style={styles.controlScore}>{homeScore}</Text>
+            <Text style={[styles.controlScore, isPortrait && styles.controlScorePortrait]}>{homeScore}</Text>
             {scoreSteps.length === 1 ? (
-              <Pressable style={styles.plusBtn} hitSlop={6} onPress={() => onHome(1)}>
-                <Text style={styles.btnSign}>＋</Text>
+              <Pressable style={[styles.plusBtn, isPortrait && styles.plusBtnPortrait]} hitSlop={6} onPress={() => onHome(1)}>
+                <Text style={[styles.btnSign, isPortrait && styles.btnSignPortrait]}>＋</Text>
               </Pressable>
             ) : null}
           </View>
@@ -1227,19 +1288,19 @@ function LiveView({
           <Text style={styles.codeText}>視聴コード: {shareCode}</Text>
         </View>
 
-        <View style={styles.teamControl}>
-          <Text style={styles.controlTeamName} numberOfLines={1}>
+        <View style={[styles.teamControl, isPortrait && styles.teamControlPortrait]}>
+          <Text style={[styles.controlTeamName, isPortrait && styles.controlTeamNamePortrait]} numberOfLines={1}>
             {awayTeam}
             {setBased ? `（${awaySets}${unitLabel}）` : ""}
           </Text>
           <View style={styles.scoreRow}>
-            <Pressable style={styles.minusBtn} hitSlop={6} onPress={() => onAway(-1)}>
-              <Text style={styles.btnSign}>−</Text>
+            <Pressable style={[styles.minusBtn, isPortrait && styles.minusBtnPortrait]} hitSlop={6} onPress={() => onAway(-1)}>
+              <Text style={[styles.btnSign, isPortrait && styles.btnSignPortrait]}>−</Text>
             </Pressable>
-            <Text style={styles.controlScore}>{awayScore}</Text>
+            <Text style={[styles.controlScore, isPortrait && styles.controlScorePortrait]}>{awayScore}</Text>
             {scoreSteps.length === 1 ? (
-              <Pressable style={styles.plusBtn} hitSlop={6} onPress={() => onAway(1)}>
-                <Text style={styles.btnSign}>＋</Text>
+              <Pressable style={[styles.plusBtn, isPortrait && styles.plusBtnPortrait]} hitSlop={6} onPress={() => onAway(1)}>
+                <Text style={[styles.btnSign, isPortrait && styles.btnSignPortrait]}>＋</Text>
               </Pressable>
             ) : null}
           </View>
@@ -1450,4 +1511,20 @@ const styles = StyleSheet.create({
   shareBtn: { backgroundColor: "#1d9bf0", borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 },
   shareText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   codeText: { color: "#bbb", fontSize: 11 },
+
+  // ===== 縦持ち時の詰めスタイル（横持ちは無変更。アウェイ側が画面外に切れないよう小型化） =====
+  // 下部スコア操作
+  controlsPortrait: { paddingHorizontal: 6, gap: 4 },
+  teamControlPortrait: { minWidth: 84, paddingHorizontal: 4 },
+  controlTeamNamePortrait: { fontSize: 11, maxWidth: 92, marginBottom: 4 },
+  minusBtnPortrait: { width: 38, height: 44, borderRadius: 19 },
+  plusBtnPortrait: { width: 46, height: 44, borderRadius: 23 },
+  btnSignPortrait: { fontSize: 22, lineHeight: 26 },
+  controlScorePortrait: { fontSize: 24, minWidth: 26 },
+  // 上部スコアボード/ステータス
+  previewTeamPortrait: { fontSize: 11, maxWidth: 52 },
+  youtubeStatusPortrait: { fontSize: 12, paddingHorizontal: 6 },
+  elapsedTextPortrait: { fontSize: 11, paddingHorizontal: 6, paddingVertical: 4 },
+  stopButtonPortrait: { paddingHorizontal: 8, paddingVertical: 6 },
+  stopTextPortrait: { fontSize: 12 },
 });
