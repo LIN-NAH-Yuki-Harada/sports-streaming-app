@@ -151,7 +151,10 @@ create table public.broadcasts (
   -- false の配信は視聴側で CSS オーバーレイ描画 + iPhone フェイク全画面に切替。
   -- 既定 true = 後方互換（従来どおり焼き込みあり扱い）。
   -- 詳細: supabase-migration-broadcasts-scoreboard-burned-in.sql
-  scoreboard_burned_in boolean not null default true
+  scoreboard_burned_in boolean not null default true,
+  -- ゴースト対策の心拍。配信中に配信者クライアントが 60 秒ごとに更新し、
+  -- cron が途絶（数分）を見て自動 ended 化する。詳細: supabase-migration-broadcasts-last-seen.sql
+  last_seen_at timestamptz
 );
 
 alter table public.broadcasts enable row level security;
