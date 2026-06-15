@@ -4,6 +4,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as SplashScreen from "expo-splash-screen";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { Session } from "@supabase/supabase-js";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./lib/supabase";
@@ -14,6 +15,8 @@ import { HomeScreen } from "./screens/HomeScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
 import { MyPageScreen } from "./screens/MyPageScreen";
+import { WatchScreen } from "./screens/WatchScreen";
+import type { RootStackParamList } from "./navigation-types";
 
 // 下タブのアイコン（@expo/vector-icons 未導入のため絵文字で代用）
 function tabIcon(emoji: string) {
@@ -44,6 +47,28 @@ function Tabs() {
       <Tab.Screen name="履歴" component={HistoryScreen} options={{ tabBarIcon: tabIcon("🕐") }} />
       <Tab.Screen name="マイページ" component={MyPageScreen} options={{ tabBarIcon: tabIcon("👤") }} />
     </Tab.Navigator>
+  );
+}
+
+// ルートスタック: 下タブ一式の上に、全画面のアプリ内視聴(Watch)を重ねる。
+// Watch は fullScreenModal なので下タブを覆い、ブラウザに飛ばさずネイティブ全画面で視聴できる。
+const RootStack = createNativeStackNavigator<RootStackParamList>();
+
+function RootNavigator() {
+  return (
+    <RootStack.Navigator screenOptions={{ headerShown: false }}>
+      <RootStack.Screen name="Tabs" component={Tabs} />
+      <RootStack.Screen
+        name="Watch"
+        component={WatchScreen}
+        options={{
+          presentation: "fullScreenModal",
+          animation: "fade",
+          // 視聴中は端末の向きに追従（横持ちで全画面横視聴）。
+          orientation: "all",
+        }}
+      />
+    </RootStack.Navigator>
   );
 }
 
@@ -103,7 +128,7 @@ export default function App() {
   } else {
     content = (
       <NavigationContainer>
-        <Tabs />
+        <RootNavigator />
       </NavigationContainer>
     );
   }
