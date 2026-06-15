@@ -381,6 +381,30 @@ function BroadcastPageInner() {
     return () => clearInterval(interval);
   }, [broadcastStartedAt]);
 
+  // ゴースト対策の心拍: 配信中は 60 秒ごとに last_seen_at を更新する。
+  // 異常終了（クラッシュ/スリープ/回線断）で停止処理(pagehide/stop)が飛ばなくても、
+  // サーバー cron(/api/cron/cleanup) が last_seen の途絶を見て自動で ended に補正できる
+  // （恒久対策の心臓）。失敗は次の心拍で再送するので無視する。
+  useEffect(() => {
+    if (!broadcastStartedAt) return;
+    const supabase = createClient();
+    const beat = async () => {
+      const id = broadcastRef.current?.id;
+      if (!id) return;
+      try {
+        await supabase
+          .from("broadcasts")
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq("id", id);
+      } catch {
+        // 失敗は無視（次の心拍で再送）
+      }
+    };
+    void beat();
+    const interval = setInterval(() => void beat(), 60_000);
+    return () => clearInterval(interval);
+  }, [broadcastStartedAt]);
+
   const scoreboardState: ScoreboardState = {
     home_team: home || "HOME",
     away_team: away || "AWAY",
