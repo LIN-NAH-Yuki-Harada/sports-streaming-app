@@ -12,13 +12,15 @@ import { useKeepAwake } from "expo-keep-awake";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import {
   AudioSession,
+  AndroidAudioTypePresets,
   LiveKitRoom,
   VideoTrack,
   useTracks,
   useParticipants,
+  useConnectionState,
   isTrackReference,
 } from "@livekit/react-native";
-import { Track } from "livekit-client";
+import { Track, ConnectionState } from "livekit-client";
 import { supabase } from "../lib/supabase";
 import { LIVEKIT_URL } from "../config";
 import {
@@ -41,40 +43,76 @@ export function WatchScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string | null>(null);
   const [tokenError, setTokenError] = useState(false);
+  const [connectError, setConnectError] = useState(false);
+  // 再読込（接続失敗/映像不達のリカバリ）用カウンタ。増やすと token 再取得＋LiveKitRoom 再マウント。
+  const [attempt, setAttempt] = useState(0);
   const audioStartedRef = useRef(false);
 
   const close = useCallback(() => {
     if (navigation.canGoBack()) navigation.goBack();
   }, [navigation]);
 
-  // 初回: 配信を取得 → live ならトークン取得 + AudioSession 開始。
+  const retry = useCallback(() => {
+    setConnectError(false);
+    setTokenError(false);
+    setToken(null);
+    setAttempt((a) => a + 1);
+  }, []);
+
+  // 配信取得（shareCode 変化で必ず初期状態へ戻す＝別コードへ遷移しても古い試合が残らない）。
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setBroadcast(null);
+    setToken(null);
+    setTokenError(false);
+    setConnectError(false);
     (async () => {
       const b = await getBroadcastByCode(shareCode);
       if (!active) return;
       setBroadcast(b);
       setLoading(false);
-      if (b && b.status === "live") {
-        const t = await fetchViewerToken(shareCode);
-        if (!active) return;
-        if (t) {
-          await AudioSession.startAudioSession().catch(() => {});
-          audioStartedRef.current = true;
-          setToken(t);
-        } else {
-          setTokenError(true);
-        }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [shareCode]);
+
+  // live のとき視聴トークン取得＋AudioSession 構成。視聴は「再生専用」なので Android は
+  // communication ではなく media プリセットで構成する（受話口/小音量/AGCダッキングを回避）。
+  // attempt を増やすと再取得（再読込リカバリ）。
+  useEffect(() => {
+    if (!broadcast || broadcast.status !== "live") return;
+    let active = true;
+    (async () => {
+      const t = await fetchViewerToken(shareCode);
+      if (!active) return;
+      if (t) {
+        await AudioSession.configureAudio({
+          android: { audioTypeOptions: AndroidAudioTypePresets.media },
+          ios: { defaultOutput: "speaker" },
+        }).catch(() => {});
+        await AudioSession.startAudioSession().catch(() => {});
+        audioStartedRef.current = true;
+        setToken(t);
+      } else {
+        setTokenError(true);
       }
     })();
     return () => {
       active = false;
+    };
+  }, [broadcast?.id, broadcast?.status, shareCode, attempt]);
+
+  // アンマウント時に AudioSession を必ず停止（解放漏れ防止）。
+  useEffect(() => {
+    return () => {
       if (audioStartedRef.current) {
         AudioSession.stopAudioSession().catch(() => {});
         audioStartedRef.current = false;
       }
     };
-  }, [shareCode]);
+  }, []);
 
   // Realtime: スコア更新を購読し、該当 broadcast.id の行だけ差し替える。
   useEffect(() => {
@@ -137,20 +175,26 @@ export function WatchScreen({ route, navigation }: Props) {
 
   // ===== 終了 / アーカイブ =====
   if (broadcast.status !== "live") {
-    const ytId = broadcast.live_youtube_broadcast_id;
+    // Web 版と同じフォールバック: youtube_video_id 優先、無ければ live 正常終了時に
+    // live_youtube_broadcast_id（同一動画ID）を使う。
+    const archiveId =
+      broadcast.youtube_video_id ??
+      (broadcast.live_status === "ended"
+        ? broadcast.live_youtube_broadcast_id
+        : null);
     return (
       <Message
         title="この配信は終了しました"
         sub="ご視聴ありがとうございました"
         onClose={close}
       >
-        {ytId ? (
+        {archiveId ? (
           <Pressable
             style={styles.ytBtn}
             onPress={() =>
-              Linking.openURL(`https://www.youtube.com/watch?v=${ytId}`).catch(
-                () => {},
-              )
+              Linking.openURL(
+                `https://www.youtube.com/watch?v=${archiveId}`,
+              ).catch(() => {})
             }
           >
             <Text style={styles.ytBtnText}>YouTube でアーカイブを見る</Text>
@@ -160,14 +204,18 @@ export function WatchScreen({ route, navigation }: Props) {
     );
   }
 
-  // ===== 視聴トークン取得失敗 =====
-  if (tokenError) {
+  // ===== 接続失敗 / トークン取得失敗 =====
+  if (connectError || tokenError) {
     return (
       <Message
         title="接続できませんでした"
         sub="電波の良い場所で、もう一度お試しください。"
         onClose={close}
-      />
+      >
+        <Pressable style={styles.ytBtn} onPress={retry}>
+          <Text style={styles.ytBtnText}>再試行</Text>
+        </Pressable>
+      </Message>
     );
   }
 
@@ -185,37 +233,66 @@ export function WatchScreen({ route, navigation }: Props) {
   // ===== 視聴中（LiveKit 接続） =====
   return (
     <LiveKitRoom
+      key={attempt}
       serverUrl={LIVEKIT_URL}
       token={token}
       connect={true}
       audio={false}
       video={false}
-      onError={(e) => console.error("[watch] LiveKit error:", e?.message)}
+      options={{ adaptiveStream: true, dynacast: true }}
+      onError={(e) => {
+        console.error("[watch] LiveKit error:", e?.message);
+        setConnectError(true);
+      }}
     >
-      <Stage broadcast={broadcast} onClose={close} />
+      <Stage broadcast={broadcast} onClose={close} onReload={retry} />
     </LiveKitRoom>
   );
 }
 
-// LiveKit 接続後のステージ（映像 + オーバーレイ + 右上情報 + 終了ボタン）。
+// LiveKit 接続後のステージ（映像 + オーバーレイ + 右上情報 + 終了/再読込）。
 function Stage({
   broadcast,
   onClose,
+  onReload,
 }: {
   broadcast: WatchBroadcast;
   onClose: () => void;
+  onReload: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const connState = useConnectionState();
   const tracks = useTracks([Track.Source.Camera]);
   const participants = useParticipants();
   // 配信者の映像（自分=ローカルではない方）を選ぶ。
   const cam =
     tracks.find((t) => isTrackReference(t) && !t.participant.isLocal) ?? tracks[0];
+  const hasVideo = !!cam && isTrackReference(cam);
+  // 視聴者数＝identity が "viewer-" で始まる参加者（配信者/Egress を除外。自分も含む）。
+  const viewerCount = participants.filter((p) =>
+    p.identity?.startsWith("viewer-"),
+  ).length;
   const tournamentLabel = broadcast.tournament || broadcast.sport;
+
+  // 接続済みなのに映像が一定時間来ない＝配信者の準備中/ゴースト/瞬断。永久スピナーを避ける。
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (hasVideo) {
+      setSlow(false);
+      return;
+    }
+    const id = setTimeout(() => setSlow(true), 30000);
+    return () => clearTimeout(id);
+  }, [hasVideo]);
+
+  const reconnecting =
+    connState === ConnectionState.Reconnecting ||
+    connState === ConnectionState.SignalReconnecting;
+  const disconnected = connState === ConnectionState.Disconnected;
 
   return (
     <View style={styles.stage}>
-      {cam && isTrackReference(cam) ? (
+      {hasVideo ? (
         <VideoTrack
           trackRef={cam}
           style={StyleSheet.absoluteFill}
@@ -223,8 +300,24 @@ function Stage({
         />
       ) : (
         <View style={styles.fill}>
-          <ActivityIndicator color="#fff" />
-          <Text style={styles.connecting}>接続中...</Text>
+          {!disconnected ? <ActivityIndicator color="#fff" /> : null}
+          <Text style={styles.connecting}>
+            {disconnected
+              ? "配信が切断されました"
+              : reconnecting
+                ? "再接続中..."
+                : "配信者の映像を待っています..."}
+          </Text>
+          {(slow || disconnected) ? (
+            <View style={styles.recoverRow}>
+              <Pressable style={styles.recoverBtn} onPress={onReload}>
+                <Text style={styles.recoverText}>再読込</Text>
+              </Pressable>
+              <Pressable style={styles.recoverBtnGhost} onPress={onClose}>
+                <Text style={styles.recoverText}>戻る</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
       )}
 
@@ -242,7 +335,7 @@ function Stage({
             <Text style={styles.liveText}>LIVE</Text>
           </View>
           <View style={styles.countBadge}>
-            <Text style={styles.countText}>👁 {participants.length}</Text>
+            <Text style={styles.countText}>👁 {viewerCount}</Text>
           </View>
         </View>
         {tournamentLabel ? (
@@ -312,6 +405,21 @@ const styles = StyleSheet.create({
   },
   stage: { flex: 1, backgroundColor: "#000" },
   connecting: { color: "#fff", marginTop: 10, fontSize: 13 },
+  recoverRow: { flexDirection: "row", gap: 10, marginTop: 16 },
+  recoverBtn: {
+    backgroundColor: "#e63946",
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  recoverBtnGhost: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  recoverText: { color: "#fff", fontSize: 13, fontWeight: "700" },
 
   // 右上 情報群
   topRight: { position: "absolute", alignItems: "flex-end", gap: 6 },

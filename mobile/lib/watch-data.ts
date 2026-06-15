@@ -11,7 +11,7 @@ const WATCH_COLUMNS =
   "id, share_code, broadcaster_id, sport, home_team, away_team, " +
   "home_score, away_score, home_sets, away_sets, tournament, period, point_label, " +
   "balls, strikes, outs, runners, status, started_at, scoreboard_burned_in, " +
-  "live_youtube_broadcast_id";
+  "live_youtube_broadcast_id, youtube_video_id, live_status";
 
 export type WatchBroadcast = {
   id: string;
@@ -35,6 +35,8 @@ export type WatchBroadcast = {
   started_at: string;
   scoreboard_burned_in: boolean | null;
   live_youtube_broadcast_id: string | null;
+  youtube_video_id: string | null;
+  live_status: string | null;
 };
 
 // share_code から配信を1件取得する（同一コード再利用に備え started_at 降順で最新を採る）。
