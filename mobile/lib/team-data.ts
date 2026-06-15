@@ -77,9 +77,21 @@ export const ROLE_LABELS: Record<TeamRole, string> = {
 };
 
 // 現在のセッションの access_token を取得（API 認証ヘッダ用）。
+// モバイルはバックグラウンド時に自動更新タイマーが止まり、getSession() が期限切れの
+// access_token を返すことがある（→ サーバの getUser が GoTrue /user で 403 → API が
+// 401 "Unauthorized"）。実際にチーム参加/作成で発生（Supabase auth ログで /user 403 確認済）。
+// 期限切れ/間近(60秒以内)なら refreshSession() で更新してから返す。更新も不可なら null
+// （呼び出し側が「再ログインしてください」を表示）。
 async function getAccessToken(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
+  const session = data.session;
+  if (!session) return null;
+  const expiresAtMs = (session.expires_at ?? 0) * 1000;
+  if (!expiresAtMs || expiresAtMs - Date.now() < 60_000) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    return refreshed.session?.access_token ?? null;
+  }
+  return session.access_token ?? null;
 }
 
 /**
