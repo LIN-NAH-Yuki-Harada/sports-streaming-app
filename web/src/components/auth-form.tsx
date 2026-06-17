@@ -23,10 +23,14 @@ type AuthFormProps = {
    * 省略時は `/mypage`。
    */
   redirectTo?: string;
+  /**
+   * 初期表示モード。省略時は `login`。広告用LP等で新規登録を主役にしたい場合に `signup` を渡す。
+   */
+  defaultMode?: Mode;
 };
 
-export function AuthForm({ redirectTo }: AuthFormProps = {}) {
-  const [mode, setMode] = useState<Mode>("login");
+export function AuthForm({ redirectTo, defaultMode = "login" }: AuthFormProps = {}) {
+  const [mode, setMode] = useState<Mode>(defaultMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
