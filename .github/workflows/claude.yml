@@ -37,6 +37,7 @@ jobs:
       - name: Run Claude
         uses: anthropics/claude-code-action@v1
         with:
-          # GitHub のリポジトリ Secrets に ANTHROPIC_API_KEY を登録すると有効化される。
-          # （Claude のサブスク利用なら CLAUDE_CODE_OAUTH_TOKEN に差し替え可）
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # GitHub のリポジトリ Secrets に CLAUDE_CODE_OAUTH_TOKEN を登録すると有効化される。
+          # Claude のサブスクを利用するため、API 従量課金（追加費用）は発生しない。
+          # （従量課金のAPIキーを使いたい場合は anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }} に差し替え）
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
