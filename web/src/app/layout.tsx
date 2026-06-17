@@ -8,6 +8,7 @@ import { AuthProvider } from "@/components/auth-provider";
 import { NameSetupModal } from "@/components/name-setup-modal";
 import { MainContainer } from "@/components/main-container";
 import { ToasterProvider } from "@/components/toaster";
+import { MetaPixel } from "@/components/meta-pixel";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -135,6 +136,7 @@ export default function RootLayout({
         </AuthProvider>
         <Analytics />
         <SpeedInsights />
+        <MetaPixel />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(ORGANIZATION_JSONLD) }}

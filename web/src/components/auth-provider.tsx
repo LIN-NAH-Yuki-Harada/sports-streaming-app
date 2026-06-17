@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/database";
+import { trackCompleteRegistrationOnce } from "@/lib/meta-pixel";
 
 type AuthContextType = {
   user: User | null;
@@ -49,6 +50,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // プロフィールはバックグラウンドで取得（loading をブロックしない）
       if (currentUser) {
+        // 新規登録(作成直後30分以内)のみ Meta CompleteRegistration を1回発火（広告CPA最適化用）。
+        // 再ログインは created_at が古いため発火しない。ID未設定なら no-op。
+        const createdAtMs = currentUser.created_at
+          ? new Date(currentUser.created_at).getTime()
+          : 0;
+        if (createdAtMs && Date.now() - createdAtMs < 30 * 60 * 1000) {
+          trackCompleteRegistrationOnce();
+        }
         getProfile(currentUser.id)
           .then((p) => setProfile(p))
           .catch(() => setProfile(null));
