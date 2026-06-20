@@ -1,4 +1,5 @@
 import { getAdminClient, getUser } from "@/lib/supabase-admin";
+import { sendPlanPitchEmail } from "@/lib/emails/plan-pitch";
 
 // 累積トライアル消費の上限（秒） = 10分
 const TRIAL_MAX_SECONDS = 600;
@@ -89,6 +90,18 @@ export async function POST(request: Request) {
     if (error) {
       console.error("Trial consume update error:", error);
       return Response.json({ error: "Update failed" }, { status: 500 });
+    }
+
+    // 無料10分をちょうど使い切った瞬間（< 600 → >= 600 に到達）に一度だけ、
+    // 「続けて配信するには」プラン案内メールを送る（Netflix型funnelの転換ドライバー）。
+    // ※ currentUsed が既に上限の場合は条件 false ＝再送なし（フラグ不要で自然に1回だけ）。
+    // ※ 送信失敗は握りつぶす（トライアル消費の本処理を止めない）。
+    if (
+      currentUsed < TRIAL_MAX_SECONDS &&
+      nextUsed >= TRIAL_MAX_SECONDS &&
+      user.email
+    ) {
+      await sendPlanPitchEmail({ email: user.email, context: "trial_end" });
     }
 
     return Response.json({ success: true, trial_seconds_used: nextUsed });
