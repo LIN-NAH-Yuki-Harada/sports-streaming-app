@@ -15,7 +15,7 @@ import { getEgressClient, getRoomServiceClient } from "./livekit-egress";
  * - 配信側 1080p → 720p 引き下げ（user-agent.ts pickBroadcastResolution）に
  *   合わせて Egress も 720p に統一。元素材より高い解像度を Egress 側で
  *   宣言してもアップスケール限界で品質改善せず、bitrate を無駄に消費するため。
- * - videoBitrate: 8 Mbps → 4 Mbps（YouTube 推奨 720p30 bitrate 1.5-4 Mbps の上限）
+ * - videoBitrate: 8 Mbps → 4 Mbps（YouTube 推奨 720p30 bitrate 1.5-4 Mbps の上限）→ 6/21: 4→6 Mbps（推奨レンジ上限・デメリットなし）
  * - videoCodec: H264_MAIN → **H264_HIGH**（同 bitrate で 10-15% 圧縮効率 UP、
  *   互換性は iOS/Android/PC ブラウザほぼ全部 OK）
  * - keyFrameInterval: 2 → **1 秒**（動きの多いシーンチェンジ・カメラパンで
@@ -33,7 +33,7 @@ const RTMP_HIGH_QUALITY_ENCODING = new EncodingOptions({
   height: 720,
   framerate: 30,
   videoCodec: VideoCodec.H264_HIGH,
-  videoBitrate: 4_000,
+  videoBitrate: 6_000,
   keyFrameInterval: 1,
   audioCodec: AudioCodec.AAC,
   audioBitrate: 128,
