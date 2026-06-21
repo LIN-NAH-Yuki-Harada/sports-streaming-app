@@ -18,7 +18,7 @@ import {
   type Broadcast,
   type Team,
 } from "@/lib/database";
-import { pickBroadcastResolution } from "@/lib/user-agent";
+import { pickBroadcastResolution, detectInAppBrowser } from "@/lib/user-agent";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
 import { isArchiveEnabled } from "@/lib/archive-flag";
@@ -111,6 +111,23 @@ function BroadcastPageInner() {
   const trialSecondsUsed = profile?.trial_seconds_used ?? 0;
   const trialSecondsRemainingInitial = Math.max(0, 600 - trialSecondsUsed);
   const trialExhausted = trialSecondsRemainingInitial <= 0;
+
+  // Android横向きゲート: Android で縦持ちのまま配信を開始すると
+  // 視聴側で映像が 90° 倒れる（Android Chrome が CVO を送らない仕様）。
+  // 横向きになるまでオーバーレイで案内し、なった瞬間自動解除する。
+  const [isAndroid, setIsAndroid] = useState(false);
+  const [isPortraitMode, setIsPortraitMode] = useState(false);
+  useEffect(() => {
+    if (typeof navigator === "undefined" || typeof window === "undefined") return;
+    const android = detectInAppBrowser().platform === "android";
+    setIsAndroid(android);
+    if (!android) return;
+    const mq = window.matchMedia("(orientation: portrait)");
+    setIsPortraitMode(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsPortraitMode(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   const [myTeams, setMyTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string>("");
@@ -1649,6 +1666,24 @@ function BroadcastPageInner() {
   // ===== 入力フォーム（ログイン済み）=====
   return (
     <div>
+      {/* Android 縦持ちゲート: 横向きになるまでオーバーレイで案内（自動解除） */}
+      {isAndroid && isPortraitMode && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center gap-5 px-8 text-center">
+          <svg className="w-16 h-16 text-[#e63946]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+            <rect x="5" y="2" width="14" height="20" rx="2" />
+            <path strokeLinecap="round" d="M12 18h.01" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l3 3-3 3M7 8l-3 3 3 3" />
+          </svg>
+          <div>
+            <h2 className="text-lg font-bold text-white">横向きにしてください</h2>
+            <p className="mt-2 text-sm text-gray-400 leading-relaxed">
+              Androidは横向き（ランドスケープ）で配信すると<br />
+              視聴者に正しい向きで映像が届きます。
+            </p>
+          </div>
+          <p className="text-xs text-gray-600">端末を横向きにすると自動で次に進みます</p>
+        </div>
+      )}
       <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
         <div className="flex items-center justify-between">
           <Logo />
