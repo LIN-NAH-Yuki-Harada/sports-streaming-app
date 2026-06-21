@@ -80,6 +80,9 @@ export type Broadcast = {
   live_started_at: string | null;
   live_ended_at: string | null;
   live_error: string | null;
+  // ネイティブ RTMP 配信（LiveKit Ingress）の ingress ID。配信終了時の破棄に使う内部列。
+  // クライアントには非公開（列レベル GRANT 対象外＝admin/service-role のみ参照）。
+  live_ingress_id: string | null;
 };
 
 // broadcasts テーブルからクライアント（anon/authenticated）でも取得できる公開列リスト。
