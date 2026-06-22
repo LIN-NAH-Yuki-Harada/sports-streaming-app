@@ -23,6 +23,11 @@ export type Profile = {
   stripe_subscription_id: string | null;
   subscription_status: string | null;
   current_period_end: string | null;
+  // Apple IAP 連携（RevenueCat 経由・2026-06-22追加）。iOSアプリ内課金。
+  // subscription_status / current_period_end / plan は Stripe と共有。
+  // 下記は「課金ソースが IAP である」ことの追跡用 内部列（クライアント非公開）。
+  iap_product_id: string | null;
+  iap_original_transaction_id: string | null;
   created_at: string;
   updated_at: string;
 };
