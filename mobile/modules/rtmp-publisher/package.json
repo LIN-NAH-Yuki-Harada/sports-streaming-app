@@ -1,0 +1,7 @@
+{
+  "name": "rtmp-publisher",
+  "version": "0.1.0",
+  "description": "Native RTMP publisher (HaishinKit) for LIVE SPOtCH — pushes camera+mic over RTMP (TCP/buffered) for stable high-quality 4G broadcasting via LiveKit Ingress.",
+  "main": "index.ts",
+  "private": true
+}
