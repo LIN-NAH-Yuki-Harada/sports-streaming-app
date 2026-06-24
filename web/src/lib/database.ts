@@ -88,6 +88,15 @@ export type Broadcast = {
   // ネイティブ RTMP 配信（LiveKit Ingress）の ingress ID。配信終了時の破棄に使う内部列。
   // クライアントには非公開（列レベル GRANT 対象外＝admin/service-role のみ参照）。
   live_ingress_id: string | null;
+  // Bunny.net Stream 配信（ネイティブ RTMP 移行・2026-06-24追加）。
+  // NEXT_PUBLIC_BUNNY_LIVE が false の間は全て null。
+  // ★ bunny_video_guid / bunny_playback_url / bunny_status は公開列（列レベル SELECT GRANT）だが、
+  //   視聴プレイヤー（HLS）対応 PR で BROADCAST_PUBLIC_COLUMNS に追加するまで SELECT には含めない。
+  bunny_video_guid: string | null;
+  bunny_playback_url: string | null;
+  bunny_status: "creating" | "live" | "ended" | "failed" | "vod_processing" | null;
+  // 録画 VOD の GUID（試合後 YouTube アップロード元）。内部用・クライアント非公開。
+  bunny_vod_guid: string | null;
 };
 
 // broadcasts テーブルからクライアント（anon/authenticated）でも取得できる公開列リスト。
