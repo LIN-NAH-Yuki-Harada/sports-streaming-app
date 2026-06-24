@@ -10,9 +10,9 @@ export const runtime = "nodejs";
  * 配信者アプリが「配信開始」時に叩く。配信先（RTMP・publish認証付）＋視聴URL（HLS）を返す。
  *
  * 戻り値（成功）: { rtmpUrl, playbackUrl, path }
- *   - rtmpUrl  = rtmp://<STREAM_HOST>/<shareCode>?user=<USER>&pass=<SECRET>
- *                （★この完全URLをそのまま RtmpPublisher.streamUrl に渡す）
- *   - playbackUrl = https://<STREAM_HOST>/<shareCode>/index.m3u8（視聴・共有コードで誰でも）
+ *   - rtmpUrl  = rtmp://<STREAM_HOST>/live/<shareCode>?user=<USER>&pass=<SECRET>
+ *                （★この完全URLをそのまま RtmpPublisher.streamUrl に渡す。2要素パス必須＝下記参照）
+ *   - playbackUrl = https://<STREAM_HOST>/live/<shareCode>/index.m3u8（視聴・共有コードで誰でも）
  *
  * 認証モデル: MediaMTX internal auth。視聴(read)は誰でも / 配信(publish)はパスワード必須。
  *   SECRET は MediaMTX 設定と同じ値を Vercel env(STREAM_PUBLISH_SECRET)に置く。
@@ -81,10 +81,16 @@ export async function POST(request: Request) {
     );
   }
 
-  // 6. URL 構築。MediaMTX の path = 共有コード（視聴の公開キー）。
-  const path = broadcast.share_code;
-  const rtmpUrl = `rtmp://${host}/${path}?user=${encodeURIComponent(pubUser)}&pass=${encodeURIComponent(secret)}`;
-  const playbackUrl = `https://${host}/${path}/index.m3u8`;
+  // 6. URL 構築。MediaMTX の path = "live/<共有コード>"（2要素）。
+  //    ★2要素必須: HaishinKit 2.x の RTMPURL は RTMP URL を /app/streamName の2要素前提でパースし、
+  //    先頭2要素を削って streamName を作る（クエリは streamName 側に残す）。1要素 (/<code>) だと
+  //    <code> が app として消費され publish 名が "?user=&pass=" だけになり認証が壊れる
+  //    （HaishinKit/gortmplib 両ソースで確認 + サーバー上 ffmpeg で2要素なら publish認証→HLS成立を実証）。
+  //    固定 app "live" を前置して 2要素にすることで HaishinKit が正しく認証を送る。
+  //    視聴 HLS も同じパス（https://host/live/<code>/index.m3u8）。Caddy は全パス転送なので変更不要。
+  const streamPath = `live/${broadcast.share_code}`;
+  const rtmpUrl = `rtmp://${host}/${streamPath}?user=${encodeURIComponent(pubUser)}&pass=${encodeURIComponent(secret)}`;
+  const playbackUrl = `https://${host}/${streamPath}/index.m3u8`;
 
   // 7. 視聴側が HLS URL を見つけられるよう broadcasts に保存（secret は保存しない）。
   //    自前RTMP経路は端末でスコアを焼き込むため scoreboard_burned_in=true にし、
@@ -98,5 +104,5 @@ export async function POST(request: Request) {
     console.error("[stream/provision] DB update failed:", uErr.message);
   }
 
-  return Response.json({ rtmpUrl, playbackUrl, path });
+  return Response.json({ rtmpUrl, playbackUrl, path: streamPath });
 }
