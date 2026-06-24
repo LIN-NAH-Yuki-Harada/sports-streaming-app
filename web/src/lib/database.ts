@@ -88,6 +88,10 @@ export type Broadcast = {
   // ネイティブ RTMP 配信（LiveKit Ingress）の ingress ID。配信終了時の破棄に使う内部列。
   // クライアントには非公開（列レベル GRANT 対象外＝admin/service-role のみ参照）。
   live_ingress_id: string | null;
+  // 自前配信サーバー(MediaMTX)の HLS 視聴 URL（/api/stream/provision が設定・2026-06-24追加）。
+  // 公開列（列レベル SELECT GRANT 済）だが、視聴プレイヤー対応 PR で BROADCAST_PUBLIC_COLUMNS に
+  // 追加するまで SELECT には含めない（migration 適用前に本番 SELECT を壊さないため）。
+  stream_playback_url: string | null;
 };
 
 // broadcasts テーブルからクライアント（anon/authenticated）でも取得できる公開列リスト。
