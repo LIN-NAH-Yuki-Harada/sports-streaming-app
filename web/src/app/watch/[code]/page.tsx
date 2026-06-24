@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
-import { getBroadcastByCode, type Broadcast } from "@/lib/database";
+import { getBroadcastByCode, getStreamPlaybackUrl, type Broadcast } from "@/lib/database";
 import { createClient } from "@/lib/supabase";
 import { LiveKitViewer } from "@/components/livekit-video";
+import { HlsPlayer } from "@/components/hls-player";
 import { ViewerScoreboardOverlay } from "@/components/viewer-scoreboard-overlay";
 import { Logo } from "@/components/logo";
 import { ShareButtons } from "@/components/share-buttons";
@@ -22,6 +23,9 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [notFound, setNotFound] = useState(false);
   const [viewerToken, setViewerToken] = useState<string | null>(null);
   const [isWatching, setIsWatching] = useState(false);
+  // 自前配信サーバー(MediaMTX)の HLS 視聴 URL。set されていれば HLS プレイヤーで直接再生
+  // （タップ不要・スコアは映像に焼き込み済み）。null なら従来 LiveKit 経路。
+  const [hlsUrl, setHlsUrl] = useState<string | null>(null);
   const [videoPaused, setVideoPaused] = useState(false);
   // 焼き込み OFF の配信は、スコアが映像に乗っていないので視聴側 CSS オーバーレイで表示する。
   // その場合 iPhone は「動画ネイティブ全画面」だと HTML オーバーレイが消えるため、
@@ -93,6 +97,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       const data = await getBroadcastByCode(code);
       if (data) {
         setBroadcast(data);
+        // 自前サーバー配信なら HLS 視聴URLを取得（migration未適用環境では null）
+        if (data.status === "live") {
+          getStreamPlaybackUrl(code).then(setHlsUrl).catch(() => {});
+        }
       } else {
         setNotFound(true);
       }
@@ -160,6 +168,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       const updated = await getBroadcastByCode(shareCodeRef.current);
       if (updated) {
         setBroadcast(updated);
+        // 配信開始がページ読み込み後の場合に備え、HLS URL も追従取得
+        if (updated.status === "live") {
+          getStreamPlaybackUrl(updated.share_code).then(setHlsUrl).catch(() => {});
+        }
         if (updated.status === "ended") {
           clearInterval(interval);
         }
@@ -289,7 +301,11 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         }
         style={isFakeFullscreen ? undefined : { minHeight: "60vh" }}
       >
-        {isWatching && viewerToken && isLive ? (
+        {isLive && hlsUrl ? (
+          // 自前配信サーバー(MediaMTX)の HLS を直接再生。タップ不要で自動再生。
+          // スコアは配信端末で映像に焼き込み済みなので CSS オーバーレイは重ねない。
+          <HlsPlayer src={hlsUrl} />
+        ) : isWatching && viewerToken && isLive ? (
           // 視聴者が「自社プレイヤーで見る」を選択中（WebRTC、リアルタイム）
           <>
             <LiveKitViewer

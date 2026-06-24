@@ -83,9 +83,11 @@ export async function POST(request: Request) {
   const playbackUrl = `https://${host}/${path}/index.m3u8`;
 
   // 7. 視聴側が HLS URL を見つけられるよう broadcasts に保存（secret は保存しない）。
+  //    自前RTMP経路は端末でスコアを焼き込むため scoreboard_burned_in=true にし、
+  //    視聴側 CSS オーバーレイの二重表示を防ぐ。
   const { error: uErr } = await admin
     .from("broadcasts")
-    .update({ stream_playback_url: playbackUrl })
+    .update({ stream_playback_url: playbackUrl, scoreboard_burned_in: true })
     .eq("id", broadcast.id);
   if (uErr) {
     // 保存失敗でも配信自体は開始できるよう creds は返す（視聴側の解決のみ遅れる）。

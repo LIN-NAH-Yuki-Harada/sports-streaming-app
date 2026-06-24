@@ -661,6 +661,25 @@ export async function getBroadcastByCode(
   return data as unknown as Broadcast;
 }
 
+// 自前配信サーバー(MediaMTX)の HLS 視聴 URL を単独取得する。
+// この列だけを別クエリで引くことで、migration 未適用の環境でも安全に null を返す
+// （stream_playback_url 列が無いと 42703 等の error → null → 従来 LiveKit 経路へフォールバック）。
+// これにより BROADCAST_PUBLIC_COLUMNS を変更せず＝既存の全 broadcast SELECT を壊さない。
+export async function getStreamPlaybackUrl(
+  shareCode: string,
+): Promise<string | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("stream_playback_url")
+    .eq("share_code", shareCode.toUpperCase())
+    .single();
+  if (error || !data) return null;
+  return (
+    (data as { stream_playback_url: string | null }).stream_playback_url ?? null
+  );
+}
+
 // ===== チームスケジュール =====
 
 export type TeamSchedule = {
