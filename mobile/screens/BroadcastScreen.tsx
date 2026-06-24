@@ -25,6 +25,9 @@ import {
   isTrackReference,
 } from "@livekit/react-native";
 import { Track } from "livekit-client";
+import RtmpPublisherView, {
+  type RtmpStatusEvent,
+} from "../modules/rtmp-publisher/src/RtmpPublisherView";
 import { supabase } from "../lib/supabase";
 import { LIVEKIT_URL, SITE_URL } from "../config";
 import {
@@ -63,6 +66,8 @@ import {
   startLiveStream,
   stopLiveStream,
   fetchLiveYoutubeId,
+  fetchBunnyIngest,
+  stopBunnyStream,
 } from "../lib/broadcasts";
 import {
   type Plan,
@@ -101,12 +106,43 @@ function formatElapsed(totalSeconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+// 映像に焼き込む1行スコアボード（ネイティブ RTMP 配信時に RtmpPublisher へ渡す）。
+// GPU 再合成を抑えるため経過秒（毎秒変化）は含めず、得点・セット・ピリオド・野球カウント
+// （実際に変わる時だけ更新）で構成する。空文字を渡すと native 側で自動非表示。
+function formatScoreboardLine(a: {
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number;
+  awayScore: number;
+  period: string;
+  setBased: boolean;
+  homeSets: number;
+  awaySets: number;
+  pointLabel: string | null;
+  sportKey: SportKey;
+  baseball: BaseballCount | null;
+}): string {
+  const home = a.setBased ? `${a.homeTeam}(${a.homeSets})` : a.homeTeam;
+  const away = a.setBased ? `${a.awayTeam}(${a.awaySets})` : a.awayTeam;
+  let line = `${home} ${a.homeScore} - ${a.awayScore} ${away}`;
+  if (a.period) line += `  ${a.period}`;
+  if (a.sportKey === "baseball" && a.baseball) {
+    line += `  B${a.baseball.balls} S${a.baseball.strikes} O${a.baseball.outs}`;
+  }
+  if (a.setBased && a.pointLabel) line += `  ${a.pointLabel}`;
+  return line;
+}
+
 export function BroadcastScreen() {
   const navigation = useNavigation<any>();
   const [phase, setPhase] = useState<Phase>("ready");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  // ネイティブ RTMP 配信（Bunny）の完全 URL。null の間は従来 LiveKit 経路を使う。
+  const [rtmpUrl, setRtmpUrl] = useState<string | null>(null);
+  // 今回の配信トランスポート（finishLive で停止先を出し分ける）。
+  const transportRef = useRef<"livekit" | "rtmp" | null>(null);
   const [shareCode, setShareCode] = useState<string | null>(null);
 
   // 試合セットアップ（配信開始前に入力）
@@ -353,6 +389,29 @@ export function BroadcastScreen() {
       setLiveYoutubeId(null);
       setYoutubeReadyAt(0);
 
+      // --- 配信トランスポート選択 ---
+      // まず Bunny(ネイティブRTMP＋端末スコア焼き込み)を試す。サーバーフラグ
+      // (NEXT_PUBLIC_BUNNY_LIVE) がOFF/未設定なら null が返るので、従来の LiveKit 経路へ
+      // 自動フォールバックする（=本番が壊れない・サーバー側フラグ1つで全体切替）。
+      const bunny = created.id ? await fetchBunnyIngest(created.id) : null;
+      if (bunny) {
+        transportRef.current = "rtmp";
+        endedRef.current = false;
+        remountingRef.current = false;
+        bgAtRef.current = 0;
+        liveStartedAtRef.current = Date.now();
+        setElapsed(0);
+        // RtmpPublisher は AVCaptureSession で自前に音声を扱うため LiveKit の
+        // AudioSession は使わない（スパイクでも未使用で成立）。
+        setToken(null);
+        setRtmpUrl(bunny.rtmpUrl);
+        setShareCode(code);
+        setPhase("live");
+        setBusy(false);
+        return;
+      }
+      transportRef.current = "livekit";
+
       // 電波が不安定で応答が返らないとボタンが固まるため 15 秒でタイムアウト
       const ctrl = new AbortController();
       let timedOut = false; // abort 理由を明示（e.name 判定に依存しない）
@@ -488,10 +547,15 @@ export function BroadcastScreen() {
         }
       }
       if (shareCode) await endBroadcast(shareCode).catch(() => {});
-      // YouTube同時配信を停止（Egress停止→enableAutoStopでアーカイブ化）。全終了経路を通る finishLive に集約。
-      // await しない（弱電波でも停止UIを固めない）。停止し損ねても webhook/cron/次回開始時の掃除で回収される。
+      // 配信トランスポートを停止（全終了経路を通る finishLive に集約・await しない）。
+      // - RTMP(Bunny): Bunny LiveStream を停止（停止し損ねても cron が回収）。
+      // - LiveKit: YouTube同時配信の Egress を停止（→enableAutoStopでアーカイブ化）。
       if (broadcastIdRef.current) {
-        void stopLiveStream(broadcastIdRef.current).catch(() => {});
+        if (transportRef.current === "rtmp") {
+          void stopBunnyStream(broadcastIdRef.current).catch(() => {});
+        } else if (transportRef.current === "livekit") {
+          void stopLiveStream(broadcastIdRef.current).catch(() => {});
+        }
       }
       liveStartedRef.current = false;
       setLiveYoutubeId(null);
@@ -512,6 +576,8 @@ export function BroadcastScreen() {
         }
       }
       setToken(null);
+      setRtmpUrl(null);
+      transportRef.current = null;
       setShareCode(null);
       if (msg) setMessage(msg);
       setPhase("ready");
@@ -643,6 +709,112 @@ export function BroadcastScreen() {
       runners: baseball.runners,
     });
   }, [phase, sportKey, shareCode, baseball]);
+
+  // 焼き込む1行スコアボード（RTMP配信時のみ使用・実際に変わった時だけ再合成）。
+  const scoreboardLine = useMemo(
+    () =>
+      formatScoreboardLine({
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        period,
+        setBased,
+        homeSets,
+        awaySets,
+        pointLabel,
+        sportKey,
+        baseball: sportKey === "baseball" ? baseball : null,
+      }),
+    [
+      homeTeam,
+      awayTeam,
+      homeScore,
+      awayScore,
+      period,
+      setBased,
+      homeSets,
+      awaySets,
+      pointLabel,
+      sportKey,
+      baseball,
+    ],
+  );
+
+  // ネイティブ RTMP の状態通知。LiveKit の onConnected/onError/onDisconnected と対応。
+  // ※ Bunny 経路では YouTube は「試合後アーカイブ」（T10）なので、ここで startLiveStream は呼ばない。
+  const handleRtmpStatus = useCallback(
+    (e: RtmpStatusEvent) => {
+      const state = e.nativeEvent.state;
+      if (state === "open") {
+        // 接続（作り直し含む）成功 → 終了タイマー解除
+        remountingRef.current = false;
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+      } else if (state === "error") {
+        if (remountingRef.current) return; // 作り直し中の一時エラーは無視
+        finishLive("配信エラー: " + (e.nativeEvent.message ?? "接続に失敗しました"));
+      } else if (state === "closed") {
+        if (remountingRef.current) return; // 既に作り直し中
+        if (endedRef.current) return; // 停止ボタン等で終了処理中の切断は無視
+        // 予期しない切断 → すぐ終了せず接続を作り直して同じ配信を再開（視聴URL不変）。
+        remountingRef.current = true;
+        setLiveKey((k) => k + 1);
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = setTimeout(() => {
+          if (remountingRef.current) {
+            remountingRef.current = false;
+            finishLive(
+              "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
+            );
+          }
+        }, 20000);
+      }
+    },
+    [finishLive],
+  );
+
+  if (phase === "live" && rtmpUrl) {
+    return (
+      <RtmpLiveView
+        key={liveKey}
+        rtmpUrl={rtmpUrl}
+        scoreboardText={scoreboardLine}
+        onStatus={handleRtmpStatus}
+        shareCode={shareCode}
+        homeTeam={homeTeam}
+        awayTeam={awayTeam}
+        homeScore={homeScore}
+        awayScore={awayScore}
+        period={period}
+        setBased={setBased}
+        unitLabel={setUnitLabel(sportKey)}
+        pointLabel={pointLabel}
+        elapsed={elapsed}
+        trialRemaining={plan === "free" ? Math.max(0, trialRemainingAtStart - elapsed) : null}
+        homeSets={homeSets}
+        awaySets={awaySets}
+        onHome={(d) => setHomeScore((s) => Math.max(0, s + d))}
+        onAway={(d) => setAwayScore((s) => Math.max(0, s + d))}
+        onPeriod={() => {
+          setPeriod((p) => nextPeriodIn(activePeriods, p));
+          if (sportKey === "baseball") setBaseball(emptyBaseballCount());
+        }}
+        onNextSet={handleNextSet}
+        onStop={() => finishLive(null)}
+        youtubeShareUrl={null}
+        youtubeReadyAt={0}
+        scoreSteps={sportKey === "basketball" ? [1, 2, 3] : [1]}
+        baseballCount={sportKey === "baseball" ? baseball : null}
+        onBall={onBall}
+        onStrike={onStrike}
+        onOut={onOut}
+        onRunner={onRunner}
+      />
+    );
+  }
 
   if (phase === "live" && token) {
     return (
@@ -1020,34 +1192,7 @@ function BroadcastReactions({ shareCode }: { shareCode: string }) {
   );
 }
 
-function LiveView({
-  shareCode,
-  homeTeam,
-  awayTeam,
-  homeScore,
-  awayScore,
-  period,
-  setBased,
-  unitLabel,
-  pointLabel,
-  elapsed,
-  trialRemaining,
-  homeSets,
-  awaySets,
-  onHome,
-  onAway,
-  onPeriod,
-  onNextSet,
-  onStop,
-  youtubeShareUrl,
-  youtubeReadyAt,
-  scoreSteps,
-  baseballCount,
-  onBall,
-  onStrike,
-  onOut,
-  onRunner,
-}: {
+type ScoreControlsProps = {
   shareCode: string | null;
   homeTeam: string;
   awayTeam: string;
@@ -1074,10 +1219,39 @@ function LiveView({
   onStrike: () => void;
   onOut: () => void;
   onRunner: (base: keyof BaseballRunners) => void;
-}) {
-  useKeepAwake(); // 配信中は画面をスリープさせない（長時間の発熱テスト対策）
-  const tracks = useTracks([Track.Source.Camera]);
-  const cam = tracks.find((t) => isTrackReference(t) && t.participant.isLocal) ?? tracks[0];
+};
+
+// 配信中オーバーレイ（スコアボードプレビュー＋スコア操作＋停止＋応援スタンプ）。
+// カメラ層は持たず、LiveKit(LiveView) と ネイティブRTMP(RtmpLiveView) の両方から重ねて使う共通UI。
+function ScoreControls(props: ScoreControlsProps) {
+  const {
+    shareCode,
+    homeTeam,
+    awayTeam,
+    homeScore,
+    awayScore,
+    period,
+    setBased,
+    unitLabel,
+    pointLabel,
+    elapsed,
+    trialRemaining,
+    homeSets,
+    awaySets,
+    onHome,
+    onAway,
+    onPeriod,
+    onNextSet,
+    onStop,
+    youtubeShareUrl,
+    youtubeReadyAt,
+    scoreSteps,
+    baseballCount,
+    onBall,
+    onStrike,
+    onOut,
+    onRunner,
+  } = props;
 
   // YouTube が準備中（ウォームアップ中）かどうかを1秒ごとに判定。
   const [now, setNow] = useState(0);
@@ -1118,16 +1292,7 @@ function LiveView({
   const isPortrait = winH >= winW;
 
   return (
-    <View style={styles.liveRoot}>
-      {cam && isTrackReference(cam) ? (
-        <VideoTrack trackRef={cam} style={styles.video} objectFit="cover" />
-      ) : (
-        <View style={styles.center}>
-          <ActivityIndicator color="#fff" />
-          <Text style={styles.connecting}>接続中...</Text>
-        </View>
-      )}
-
+    <>
       {/* 上: 視聴者に見えているのと同じスコアボードのプレビュー ＋ 停止 */}
       <SafeAreaView style={styles.topOverlay} pointerEvents="box-none">
         <View style={styles.topLeftGroup}>
@@ -1323,6 +1488,58 @@ function LiveView({
 
       {/* 視聴者からの応援スタンプ（pointerEvents none で操作を邪魔しない） */}
       {shareCode ? <BroadcastReactions shareCode={shareCode} /> : null}
+    </>
+  );
+}
+
+// LiveKit 経路: WebRTC のカメラトラックをプレビューしつつ操作UIを重ねる。
+function LiveView(props: ScoreControlsProps) {
+  useKeepAwake(); // 配信中は画面をスリープさせない（長時間の発熱テスト対策）
+  const tracks = useTracks([Track.Source.Camera]);
+  const cam =
+    tracks.find((t) => isTrackReference(t) && t.participant.isLocal) ?? tracks[0];
+  return (
+    <View style={styles.liveRoot}>
+      {cam && isTrackReference(cam) ? (
+        <VideoTrack trackRef={cam} style={styles.video} objectFit="cover" />
+      ) : (
+        <View style={styles.center}>
+          <ActivityIndicator color="#fff" />
+          <Text style={styles.connecting}>接続中...</Text>
+        </View>
+      )}
+      <ScoreControls {...props} />
+    </View>
+  );
+}
+
+// ネイティブ RTMP 経路（Bunny）: 端末でカメラ＋スコア焼き込みを GPU 合成して RTMP 送信。
+// プレビューは RtmpPublisherView 自身が描画する。操作UIは同じ ScoreControls を重ねる。
+function RtmpLiveView(
+  props: ScoreControlsProps & {
+    rtmpUrl: string;
+    scoreboardText: string;
+    onStatus: (e: RtmpStatusEvent) => void;
+  },
+) {
+  useKeepAwake();
+  const { rtmpUrl, scoreboardText, onStatus, ...controls } = props;
+  return (
+    <View style={styles.liveRoot}>
+      <RtmpPublisherView
+        style={styles.video}
+        streamUrl={rtmpUrl}
+        active={true}
+        videoWidth={1280}
+        videoHeight={720}
+        videoBitrate={6_000_000}
+        fps={60}
+        cameraPosition="back"
+        scoreboardText={scoreboardText}
+        scoreboardVisible={true}
+        onStatus={onStatus}
+      />
+      <ScoreControls {...controls} />
     </View>
   );
 }
