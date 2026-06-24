@@ -66,8 +66,7 @@ import {
   startLiveStream,
   stopLiveStream,
   fetchLiveYoutubeId,
-  fetchBunnyIngest,
-  stopBunnyStream,
+  fetchStreamTarget,
 } from "../lib/broadcasts";
 import {
   type Plan,
@@ -390,11 +389,11 @@ export function BroadcastScreen() {
       setYoutubeReadyAt(0);
 
       // --- 配信トランスポート選択 ---
-      // まず Bunny(ネイティブRTMP＋端末スコア焼き込み)を試す。サーバーフラグ
-      // (NEXT_PUBLIC_BUNNY_LIVE) がOFF/未設定なら null が返るので、従来の LiveKit 経路へ
+      // まず自前配信サーバー(ネイティブRTMP→MediaMTX＋端末スコア焼き込み)を試す。サーバーフラグ
+      // (NEXT_PUBLIC_STREAM_SELFHOST) がOFF/未設定なら null が返るので、従来の LiveKit 経路へ
       // 自動フォールバックする（=本番が壊れない・サーバー側フラグ1つで全体切替）。
-      const bunny = created.id ? await fetchBunnyIngest(created.id) : null;
-      if (bunny) {
+      const stream = created.id ? await fetchStreamTarget(created.id) : null;
+      if (stream) {
         transportRef.current = "rtmp";
         endedRef.current = false;
         remountingRef.current = false;
@@ -404,7 +403,7 @@ export function BroadcastScreen() {
         // RtmpPublisher は AVCaptureSession で自前に音声を扱うため LiveKit の
         // AudioSession は使わない（スパイクでも未使用で成立）。
         setToken(null);
-        setRtmpUrl(bunny.rtmpUrl);
+        setRtmpUrl(stream.rtmpUrl);
         setShareCode(code);
         setPhase("live");
         setBusy(false);
@@ -548,14 +547,10 @@ export function BroadcastScreen() {
       }
       if (shareCode) await endBroadcast(shareCode).catch(() => {});
       // 配信トランスポートを停止（全終了経路を通る finishLive に集約・await しない）。
-      // - RTMP(Bunny): Bunny LiveStream を停止（停止し損ねても cron が回収）。
+      // - RTMP(自前MediaMTX): 停止API不要。publish が切れると MediaMTX が自動でパス破棄。
       // - LiveKit: YouTube同時配信の Egress を停止（→enableAutoStopでアーカイブ化）。
-      if (broadcastIdRef.current) {
-        if (transportRef.current === "rtmp") {
-          void stopBunnyStream(broadcastIdRef.current).catch(() => {});
-        } else if (transportRef.current === "livekit") {
-          void stopLiveStream(broadcastIdRef.current).catch(() => {});
-        }
+      if (broadcastIdRef.current && transportRef.current === "livekit") {
+        void stopLiveStream(broadcastIdRef.current).catch(() => {});
       }
       liveStartedRef.current = false;
       setLiveYoutubeId(null);

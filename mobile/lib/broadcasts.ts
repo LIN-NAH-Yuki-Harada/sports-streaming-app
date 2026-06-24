@@ -82,17 +82,18 @@ export async function startLiveStream(
   }
 }
 
-// ===== Bunny.net Stream（ネイティブ RTMP 配信）=====
+// ===== 自前配信サーバー（MediaMTX on VPS）=====
 
-// 配信ごとの取り込み先（完全 RTMP URL）＋ HLS 再生 URL を取得する。
-// サーバー（/api/bunny/live/start）が Bunny LiveStream を発行し rtmpUrl/streamKey/playbackUrl を返す。
-// ★ ネイティブ RtmpPublisher は「完全 URL（最後のパス要素=stream key）」を要求するため、
-//   rtmpUrl + "/" + streamKey を **JS 側で結合** して返す（分離して渡すと native の URL parse が無言で失敗する）。
-// ★ サーバーフラグ（NEXT_PUBLIC_BUNNY_LIVE）OFF の間は 503 が返る → null を返し、
+// 配信ごとの配信先（完全 RTMP URL・publish認証付）＋ HLS 視聴 URL を取得する。
+// サーバー（/api/stream/provision）が rtmp://<host>/<shareCode>?user=&pass=<SECRET> を組んで返す。
+// ★ これは**完全URL**なので、そのまま RtmpPublisher.streamUrl に渡す（結合不要）。
+// ★ サーバーフラグ（NEXT_PUBLIC_STREAM_SELFHOST）OFF の間は 503 が返る → null を返し、
 //   呼び出し側は従来の LiveKit 経路にフォールバックする（=本番が壊れない・rebuild なしで切替）。
-export async function fetchBunnyIngest(
+// ※ 配信終了時の「停止API」は不要：publish が切れると MediaMTX が自動でパスを破棄する
+//   （broadcasts の status=ended は endBroadcast 側で記録）。
+export async function fetchStreamTarget(
   broadcastId: string,
-): Promise<{ rtmpUrl: string; playbackUrl: string; bunnyVideoGuid: string } | null> {
+): Promise<{ rtmpUrl: string; playbackUrl: string } | null> {
   // 弱電波でボタンが固まらないよう 15 秒でタイムアウト
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 15_000);
@@ -100,7 +101,7 @@ export async function fetchBunnyIngest(
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (!token) return null;
-    const res = await fetch(`${SITE_URL}/api/bunny/live/start`, {
+    const res = await fetch(`${SITE_URL}/api/stream/provision`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -113,44 +114,12 @@ export async function fetchBunnyIngest(
     if (!res.ok) return null;
     const json = (await res.json().catch(() => ({}))) as {
       rtmpUrl?: string;
-      streamKey?: string;
       playbackUrl?: string;
-      bunnyVideoGuid?: string;
     };
-    if (!json.rtmpUrl || !json.streamKey) return null;
-    const fullRtmpUrl = `${json.rtmpUrl.replace(/\/+$/, "")}/${json.streamKey}`;
-    return {
-      rtmpUrl: fullRtmpUrl,
-      playbackUrl: json.playbackUrl ?? "",
-      bunnyVideoGuid: json.bunnyVideoGuid ?? "",
-    };
+    if (!json.rtmpUrl) return null;
+    return { rtmpUrl: json.rtmpUrl, playbackUrl: json.playbackUrl ?? "" };
   } catch {
     return null;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-// Bunny LiveStream を停止する（配信終了時・fire-and-forget）。
-// 停止し損ねても cron cleanup が残骸を回収する。LiveKit の stopLiveStream と同型。
-export async function stopBunnyStream(broadcastId: string): Promise<void> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 15_000);
-  try {
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token;
-    if (!token) return;
-    await fetch(`${SITE_URL}/api/bunny/live/stop`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ broadcastId }),
-      signal: ctrl.signal,
-    });
-  } catch {
-    // fire-and-forget
   } finally {
     clearTimeout(t);
   }
