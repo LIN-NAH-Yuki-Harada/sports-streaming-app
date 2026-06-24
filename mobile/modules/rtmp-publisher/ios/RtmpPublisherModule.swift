@@ -32,6 +32,14 @@ public class RtmpPublisherModule: Module {
         view.cameraPosition = value
         if changed { view.updateCamera() }
       }
+      Prop("scoreboardText") { (view: RtmpPublisherView, value: String?) in
+        view.scoreboardText = value ?? ""
+        view.applyScoreboard()
+      }
+      Prop("scoreboardVisible") { (view: RtmpPublisherView, value: Bool) in
+        view.scoreboardVisible = value
+        view.applyScoreboard()
+      }
     }
   }
 }

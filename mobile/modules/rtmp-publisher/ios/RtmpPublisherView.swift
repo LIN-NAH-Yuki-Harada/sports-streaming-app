@@ -2,6 +2,7 @@ import ExpoModulesCore
 import HaishinKit
 import RTMPHaishinKit
 import AVFoundation
+import UIKit
 
 // カメラ＋マイクを RTMP(TCP/バッファ型) で push する Expo ネイティブ View。
 // 4G でも「フレームを捨てず、詰まったらビットレートを下げて送り切る」ため安定・高画質。
@@ -23,12 +24,22 @@ class RtmpPublisherView: ExpoView {
   var active: Bool = false
   var videoWidth: Int = 1280
   var videoHeight: Int = 720
-  var videoBitrate: Int = 4_000_000
-  var fps: Double = 30
+  var videoBitrate: Int = 6_000_000
+  var fps: Double = 60
   var cameraPosition: String = "back"
+
+  // スコアボード焼き込み（スパイク検証用）。
+  // JS 側で整形した1行文字列を渡し、ネイティブ（GPU合成）で映像に焼き込む。
+  // ＝ブラウザCanvas合成と違い発熱主因にならないかを実機で検証する。
+  var scoreboardText: String = ""
+  var scoreboardVisible: Bool = true
 
   private var isMixerReady = false
   private var isStreaming = false
+
+  // 画面合成（offscreen）に載せるスコアボードのテキストオブジェクト。
+  // TextScreenObject は @ScreenActor 隔離クラス＝Sendable なので MainActor 保持でも安全に受け渡せる。
+  private var scoreboardObject: TextScreenObject?
 
   let onStatus = EventDispatcher()
 
@@ -54,9 +65,57 @@ class RtmpPublisherView: ExpoView {
     try? await mixer.attachVideo(camera, track: 0)
     try? await mixer.attachAudio(AVCaptureDevice.default(for: .audio))
     await mixer.addOutput(mtView)
+
+    // スコアボードをピクセルへ焼き込むため offscreen 合成を有効化する。
+    // 既定は .passthrough（合成されず素のカメラがそのまま流れる）。
+    var settings = await mixer.videoMixerSettings
+    settings.mode = .offscreen
+    await mixer.setVideoMixerSettings(settings)
+    try? await mixer.setFrameRate(fps)
+
     await mixer.startRunning()
+
+    // 現在の Prop 値でオーバーレイを構築（以後の更新は applyScoreboard）。
+    // self を @ScreenActor クロージャに捕まえないよう、必要な値はローカルに取り出して渡す。
+    let mixer = self.mixer
+    let w = CGFloat(videoWidth)
+    let h = CGFloat(videoHeight)
+    let str = scoreboardText
+    let visible = scoreboardVisible
+    let label = await Task { @ScreenActor () -> TextScreenObject in
+      await mixer.screen.isGPURendererEnabled = true
+      await mixer.screen.size = CGSize(width: w, height: h)
+      let l = TextScreenObject()
+      l.horizontalAlignment = .center
+      l.verticalAlignment = .top
+      l.layoutMargin = UIEdgeInsets(top: 24, left: 16, bottom: 0, right: 16)
+      l.cornerRadius = 8
+      l.attributes = [
+        .font: UIFont.boldSystemFont(ofSize: 40),
+        .foregroundColor: UIColor.white,
+        .backgroundColor: UIColor.black.withAlphaComponent(0.55)
+      ]
+      l.string = str
+      l.isVisible = visible && !str.isEmpty
+      try? await mixer.screen.addChild(l)
+      return l
+    }.value
+    scoreboardObject = label
+
     isMixerReady = true
     await reconcile()
+  }
+
+  // JS から scoreboardText / scoreboardVisible が更新されたら呼ぶ。
+  // label は Sendable なのでローカルに取り出して @ScreenActor で更新（self 非捕捉）。
+  func applyScoreboard() {
+    guard let label = scoreboardObject else { return }
+    let str = scoreboardText
+    let visible = scoreboardVisible
+    Task { @ScreenActor in
+      label.string = str
+      label.isVisible = visible && !str.isEmpty
+    }
   }
 
   // Prop 更新のたびに呼び、active/url に応じて配信を開始・停止する。
