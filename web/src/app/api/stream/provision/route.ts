@@ -34,9 +34,13 @@ export async function POST(request: Request) {
   }
 
   // 3. env
-  const host = process.env.STREAM_HOST;
-  const secret = process.env.STREAM_PUBLISH_SECRET;
-  const pubUser = process.env.STREAM_PUBLISH_USER || "spotch";
+  // ★ .trim() 必須: Vercel env に値を貼る際、前後に空白/改行が混入しやすい。
+  //    host に空白が入ると `rtmp:// host /code` となり、iOS の URL(string:) が
+  //    nil を返して native 側が "invalid url" で落ちる（2026-06-25 実機で発生）。
+  //    host/secret/user すべて trim して空白混入を無害化する。
+  const host = process.env.STREAM_HOST?.trim();
+  const secret = process.env.STREAM_PUBLISH_SECRET?.trim();
+  const pubUser = (process.env.STREAM_PUBLISH_USER || "spotch").trim();
   if (!host || !secret) {
     console.error(
       "[stream/provision] env missing: STREAM_HOST / STREAM_PUBLISH_SECRET",
