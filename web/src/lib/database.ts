@@ -88,6 +88,10 @@ export type Broadcast = {
   // ネイティブ RTMP 配信（LiveKit Ingress）の ingress ID。配信終了時の破棄に使う内部列。
   // クライアントには非公開（列レベル GRANT 対象外＝admin/service-role のみ参照）。
   live_ingress_id: string | null;
+  // 自前配信サーバー(MediaMTX)の HLS 視聴 URL（/api/stream/provision が設定・2026-06-24追加）。
+  // 公開列（列レベル SELECT GRANT 済）だが、視聴プレイヤー対応 PR で BROADCAST_PUBLIC_COLUMNS に
+  // 追加するまで SELECT には含めない（migration 適用前に本番 SELECT を壊さないため）。
+  stream_playback_url: string | null;
 };
 
 // broadcasts テーブルからクライアント（anon/authenticated）でも取得できる公開列リスト。
@@ -655,6 +659,25 @@ export async function getBroadcastByCode(
     return null;
   }
   return data as unknown as Broadcast;
+}
+
+// 自前配信サーバー(MediaMTX)の HLS 視聴 URL を単独取得する。
+// この列だけを別クエリで引くことで、migration 未適用の環境でも安全に null を返す
+// （stream_playback_url 列が無いと 42703 等の error → null → 従来 LiveKit 経路へフォールバック）。
+// これにより BROADCAST_PUBLIC_COLUMNS を変更せず＝既存の全 broadcast SELECT を壊さない。
+export async function getStreamPlaybackUrl(
+  shareCode: string,
+): Promise<string | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("stream_playback_url")
+    .eq("share_code", shareCode.toUpperCase())
+    .single();
+  if (error || !data) return null;
+  return (
+    (data as { stream_playback_url: string | null }).stream_playback_url ?? null
+  );
 }
 
 // ===== チームスケジュール =====
