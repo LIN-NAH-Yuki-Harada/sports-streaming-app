@@ -16,7 +16,7 @@ import UIKit
 class RtmpPublisherView: ExpoView {
   private let mtView = MTHKView(frame: .zero)
   private let mixer = MediaMixer()
-  private var session: (any StreamSession)?
+  private var session: (any Session)?
   private var readyStateTask: Task<Void, Never>?
 
   // Props（JS から設定）
@@ -146,7 +146,13 @@ class RtmpPublisherView: ExpoView {
       try? audioSession.setActive(true)
 
       emit("connecting")
-      let session = try await StreamSessionBuilderFactory.shared.make(url).setMode(.publish).build()
+      // RTMP セッションファクトリを登録（未登録だと make が notFound で失敗。重複登録は内部でガード）。
+      await SessionBuilderFactory.shared.register(RTMPSessionFactory())
+      guard let session = try await SessionBuilderFactory.shared.make(url).setMode(.publish).build() else {
+        isStreaming = false
+        emit("error", "session build failed")
+        return
+      }
       self.session = session
 
       let stream = await session.stream
