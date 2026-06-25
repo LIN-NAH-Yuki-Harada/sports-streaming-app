@@ -48,7 +48,35 @@ class RtmpPublisherView: ExpoView {
     clipsToBounds = true
     mtView.videoGravity = .resizeAspectFill
     addSubview(mtView)
+    // 端末の物理向きに追従してカメラ向きを更新する（横持ちの左右どちらでも正立・上下逆を防ぐ）。
+    UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(deviceOrientationChanged),
+      name: UIDevice.orientationDidChangeNotification,
+      object: nil
+    )
     Task { await self.setupMixer() }
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+  }
+
+  // 端末を横に回したら配信映像も正立させる（AVF と UIDevice は左右反転の慣習）。
+  // 縦持ち等は無視して直近の横向きを維持（出力は常に 1280x720 横固定＝配信中の解像度変更不可のため）。
+  @objc private func deviceOrientationChanged() {
+    let mixer = self.mixer
+    let orientation = UIDevice.current.orientation
+    Task {
+      let vo: AVCaptureVideoOrientation
+      switch orientation {
+      case .landscapeLeft: vo = .landscapeRight
+      case .landscapeRight: vo = .landscapeLeft
+      default: return
+      }
+      await mixer.setVideoOrientation(vo)
+    }
   }
 
   override func layoutSubviews() {
@@ -71,10 +99,17 @@ class RtmpPublisherView: ExpoView {
     var settings = await mixer.videoMixerSettings
     settings.mode = .offscreen
     await mixer.setVideoMixerSettings(settings)
-    // 横持ち固定（landscape）。capture 接続(AVCaptureConnection)を回転させ、offscreen 合成より
-    // 前段でフレーム自体を 1280x720 の横向きにする。これが無いと iOS 既定の .portrait(720x1280)
-    // が 1280x720 キャンバス中央に「縦帯」で描画される（HaishinKit 2.x の正API＝setVideoOrientation）。
-    await mixer.setVideoOrientation(.landscapeRight)
+    // 横向き配信。capture 接続(AVCaptureConnection)を回転させ、offscreen 合成より前段で
+    // フレーム自体を 1280x720 の横向きにする（無いと iOS 既定の縦が縦帯になる）。
+    // 起動時は現在の端末向きに合わせて初期化し、以後は deviceOrientationChanged で追従。
+    let orientation = UIDevice.current.orientation
+    let initialVO: AVCaptureVideoOrientation
+    switch orientation {
+    case .landscapeLeft: initialVO = .landscapeRight
+    case .landscapeRight: initialVO = .landscapeLeft
+    default: initialVO = .landscapeRight
+    }
+    await mixer.setVideoOrientation(initialVO)
     try? await mixer.setFrameRate(fps)
 
     await mixer.startRunning()
