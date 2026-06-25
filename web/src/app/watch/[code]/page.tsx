@@ -303,8 +303,15 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       >
         {isLive && hlsUrl ? (
           // 自前配信サーバー(MediaMTX)の HLS を直接再生。タップ不要で自動再生。
-          // スコアは配信端末で映像に焼き込み済みなので CSS オーバーレイは重ねない。
-          <HlsPlayer src={hlsUrl} />
+          // スコアは端末焼き込み(プレーンテキスト)ではなく、視聴側で CSS の綺麗な
+          // オーバーレイ(配信者画面と同デザイン・DBからリアルタイム)を重ねる。
+          // ＝端末は焼き込みOFF(scoreboardVisible=false)・provision は burned_in=false。
+          <>
+            <HlsPlayer src={hlsUrl} />
+            {!scoreboardBurnedIn && (
+              <ViewerScoreboardOverlay broadcast={broadcast} />
+            )}
+          </>
         ) : isWatching && viewerToken && isLive ? (
           // 視聴者が「自社プレイヤーで見る」を選択中（WebRTC、リアルタイム）
           <>
