@@ -754,7 +754,9 @@ export function BroadcastScreen() {
       } else if (state === "closed") {
         if (remountingRef.current) return; // 既に作り直し中
         if (endedRef.current) return; // 停止ボタン等で終了処理中の切断は無視
-        // 予期しない切断 → すぐ終了せず接続を作り直して同じ配信を再開（視聴URL不変）。
+        // 予期しない切断（バックグラウンド復帰・電波瞬断など）→ すぐ終了せず接続を
+        // 作り直して同じ配信を再開する（視聴URL不変）。MediaMTX は overridePublisher 既定 true
+        // のため、作り直しの新 publisher が同一パスを引き継ぐ（認証修正後は open で安定）。
         remountingRef.current = true;
         setLiveKey((k) => k + 1);
         if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
@@ -1531,7 +1533,10 @@ function RtmpLiveView(
         fps={60}
         cameraPosition="back"
         scoreboardText={scoreboardText}
-        scoreboardVisible={true}
+        // 端末焼き込み(プレーンテキスト)はOFF。視聴側で綺麗な CSS オーバーレイ
+        // (ViewerScoreboardOverlay・DBからリアルタイム)を重ねる方式に統一したため。
+        // ※将来 YouTube アーカイブで焼き込みが要るなら再検討。
+        scoreboardVisible={false}
         onStatus={onStatus}
       />
       <ScoreControls {...controls} />

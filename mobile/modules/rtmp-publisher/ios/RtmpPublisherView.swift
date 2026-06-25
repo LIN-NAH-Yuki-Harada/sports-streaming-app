@@ -71,6 +71,10 @@ class RtmpPublisherView: ExpoView {
     var settings = await mixer.videoMixerSettings
     settings.mode = .offscreen
     await mixer.setVideoMixerSettings(settings)
+    // 横持ち固定（landscape）。capture 接続(AVCaptureConnection)を回転させ、offscreen 合成より
+    // 前段でフレーム自体を 1280x720 の横向きにする。これが無いと iOS 既定の .portrait(720x1280)
+    // が 1280x720 キャンバス中央に「縦帯」で描画される（HaishinKit 2.x の正API＝setVideoOrientation）。
+    await mixer.setVideoOrientation(.landscapeRight)
     try? await mixer.setFrameRate(fps)
 
     await mixer.startRunning()
