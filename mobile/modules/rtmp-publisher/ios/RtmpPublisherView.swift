@@ -59,19 +59,22 @@ class RtmpPublisherView: ExpoView {
     Task { await self.setupMixer() }
   }
 
-  // 端末を横に回したら配信映像も正立させる（AVF と UIDevice は左右反転の慣習）。
-  // 縦持ち等は無視して直近の横向きを維持（出力は常に 1280x720 横固定＝配信中の解像度変更不可のため）。
+  // 端末を横に回したら配信映像を正立させる。iOS17+ の videoRotationAngle を live 接続に再適用。
+  // 縦持ち等は無視して直近の横を維持（出力は常に 1280x720 横固定＝配信中の解像度変更不可のため）。
   @objc private func deviceOrientationChanged() {
+    guard let angle = landscapeRotationAngle(for: UIDevice.current.orientation) else { return }
     let mixer = self.mixer
-    let orientation = UIDevice.current.orientation
     Task {
-      let vo: AVCaptureVideoOrientation
-      switch orientation {
-      case .landscapeLeft: vo = .landscapeRight
-      case .landscapeRight: vo = .landscapeLeft
-      default: return
+      try? await mixer.configuration(video: 0) { unit in
+        if #available(iOS 17.0, *) {
+          if let conn = unit.connection, conn.isVideoRotationAngleSupported(angle) {
+            conn.videoRotationAngle = angle
+          }
+          for c in unit.output?.connections ?? [] where c.isVideoRotationAngleSupported(angle) {
+            c.videoRotationAngle = angle
+          }
+        }
       }
-      await mixer.setVideoOrientation(vo)
     }
   }
 
@@ -84,9 +87,33 @@ class RtmpPublisherView: ExpoView {
     cameraPosition == "front" ? .front : .back
   }
 
+  // iOS17+ の videoRotationAngle（度・時計回り）。背面カメラの横固定用。
+  // 0=横(端末 landscapeLeft) / 180=横(端末 landscapeRight)。縦持ち等は nil（直近の横を維持）。
+  private func landscapeRotationAngle(for orientation: UIDeviceOrientation) -> CGFloat? {
+    switch orientation {
+    case .landscapeLeft: return 0
+    case .landscapeRight: return 180
+    default: return nil
+    }
+  }
+
   private func setupMixer() async {
     let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: devicePosition())
-    try? await mixer.attachVideo(camera, track: 0)
+    // ★iOS17+ は videoOrientation が無視される端末が多い（HaishinKit は videoOrientation のみ設定し、
+    //   isVideoOrientationSupported=false の端末では何もしない＝縦のまま）。そこで capture 接続に
+    //   iOS17+ の正API videoRotationAngle を直接設定して横向きにする。configuration ブロックは
+    //   session 追加前に実行され、HaishinKit は videoRotationAngle を一切触らないため上書きされない。
+    let initialAngle = landscapeRotationAngle(for: UIDevice.current.orientation) ?? 0
+    try? await mixer.attachVideo(camera, track: 0) { unit in
+      if #available(iOS 17.0, *) {
+        if let conn = unit.connection, conn.isVideoRotationAngleSupported(initialAngle) {
+          conn.videoRotationAngle = initialAngle
+        }
+        for c in unit.output?.connections ?? [] where c.isVideoRotationAngleSupported(initialAngle) {
+          c.videoRotationAngle = initialAngle
+        }
+      }
+    }
     try? await mixer.attachAudio(AVCaptureDevice.default(for: .audio))
     await mixer.addOutput(mtView)
 
@@ -98,17 +125,9 @@ class RtmpPublisherView: ExpoView {
     var settings = await mixer.videoMixerSettings
     settings.mode = .passthrough
     await mixer.setVideoMixerSettings(settings)
-    // 横向き配信。capture 接続(AVCaptureConnection)を回転させ、offscreen 合成より前段で
-    // フレーム自体を 1280x720 の横向きにする（無いと iOS 既定の縦が縦帯になる）。
-    // 起動時は現在の端末向きに合わせて初期化し、以後は deviceOrientationChanged で追従。
-    let orientation = UIDevice.current.orientation
-    let initialVO: AVCaptureVideoOrientation
-    switch orientation {
-    case .landscapeLeft: initialVO = .landscapeRight
-    case .landscapeRight: initialVO = .landscapeLeft
-    default: initialVO = .landscapeRight
-    }
-    await mixer.setVideoOrientation(initialVO)
+    // 向きは attachVideo の configuration で videoRotationAngle を設定済み。
+    // 端末回転時は deviceOrientationChanged が mixer.configuration(video:0) で再適用する。
+    // （setVideoOrientation は iOS17+ で無効なため呼ばない）
     try? await mixer.setFrameRate(fps)
 
     await mixer.startRunning()
