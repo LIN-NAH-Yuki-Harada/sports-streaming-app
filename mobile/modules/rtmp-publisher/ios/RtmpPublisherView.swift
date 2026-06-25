@@ -59,10 +59,6 @@ class RtmpPublisherView: ExpoView {
     Task { await self.setupMixer() }
   }
 
-  deinit {
-    NotificationCenter.default.removeObserver(self)
-  }
-
   // 端末を横に回したら配信映像も正立させる（AVF と UIDevice は左右反転の慣習）。
   // 縦持ち等は無視して直近の横向きを維持（出力は常に 1280x720 横固定＝配信中の解像度変更不可のため）。
   @objc private func deviceOrientationChanged() {
@@ -247,5 +243,6 @@ class RtmpPublisherView: ExpoView {
 
   deinit {
     readyStateTask?.cancel()
+    NotificationCenter.default.removeObserver(self)
   }
 }
