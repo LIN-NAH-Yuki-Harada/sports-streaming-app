@@ -90,10 +90,13 @@ class RtmpPublisherView: ExpoView {
     try? await mixer.attachAudio(AVCaptureDevice.default(for: .audio))
     await mixer.addOutput(mtView)
 
-    // スコアボードをピクセルへ焼き込むため offscreen 合成を有効化する。
-    // 既定は .passthrough（合成されず素のカメラがそのまま流れる）。
+    // passthrough（既定）＝カメラの capture バッファをそのまま出力する経路。
+    // スコアは視聴側 Web CSS オーバーレイに移したので端末 GPU 合成(offscreen)は不要。
+    // ★offscreen だと screen 合成が setVideoOrientation を反映せず「縦帯＋90°回転」になる
+    //   （実機＋HaishinKit 2.2.5 ソースで確認）。passthrough なら AVF が物理回転した
+    //   1280x720 横・正立バッファがそのまま配信される（下の screen 関連設定は passthrough では不活性）。
     var settings = await mixer.videoMixerSettings
-    settings.mode = .offscreen
+    settings.mode = .passthrough
     await mixer.setVideoMixerSettings(settings)
     // 横向き配信。capture 接続(AVCaptureConnection)を回転させ、offscreen 合成より前段で
     // フレーム自体を 1280x720 の横向きにする（無いと iOS 既定の縦が縦帯になる）。
