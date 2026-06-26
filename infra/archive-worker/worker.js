@@ -20,6 +20,9 @@ const {
 } = process.env;
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/var/recordings";
 const MAX_RETRY = 5;
+// 終了からこの時間を過ぎても録画が無ければ、録画OFF時代/取りこぼしと判断して即 failed
+// （新しい配信は録画ファイナライズ待ちの可能性があるので、この時間内は retry）。
+const RECORDING_WAIT_MS = 30 * 60 * 1000;
 
 if (
   !SUPABASE_URL ||
@@ -157,7 +160,7 @@ async function main() {
   const { data: rows, error } = await admin
     .from("broadcasts")
     .select(
-      "id, share_code, broadcaster_id, home_team, away_team, sport, tournament, venue, started_at, youtube_retry_count",
+      "id, share_code, broadcaster_id, home_team, away_team, sport, tournament, venue, started_at, ended_at, youtube_retry_count",
     )
     .eq("status", "ended")
     .not("stream_playback_url", "is", null)
@@ -201,20 +204,28 @@ async function main() {
   // 3. 録画ファイル（まだ書き込み中/未生成なら retry）
   const rec = findRecording(b.share_code);
   if (!rec) {
-    if (retry < MAX_RETRY - 1) {
+    const endedMs = b.ended_at ? Date.parse(b.ended_at) : 0;
+    const ageMs = endedMs ? Date.now() - endedMs : Infinity;
+    if (ageMs > RECORDING_WAIT_MS || retry >= MAX_RETRY - 1) {
+      // 終了から十分経過(録画OFF時代/取りこぼし) or リトライ上限 → 即 failed
+      await setStatus(b.id, {
+        youtube_upload_status: "failed",
+        youtube_upload_error: "recording not found (predates recording or lost)",
+        youtube_retry_count: retry,
+      });
+    } else {
+      // 終了直後 = 録画ファイナライズ待ちの可能性 → retry
       await setStatus(b.id, {
         youtube_upload_status: "pending",
         youtube_retry_count: retry + 1,
-        youtube_upload_error: "recording not found yet",
-      });
-    } else {
-      await setStatus(b.id, {
-        youtube_upload_status: "failed",
-        youtube_upload_error: "recording not found",
-        youtube_retry_count: retry,
+        youtube_upload_error: "recording not found yet (finalizing?)",
       });
     }
-    log("recording not found:", b.share_code);
+    log(
+      "recording not found:",
+      b.share_code,
+      `age=${ageMs === Infinity ? "?" : Math.round(ageMs / 60000) + "min"}`,
+    );
     return;
   }
 
