@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { getBroadcastByCode, getStreamPlaybackUrl, type Broadcast } from "@/lib/database";
 import { createClient } from "@/lib/supabase";
 import { LiveKitViewer } from "@/components/livekit-video";
@@ -15,6 +16,44 @@ import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
+
+// HLS視聴は映像が数秒〜10秒遅延するため、リアルタイムのスコアをそのまま重ねると
+// 得点が映像より先に出る（ネタバレ）。スコアオーバーレイを映像の遅延ぶん遅らせて同期する。
+// ※固定値（平均的なHLSライブ遅延）。ズレが残るならこの値を調整。LiveKit経路は ~リアルタイム
+//   なので遅延させない（HLS分岐のみ delayedBroadcast を渡す）。
+const OVERLAY_DELAY_MS = 7000;
+
+// broadcast を delayMs ぶん遅らせて返す（スコア表示を映像に同期させるため）。
+function useDelayedBroadcast(
+  broadcast: Broadcast | null,
+  delayMs: number,
+): Broadcast | null {
+  const [delayed, setDelayed] = useState<Broadcast | null>(broadcast);
+  const queueRef = useRef<{ value: Broadcast; at: number }[]>([]);
+  useEffect(() => {
+    if (broadcast) queueRef.current.push({ value: broadcast, at: Date.now() });
+  }, [broadcast]);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const cutoff = Date.now() - delayMs;
+      const q = queueRef.current;
+      let chosen: Broadcast | null = null;
+      let pruneTo = 0;
+      for (let i = 0; i < q.length; i++) {
+        if (q[i].at <= cutoff) {
+          chosen = q[i].value;
+          pruneTo = i;
+        } else break;
+      }
+      if (chosen) {
+        if (pruneTo > 0) queueRef.current = q.slice(pruneTo);
+        setDelayed(chosen);
+      }
+    }, 500);
+    return () => clearInterval(id);
+  }, [delayMs]);
+  return delayed;
+}
 
 export default function WatchPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
@@ -32,6 +71,9 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   // フェイク全画面（CSS）に切り替える（allowVideoFallback=false）。
   // 焼き込みありの従来配信（既定 true）は従来どおりネイティブ全画面を許可。
   const scoreboardBurnedIn = broadcast?.scoreboard_burned_in ?? true;
+  const router = useRouter();
+  // HLS視聴用：映像遅延に合わせてスコアを遅らせた broadcast（同期表示）
+  const delayedBroadcast = useDelayedBroadcast(broadcast, OVERLAY_DELAY_MS);
   const { stageRef, isFullscreen, isFakeFullscreen, toggleFullscreen } =
     useStageFullscreen<HTMLDivElement>({
       allowVideoFallback: scoreboardBurnedIn,
@@ -309,7 +351,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
           <>
             <HlsPlayer src={hlsUrl} />
             {!scoreboardBurnedIn && (
-              <ViewerScoreboardOverlay broadcast={broadcast} />
+              <ViewerScoreboardOverlay broadcast={delayedBroadcast ?? broadcast} />
             )}
           </>
         ) : isWatching && viewerToken && isLive ? (
@@ -500,13 +542,17 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         {/* スコア/経過時間は、焼き込みあり配信では映像内、焼き込み OFF 配信では
             ViewerScoreboardOverlay（ステージ内に重畳）で表示する。 */}
 
-        {/* 右下: コントロール群（視聴中のみ表示） */}
-        {isWatching && viewerToken && (
+        {/* 右下: コントロール群（LiveKit視聴中 or HLS再生中に表示） */}
+        {((isWatching && viewerToken) || (isLive && hlsUrl)) && (
           <div className="absolute bottom-3 right-3 z-[2] flex items-center gap-2">
-            {/* 視聴を終了する: setIsWatching(false) で LiveKitViewer をアンマウント
-                → リスナー接続が自動切断 → 「タップして視聴」状態に戻り、再開可能 */}
+            {/* 視聴を終了する:
+                - LiveKit: setIsWatching(false) でアンマウント→「タップして視聴」に戻り再開可能
+                - HLS(自前配信): 自動再生で「タップして視聴」状態が無いため、ホームへ戻る */}
             <button
-              onClick={() => setIsWatching(false)}
+              onClick={() => {
+                if (isWatching) setIsWatching(false);
+                else router.push("/");
+              }}
               aria-label="視聴を終了する"
               className="flex items-center gap-1.5 h-9 px-3 rounded-md bg-black/70 hover:bg-black/85 backdrop-blur-sm text-white transition"
             >
