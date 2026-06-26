@@ -101,6 +101,7 @@ export function HistoryScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.filterScroll}
           contentContainerStyle={styles.filterRow}
         >
           <FilterChip
@@ -126,7 +127,7 @@ export function HistoryScreen() {
       ) : count === 0 ? (
         <EmptyState isTeamFilter={filter !== "self"} />
       ) : (
-        <ScrollView contentContainerStyle={styles.scroll}>
+        <ScrollView style={styles.listScroll} contentContainerStyle={styles.scroll}>
           {groups.map((group) => (
             <View key={group.date} style={styles.group}>
               <Text style={styles.groupDate}>{group.date}</Text>
@@ -312,7 +313,9 @@ const styles = StyleSheet.create({
   },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   scroll: { paddingHorizontal: 16, paddingBottom: 32 },
+  listScroll: { flex: 1 },
 
+  filterScroll: { flexGrow: 0 },
   filterRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 12 },
   chip: {
     paddingHorizontal: 14,
