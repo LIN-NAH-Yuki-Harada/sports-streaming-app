@@ -133,11 +133,11 @@ function formatScoreboardLine(a: {
   return line;
 }
 
-// セッション継続性: 中断(電話/回線切替/背景)から「同じ配信」へ復帰する許容時間。
-// BACKGROUND_GRACE_MS = 背景化(ハンズフリー通話で離脱含む)から復帰を待つ最大。超えたら終了。
-// RECONNECT_TIMEOUT_MS = remount 後に再接続(open/connected)が来るのを待つ最大。
-const BACKGROUND_GRACE_MS = 180_000; // 3分
-const RECONNECT_TIMEOUT_MS = 60_000;
+// セッション継続性: 中断(電話/回線切替/背景)から「同じ配信」へ復帰するための再接続パラメータ。
+// 再接続コーディネータ(startRecovering)が、デッドラインまでクールダウン間隔で作り直しを再試行する。
+const BACKGROUND_GRACE_MS = 180_000; // 中断(電話/回線/背景)から復帰を待つ総デッドライン(3分)
+const RECONNECT_COOLDOWN_MS = 6_000; // 作り直し試行の最小間隔(乱発=thrash防止)
+const RECONNECT_SETTLE_MS = 1_500; // 切断検知から最初の作り直しまでの待ち(回線/カメラ安定待ち)
 
 export function BroadcastScreen() {
   const navigation = useNavigation<any>();
@@ -179,8 +179,11 @@ export function BroadcastScreen() {
   // 画面ロック復帰時に LiveKit 接続を“作り直す(remount)”ための状態
   const [liveKey, setLiveKey] = useState(0); // 変えると LiveKitRoom が再マウント＝再接続
   const bgAtRef = useRef(0); // バックグラウンドに入った時刻
-  const remountingRef = useRef(false); // 意図的な作り直し中は onDisconnected で終了させない
+  const remountingRef = useRef(false); // 再接続(作り直し)モード中は onDisconnected/closed で終了させない
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interruptedRef = useRef(false); // 通話等で映像キャプチャ中断中＝復帰まで作り直しを待つ
+  const recoverDeadlineRef = useRef(0); // 再接続を諦める総デッドライン（この時刻を過ぎたら finishLive）
+  const recoverAttemptRef = useRef<() => void>(() => {}); // 直近の「作り直し試行」関数（resumed で即時呼ぶ用）
   // プラン＆無料トライアル
   const [plan, setPlan] = useState<Plan>("free");
   const [trialRemainingAtStart, setTrialRemainingAtStart] = useState(0);
@@ -509,6 +512,7 @@ export function BroadcastScreen() {
       if (endedRef.current) return;
       endedRef.current = true;
       remountingRef.current = false;
+      interruptedRef.current = false;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -587,6 +591,65 @@ export function BroadcastScreen() {
     [shareCode, plan],
   );
 
+  // === 再接続コーディネータ（中断耐性の中核）=================================
+  // 切断/中断トリガー(RTMP closed・通話・回線切替・背景復帰)を1本化:
+  // ・乱発(thrash)させない: 同時に1試行だけ。クールダウン間隔で再試行。
+  // ・成功するまで粘る: 総デッドライン(3分)まで「作り直し→open待ち→ダメなら再試行」。
+  // ・通話中は待つ: interruptedRef が立つ間はカメラ使用不可なので作り直さない。
+  // open(接続成功)で stopRecovering 確定。デッドライン超過で finishLive。
+  const stopRecovering = useCallback(() => {
+    remountingRef.current = false;
+    interruptedRef.current = false;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  const startRecovering = useCallback(
+    (reason: string) => {
+      if (endedRef.current) return;
+      if (remountingRef.current) {
+        // 既に再接続中＝デッドラインだけ延長（中断が重なった場合）。試行ループは継続中。
+        recoverDeadlineRef.current = Date.now() + BACKGROUND_GRACE_MS;
+        return;
+      }
+      remountingRef.current = true;
+      recoverDeadlineRef.current = Date.now() + BACKGROUND_GRACE_MS;
+      console.log("[recover] start:", reason);
+      const attempt = () => {
+        if (endedRef.current) {
+          stopRecovering();
+          return;
+        }
+        if (Date.now() > recoverDeadlineRef.current) {
+          stopRecovering();
+          finishLive(
+            "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
+          );
+          return;
+        }
+        if (interruptedRef.current) {
+          // 通話中＝カメラ使用不可。作り直さずクールダウン後に再チェック。
+          reconnectTimerRef.current = setTimeout(attempt, RECONNECT_COOLDOWN_MS);
+          return;
+        }
+        console.log("[recover] remount attempt");
+        setLiveKey((k) => k + 1); // 同一 broadcastId/共有コードへ作り直し＝再接続
+        // 安全網: クールダウン後に open が来ていなければ再試行（無音タイムアウト対策）。
+        // 成功時は handleRtmpStatus("open") が stopRecovering でこのタイマーを解除する。
+        reconnectTimerRef.current = setTimeout(attempt, RECONNECT_COOLDOWN_MS);
+      };
+      recoverAttemptRef.current = attempt;
+      // 初回は少し待つ（回線/カメラの安定待ち）。通話中ならクールダウン後に。
+      reconnectTimerRef.current = setTimeout(
+        attempt,
+        interruptedRef.current ? RECONNECT_COOLDOWN_MS : RECONNECT_SETTLE_MS,
+      );
+    },
+    [finishLive, stopRecovering],
+  );
+
   // 画面ロック/バックグラウンド対応（同じ配信を続ける＝視聴URL不変）:
   // ・背景化した時刻を記録（共有シートは "inactive" なので発火しない）。
   // ・復帰("active")時に 90秒以内なら LiveKit 接続を“作り直して(remount)”再開。
@@ -609,21 +672,11 @@ export function BroadcastScreen() {
           return;
         }
         // 接続を作り直して同じ配信を再開（視聴URLは変わらない）
-        remountingRef.current = true;
-        setLiveKey((k) => k + 1);
-        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = setTimeout(() => {
-          if (remountingRef.current) {
-            remountingRef.current = false;
-            finishLive(
-              "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
-            );
-          }
-        }, RECONNECT_TIMEOUT_MS);
+        startRecovering("foreground");
       }
     });
     return () => sub.remove();
-  }, [phase, finishLive]);
+  }, [phase, finishLive, startRecovering]);
 
   // 回線切替(WiFi↔5G)の主動検知: 回線種別が変わったら古い TCP の timeout を待たず即再接続。
   // ＝同じ共有コードのまま新回線へ再 publish（視聴URL不変）。配信中のみ監視。
@@ -636,25 +689,15 @@ export function BroadcastScreen() {
         prevType !== null &&
         type !== prevType &&
         state.isConnected === true &&
-        !remountingRef.current &&
         !endedRef.current
       ) {
-        remountingRef.current = true;
-        setLiveKey((k) => k + 1);
-        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = setTimeout(() => {
-          if (remountingRef.current) {
-            remountingRef.current = false;
-            finishLive(
-              "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
-            );
-          }
-        }, RECONNECT_TIMEOUT_MS);
+        // 回線種別が変化(WiFi⇔cellular) → 古いTCPの timeout を待たず再接続
+        startRecovering("network change:" + type);
       }
       prevType = type;
     });
     return () => unsub();
-  }, [phase, finishLive]);
+  }, [phase, startRecovering]);
 
   // 無料トライアル: 残り時間が 0 になったら自動終了（1秒ごとの elapsed 変化で判定）
   useEffect(() => {
@@ -777,54 +820,38 @@ export function BroadcastScreen() {
   const handleRtmpStatus = useCallback(
     (e: RtmpStatusEvent) => {
       const state = e.nativeEvent.state;
+      console.log("[rtmp]", state, e.nativeEvent.message ?? "");
       if (state === "open") {
-        // 接続（作り直し含む）成功 → 終了タイマー解除
-        remountingRef.current = false;
-        if (reconnectTimerRef.current) {
-          clearTimeout(reconnectTimerRef.current);
-          reconnectTimerRef.current = null;
-        }
+        // 接続（作り直し含む）成功 → 再接続モード終了・タイマー解除
+        stopRecovering();
       } else if (state === "error") {
-        if (remountingRef.current) return; // 作り直し中の一時エラーは無視
+        if (remountingRef.current) return; // 再接続中の一時エラーは無視（試行ループが継続）
         finishLive("配信エラー: " + (e.nativeEvent.message ?? "接続に失敗しました"));
       } else if (state === "closed") {
-        if (remountingRef.current) return; // 既に作り直し中
         if (endedRef.current) return; // 停止ボタン等で終了処理中の切断は無視
-        // 予期しない切断（バックグラウンド復帰・電波瞬断など）→ すぐ終了せず接続を
-        // 作り直して同じ配信を再開する（視聴URL不変）。MediaMTX は overridePublisher 既定 true
-        // のため、作り直しの新 publisher が同一パスを引き継ぐ（認証修正後は open で安定）。
-        remountingRef.current = true;
-        setLiveKey((k) => k + 1);
-        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = setTimeout(() => {
-          if (remountingRef.current) {
-            remountingRef.current = false;
-            finishLive(
-              "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
-            );
-          }
-        }, RECONNECT_TIMEOUT_MS);
+        // 予期しない切断（電波瞬断・回線切替・背景など）→ すぐ終了せず再接続コーディネータへ。
+        // MediaMTX overridePublisher 既定 true で作り直しの新 publisher が同一パスを引き継ぐ。
+        startRecovering("rtmp closed");
       } else if (state === "interrupted") {
-        // 通話等で映像キャプチャが中断（音声のみの割り込みは HaishinKit が自動処理＝映像は継続するのでここに来ない）。
-        // 終了させず復帰(resumed)を待つ。長時間(3分)戻らなければ終了。
+        // 通話等で映像キャプチャが中断（音声のみの割り込みは HaishinKit が自動処理＝映像継続でここに来ない）。
+        // カメラ使用不可なので作り直しは待つ。終了させず復帰(resumed)を待つ。
         if (endedRef.current) return;
-        remountingRef.current = true;
-        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = setTimeout(() => {
-          if (remountingRef.current) {
-            remountingRef.current = false;
-            finishLive(
-              "通話/中断が長引いたため配信を終了しました。再開するには「配信開始」を押してください。",
-            );
-          }
-        }, BACKGROUND_GRACE_MS);
+        interruptedRef.current = true;
+        startRecovering("interrupted (call)");
       } else if (state === "resumed") {
-        // 中断終了＝映像復帰可能。同じ共有コードへ作り直して再接続（HaishinKit 自動復帰の補強）。
+        // 中断終了＝カメラ復帰可能。待機を解除し、少し待って1回作り直して再接続。
         if (endedRef.current) return;
-        setLiveKey((k) => k + 1);
+        interruptedRef.current = false;
+        if (remountingRef.current) {
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = setTimeout(
+            recoverAttemptRef.current,
+            RECONNECT_SETTLE_MS,
+          );
+        }
       }
     },
-    [finishLive],
+    [finishLive, startRecovering, stopRecovering],
   );
 
   if (phase === "live" && rtmpUrl) {
@@ -877,12 +904,8 @@ export function BroadcastScreen() {
         audio={true}
         video={{ facingMode: "environment" }}
         onConnected={() => {
-          // 再接続（作り直し）成功 → 終了タイマー解除
-          remountingRef.current = false;
-          if (reconnectTimerRef.current) {
-            clearTimeout(reconnectTimerRef.current);
-            reconnectTimerRef.current = null;
-          }
+          // 再接続（作り直し）成功 → 再接続モード終了・タイマー解除
+          stopRecovering();
           // YouTube同時配信を起動（初回接続のみ・publish確立後）。fire-and-forget。
           // remount=背景復帰の作り直しでは liveStartedRef が true のため呼ばない（live_egress_idで冪等だが二重防止）。
           if (
@@ -907,21 +930,9 @@ export function BroadcastScreen() {
           finishLive("配信エラー: " + (e?.message ?? "接続に失敗しました"));
         }}
         onDisconnected={() => {
-          if (remountingRef.current) return; // 既に作り直し中
           if (endedRef.current) return; // 停止ボタン等で終了処理中の切断は無視
-          // WiFi↔5G切替や瞬断での切断 → すぐ終了せず接続を作り直して同じ配信を再開（視聴URL不変）。
-          // 20秒以内に onConnected が来なければ終了（視聴者を宙ぶらりんにしない）。
-          remountingRef.current = true;
-          setLiveKey((k) => k + 1);
-          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-          reconnectTimerRef.current = setTimeout(() => {
-            if (remountingRef.current) {
-              remountingRef.current = false;
-              finishLive(
-                "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
-              );
-            }
-          }, RECONNECT_TIMEOUT_MS);
+          // WiFi↔5G切替や瞬断での切断 → 再接続コーディネータへ（同じ配信を再開・視聴URL不変）。
+          startRecovering("livekit disconnected");
         }}
       >
         <LiveView
