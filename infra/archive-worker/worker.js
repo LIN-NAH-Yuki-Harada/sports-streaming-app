@@ -246,6 +246,13 @@ async function burnScoreboard(recPath, b) {
   const pngs = [];
   for (let i = 0; i < segs.length; i++) {
     const ev = segs[i].ev;
+    // 競技別の追加情報（野球=B/S/O、バレー=セットポイント等）= scoreboard_text の period より後ろ
+    const periodStr = ev.period || "";
+    const txt = ev.scoreboard_text || "";
+    let extra = "";
+    if (periodStr && txt.includes(periodStr)) {
+      extra = txt.slice(txt.lastIndexOf(periodStr) + periodStr.length).trim();
+    }
     const svg = buildScoreboardSvg(
       {
         homeTeam: b.home_team,
@@ -255,6 +262,7 @@ async function burnScoreboard(recPath, b) {
         homeSets: ev.home_sets,
         awaySets: ev.away_sets,
         period: ev.period,
+        extra,
       },
       { width: w, height: h },
     );
