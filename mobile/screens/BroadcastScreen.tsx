@@ -904,18 +904,16 @@ export function BroadcastScreen() {
         // MediaMTX overridePublisher 既定 true で作り直しの新 publisher が同一パスを引き継ぐ。
         startRecovering("rtmp closed");
       } else if (state === "interrupted") {
-        // 通話等で映像キャプチャが中断（音声のみの割り込みは HaishinKit が自動処理＝映像継続でここに来ない）。
-        // カメラ使用不可なので作り直しは待つ。終了させず復帰(resumed)を待つ。
+        // 映像キャプチャの一時中断（通話/システム要因）。HaishinKit が同一セッションで自動復帰
+        // するので、ここでは remount しない（remount すると録画が分割され③スコア整列も崩れる）。
+        // 本当に RTMP が切れたら closed が来て startRecovering に入る。interruptedRef は
+        // recover loop が中断中に作り直しを待つための判定にのみ使う。
         if (endedRef.current) return;
         interruptedRef.current = true;
         wasInterruptedRef.current = true;
-        if (stableTimerRef.current) {
-          clearTimeout(stableTimerRef.current);
-          stableTimerRef.current = null;
-        }
-        startRecovering("interrupted (call)");
       } else if (state === "resumed") {
-        // 中断終了＝カメラ復帰可能。待機を解除し、少し待って1回作り直して再接続。
+        // 中断解除。一過性(RTMP維持)なら何もしない＝分割を防ぐ。
+        // 既に再接続中(=RTMPが実際に切れていた)なら、解除後に作り直しを促す。
         if (endedRef.current) return;
         interruptedRef.current = false;
         if (remountingRef.current) {
@@ -924,6 +922,8 @@ export function BroadcastScreen() {
             recoverAttemptRef.current,
             RECONNECT_SETTLE_MS,
           );
+        } else {
+          wasInterruptedRef.current = false; // 一過性だった → 誤メッセージ防止にクリア
         }
       }
     },
