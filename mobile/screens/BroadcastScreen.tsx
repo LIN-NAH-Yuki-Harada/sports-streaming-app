@@ -184,6 +184,7 @@ export function BroadcastScreen() {
   const remountingRef = useRef(false); // 再接続(作り直し)モード中は onDisconnected/closed で終了させない
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interruptedRef = useRef(false); // 通話等で映像キャプチャ中断中＝復帰まで作り直しを待つ
+  const wasLiveRef = useRef(false); // 一度でも open(配信確立)したか。配信中エラーは終了せず再接続するため
   const wasInterruptedRef = useRef(false); // 今回の再接続が通話起因か（終了メッセージ出し分け用）
   const recoverDeadlineRef = useRef(0); // 再接続を諦める総デッドライン（この時刻を過ぎたら finishLive）
   const recoverAttemptRef = useRef<() => void>(() => {}); // 直近の「作り直し試行」関数（resumed で即時呼ぶ用）
@@ -411,6 +412,7 @@ export function BroadcastScreen() {
         transportRef.current = "rtmp";
         endedRef.current = false;
         remountingRef.current = false;
+        wasLiveRef.current = false;
         bgAtRef.current = 0;
         liveStartedAtRef.current = Date.now();
         setElapsed(0);
@@ -484,6 +486,7 @@ export function BroadcastScreen() {
       await AudioSession.startAudioSession();
       endedRef.current = false;
       remountingRef.current = false;
+      wasLiveRef.current = false;
       bgAtRef.current = 0;
       liveStartedAtRef.current = Date.now();
       setElapsed(0);
@@ -854,6 +857,7 @@ export function BroadcastScreen() {
       const state = e.nativeEvent.state;
       console.log("[rtmp]", state, e.nativeEvent.message ?? "");
       if (state === "open") {
+        wasLiveRef.current = true; // 一度でも確立したら、以後のエラーは終了でなく再接続対象
         if (!remountingRef.current) return; // 通常運転中の open（初回接続）→ そのまま
         // 再接続中の open → すぐ成功確定せず安定確認(5s)。瞬間 open→error の誤確定→切断を防ぐ。
         // 確認中は試行ループを止める（重複 remount しない）。
@@ -883,6 +887,12 @@ export function BroadcastScreen() {
           }
           return;
         }
+        // 配信中(一度live化済)のエラー＝回線断/切替など → 終了せず再接続を試みる（closed と同様）。
+        if (wasLiveRef.current && !endedRef.current) {
+          startRecovering("rtmp error");
+          return;
+        }
+        // 初回接続そのものが失敗（一度も live になっていない）→ 終了。
         finishLive("配信エラー: " + (e.nativeEvent.message ?? "接続に失敗しました"));
       } else if (state === "closed") {
         if (endedRef.current) return; // 停止ボタン等で終了処理中の切断は無視
