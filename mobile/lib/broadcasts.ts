@@ -197,6 +197,18 @@ export async function endBroadcast(shareCode: string): Promise<void> {
     .eq("share_code", shareCode);
 }
 
+// ③ サーバー側スコア焼き込み用: スコア変更時に「時刻付き」でスコア行を記録（配信中のみ）。
+// アーカイブワーカー(VPS)がこの時系列で録画に ffmpeg(ASS字幕)でスコアを焼き込む。
+// fire-and-forget（記録に失敗しても配信は止めない）。
+export async function insertScoreEvent(
+  broadcastId: string,
+  scoreboardText: string,
+): Promise<void> {
+  await supabase
+    .from("broadcast_score_events")
+    .insert({ broadcast_id: broadcastId, scoreboard_text: scoreboardText });
+}
+
 // この配信者の「まだ live のまま残っている」配信を全て終了させる。
 // Web の cleanupStaleBroadcasts の挙動を移植（broadcaster_id + status=live を ended に補正）。
 // 異常終了で残ったゴースト配信が新規配信と二重化するのを防ぐ（新規開始前に呼ぶ想定）。

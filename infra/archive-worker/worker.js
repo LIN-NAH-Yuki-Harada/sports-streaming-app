@@ -9,6 +9,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 const { createClient } = require("@supabase/supabase-js");
 const { google } = require("googleapis");
 
@@ -151,6 +152,146 @@ function classify(err) {
   return { type: "retry", msg };
 }
 
+// ===== ③ サーバー側スコア焼き込み（ffmpeg + ASS字幕）=====
+
+// ms → ASS 時刻 H:MM:SS.cc
+function assTime(ms) {
+  if (ms < 0) ms = 0;
+  const cs = Math.floor((ms % 1000) / 10);
+  let s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  s -= h * 3600;
+  const m = Math.floor(s / 60);
+  s -= m * 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+}
+
+// 録画ファイル名 2026-06-26_14-51-55-830050.mp4 → 開始時刻(epoch ms・VPSローカル=JST)
+function recordingStartMs(recPath, fallbackIso) {
+  const m = path
+    .basename(recPath)
+    .match(/(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})-(\d+)/);
+  if (m) {
+    const ms = Math.floor(Number(`0.${m[7]}`) * 1000);
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], ms).getTime();
+  }
+  return fallbackIso ? Date.parse(fallbackIso) : Date.now();
+}
+
+function ffprobeDurationSec(p) {
+  return new Promise((resolve) => {
+    const pr = spawn("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      p,
+    ]);
+    let out = "";
+    pr.stdout.on("data", (d) => (out += d.toString()));
+    pr.on("close", () => resolve(parseFloat(out.trim()) || 0));
+    pr.on("error", () => resolve(0));
+  });
+}
+
+// スコアイベント → ASS（上中央・半透明黒box・白太字＝ライブのオーバーレイ風）
+function buildAss(events, fileStartMs, durationMs) {
+  const header = [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    "PlayResX: 1280",
+    "PlayResY: 720",
+    "WrapStyle: 2",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    "Style: Score,Noto Sans CJK JP,42,&H00FFFFFF,&H00000000,&H8C000000,1,0,4,0,0,8,40,40,28,1",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+  ];
+  const lines = [];
+  for (let i = 0; i < events.length; i++) {
+    const startMs = Date.parse(events[i].at) - fileStartMs;
+    const rawEnd =
+      i + 1 < events.length
+        ? Date.parse(events[i + 1].at) - fileStartMs
+        : durationMs;
+    const s = Math.max(0, startMs);
+    const e = Math.min(durationMs, rawEnd);
+    if (e <= 0 || s >= durationMs || e <= s) continue;
+    const text = (events[i].scoreboard_text || "")
+      .replace(/[\r\n]+/g, " ")
+      .replace(/[{}]/g, "");
+    lines.push(
+      `Dialogue: 0,${assTime(s)},${assTime(e)},Score,,0,0,0,,${text}`,
+    );
+  }
+  return lines.length ? header.concat(lines).join("\n") + "\n" : null;
+}
+
+function runFfmpegBurn(inPath, assPath, outPath) {
+  return new Promise((resolve, reject) => {
+    const pr = spawn("ffmpeg", [
+      "-y",
+      "-i", inPath,
+      "-vf", `ass=${assPath}`,
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "23",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "copy",
+      "-movflags", "+faststart",
+      outPath,
+    ]);
+    let err = "";
+    pr.stderr.on("data", (d) => {
+      err += d.toString();
+      if (err.length > 4000) err = err.slice(-2000);
+    });
+    pr.on("close", (code) =>
+      code === 0
+        ? resolve()
+        : reject(new Error(`ffmpeg exit ${code}: ${err.slice(-400)}`)),
+    );
+    pr.on("error", reject);
+  });
+}
+
+// 録画にスコアを焼き込んだ新ファイルパスを返す。イベント無し/失敗時は元ファイル(raw)を返す。
+async function burnScoreboard(recPath, b) {
+  const { data: events } = await admin
+    .from("broadcast_score_events")
+    .select("at, scoreboard_text")
+    .eq("broadcast_id", b.id)
+    .order("at", { ascending: true });
+  if (!events || events.length === 0) {
+    log("no score events -> raw upload");
+    return { path: recPath, temp: null };
+  }
+  const durationMs = (await ffprobeDurationSec(recPath)) * 1000;
+  if (!durationMs) {
+    log("ffprobe duration 0 -> raw upload");
+    return { path: recPath, temp: null };
+  }
+  const fileStartMs = recordingStartMs(recPath, b.started_at);
+  const ass = buildAss(events, fileStartMs, durationMs);
+  if (!ass) {
+    log("no ass lines in range -> raw upload");
+    return { path: recPath, temp: null };
+  }
+  const assPath = `/tmp/spotch_${b.id}.ass`;
+  const outPath = recPath.replace(/\.mp4$/i, ".scored.mp4");
+  fs.writeFileSync(assPath, ass);
+  log(
+    `burning scoreboard (${events.length} events, dur ${Math.round(durationMs / 1000)}s)`,
+  );
+  await runFfmpegBurn(recPath, assPath, outPath);
+  try {
+    fs.unlinkSync(assPath);
+  } catch {
+    /* noop */
+  }
+  return { path: outPath, temp: outPath };
+}
+
 async function setStatus(id, fields) {
   await admin.from("broadcasts").update(fields).eq("id", id);
 }
@@ -252,15 +393,32 @@ async function main() {
       prof.youtube_access_token,
       prof.id,
     );
-    // ── Phase2(③): ここで ffmpeg によるスコア焼き込みを行い、焼き込み済みファイルに差し替える ──
-    const videoId = await uploadToYouTube(rec.p, b, oauth);
+    // ③ スコア焼き込み（ffmpeg）。イベント無し/失敗時は raw にフォールバック。
+    let finalPath = rec.p;
+    let burnedTemp = null;
+    try {
+      const burned = await burnScoreboard(rec.p, b);
+      finalPath = burned.path;
+      burnedTemp = burned.temp;
+    } catch (e) {
+      log("scoreboard burn failed -> raw upload:", String(e).slice(0, 200));
+      finalPath = rec.p;
+    }
+    const videoId = await uploadToYouTube(finalPath, b, oauth);
     await setStatus(b.id, {
       youtube_upload_status: "completed",
       youtube_video_id: videoId,
       youtube_upload_completed_at: new Date().toISOString(),
       youtube_upload_error: null,
     });
-    // 成功 → ローカル録画を削除（YouTube unlisted が正本）
+    // 成功 → 焼き込み一時ファイル＋ローカル録画を削除（YouTube unlisted が正本）
+    if (burnedTemp) {
+      try {
+        fs.unlinkSync(burnedTemp);
+      } catch {
+        /* noop */
+      }
+    }
     try {
       fs.rmSync(path.join(RECORDINGS_DIR, "live", b.share_code), {
         recursive: true,

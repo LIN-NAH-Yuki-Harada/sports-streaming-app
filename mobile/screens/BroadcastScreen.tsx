@@ -67,6 +67,7 @@ import {
   stopLiveStream,
   fetchLiveYoutubeId,
   fetchStreamTarget,
+  insertScoreEvent,
 } from "../lib/broadcasts";
 import {
   type Plan,
@@ -828,6 +829,16 @@ export function BroadcastScreen() {
       baseball,
     ],
   );
+
+  // ③ スコア焼き込み用: スコア行が変わったら「時刻付き」でイベントを記録（配信中・broadcastIdあり）。
+  // formatScoreboardLine はクロック非含なので、得点/ピリオド/セット変化時だけ発火する。
+  // アーカイブワーカーがこの時系列で録画に ffmpeg(ASS字幕)でスコアを焼き込む。fire-and-forget。
+  useEffect(() => {
+    if (phase !== "live") return;
+    const bid = broadcastIdRef.current;
+    if (!bid || !scoreboardLine) return;
+    insertScoreEvent(bid, scoreboardLine).catch(() => {});
+  }, [scoreboardLine, phase]);
 
   // ネイティブ RTMP の状態通知。LiveKit の onConnected/onError/onDisconnected と対応。
   // ※ Bunny 経路では YouTube は「試合後アーカイブ」（T10）なので、ここで startLiveStream は呼ばない。
