@@ -1,0 +1,14 @@
+[Unit]
+Description=LIVE SPOtCH archive worker (MediaMTX recording -> YouTube unlisted)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/archive-worker
+EnvironmentFile=/opt/archive-worker/.env
+ExecStart=/usr/bin/node /opt/archive-worker/worker.js
+# 大容量アップロードに備え最大1時間。Nice/IOで優先度を下げライブ(MediaMTX)を優先。
+TimeoutStartSec=3600
+Nice=10
+IOSchedulingClass=idle

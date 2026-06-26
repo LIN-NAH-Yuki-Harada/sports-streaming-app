@@ -1,0 +1,11 @@
+{
+  "name": "spotch-archive-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LIVE SPOtCH archive worker: MediaMTX recording -> YouTube unlisted",
+  "main": "worker.js",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "googleapis": "^144.0.0"
+  }
+}
