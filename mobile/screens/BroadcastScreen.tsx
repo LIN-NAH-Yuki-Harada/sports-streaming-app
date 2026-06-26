@@ -138,6 +138,7 @@ function formatScoreboardLine(a: {
 const BACKGROUND_GRACE_MS = 180_000; // 中断(電話/回線/背景)から復帰を待つ総デッドライン(3分)
 const RECONNECT_COOLDOWN_MS = 6_000; // 作り直し試行の最小間隔(乱発=thrash防止)
 const RECONNECT_SETTLE_MS = 1_500; // 切断検知から最初の作り直しまでの待ち(回線/カメラ安定待ち)
+const RECONNECT_STABLE_MS = 5_000; // open が来てから「成功」と確定するまでの安定確認(瞬間openで誤確定しない)
 
 export function BroadcastScreen() {
   const navigation = useNavigation<any>();
@@ -182,8 +183,10 @@ export function BroadcastScreen() {
   const remountingRef = useRef(false); // 再接続(作り直し)モード中は onDisconnected/closed で終了させない
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interruptedRef = useRef(false); // 通話等で映像キャプチャ中断中＝復帰まで作り直しを待つ
+  const wasInterruptedRef = useRef(false); // 今回の再接続が通話起因か（終了メッセージ出し分け用）
   const recoverDeadlineRef = useRef(0); // 再接続を諦める総デッドライン（この時刻を過ぎたら finishLive）
   const recoverAttemptRef = useRef<() => void>(() => {}); // 直近の「作り直し試行」関数（resumed で即時呼ぶ用）
+  const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // open の安定確認タイマー
   // プラン＆無料トライアル
   const [plan, setPlan] = useState<Plan>("free");
   const [trialRemainingAtStart, setTrialRemainingAtStart] = useState(0);
@@ -513,9 +516,14 @@ export function BroadcastScreen() {
       endedRef.current = true;
       remountingRef.current = false;
       interruptedRef.current = false;
+      wasInterruptedRef.current = false;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
+      }
+      if (stableTimerRef.current) {
+        clearTimeout(stableTimerRef.current);
+        stableTimerRef.current = null;
       }
       await AudioSession.stopAudioSession().catch(() => {});
       // 終了時に「現時点の得点」を最終確定として記録する（全競技・オーナー要望 2026-06-13）。
@@ -600,9 +608,14 @@ export function BroadcastScreen() {
   const stopRecovering = useCallback(() => {
     remountingRef.current = false;
     interruptedRef.current = false;
+    wasInterruptedRef.current = false;
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
+    }
+    if (stableTimerRef.current) {
+      clearTimeout(stableTimerRef.current);
+      stableTimerRef.current = null;
     }
   }, []);
 
@@ -623,10 +636,11 @@ export function BroadcastScreen() {
           return;
         }
         if (Date.now() > recoverDeadlineRef.current) {
+          const msg = wasInterruptedRef.current
+            ? "通話により配信が中断し、再接続できませんでした。再開するには「配信開始」を押してください。"
+            : "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。";
           stopRecovering();
-          finishLive(
-            "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
-          );
+          finishLive(msg);
           return;
         }
         if (interruptedRef.current) {
@@ -822,14 +836,53 @@ export function BroadcastScreen() {
       const state = e.nativeEvent.state;
       console.log("[rtmp]", state, e.nativeEvent.message ?? "");
       if (state === "open") {
-        // 接続（作り直し含む）成功 → 再接続モード終了・タイマー解除
-        stopRecovering();
+        if (!remountingRef.current) return; // 通常運転中の open（初回接続）→ そのまま
+        // 再接続中の open → すぐ成功確定せず安定確認(5s)。瞬間 open→error の誤確定→切断を防ぐ。
+        // 確認中は試行ループを止める（重複 remount しない）。
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+        if (stableTimerRef.current) clearTimeout(stableTimerRef.current);
+        console.log("[recover] open → confirming stability");
+        stableTimerRef.current = setTimeout(() => {
+          stableTimerRef.current = null;
+          console.log("[recover] stable → success");
+          stopRecovering();
+        }, RECONNECT_STABLE_MS);
       } else if (state === "error") {
-        if (remountingRef.current) return; // 再接続中の一時エラーは無視（試行ループが継続）
+        if (remountingRef.current) {
+          // 再接続中（安定確認中含む）の一時エラー → 切らずに再試行継続。
+          if (stableTimerRef.current) {
+            clearTimeout(stableTimerRef.current);
+            stableTimerRef.current = null;
+          }
+          if (!reconnectTimerRef.current) {
+            reconnectTimerRef.current = setTimeout(
+              recoverAttemptRef.current,
+              RECONNECT_COOLDOWN_MS,
+            );
+          }
+          return;
+        }
         finishLive("配信エラー: " + (e.nativeEvent.message ?? "接続に失敗しました"));
       } else if (state === "closed") {
         if (endedRef.current) return; // 停止ボタン等で終了処理中の切断は無視
-        // 予期しない切断（電波瞬断・回線切替・背景など）→ すぐ終了せず再接続コーディネータへ。
+        if (remountingRef.current) {
+          // 再接続中（安定確認中含む）の closed → 切らずに再試行継続。
+          if (stableTimerRef.current) {
+            clearTimeout(stableTimerRef.current);
+            stableTimerRef.current = null;
+          }
+          if (!reconnectTimerRef.current) {
+            reconnectTimerRef.current = setTimeout(
+              recoverAttemptRef.current,
+              RECONNECT_COOLDOWN_MS,
+            );
+          }
+          return;
+        }
+        // 通常運転中の予期しない切断（電波瞬断・回線切替・背景）→ 再接続コーディネータへ。
         // MediaMTX overridePublisher 既定 true で作り直しの新 publisher が同一パスを引き継ぐ。
         startRecovering("rtmp closed");
       } else if (state === "interrupted") {
@@ -837,6 +890,11 @@ export function BroadcastScreen() {
         // カメラ使用不可なので作り直しは待つ。終了させず復帰(resumed)を待つ。
         if (endedRef.current) return;
         interruptedRef.current = true;
+        wasInterruptedRef.current = true;
+        if (stableTimerRef.current) {
+          clearTimeout(stableTimerRef.current);
+          stableTimerRef.current = null;
+        }
         startRecovering("interrupted (call)");
       } else if (state === "resumed") {
         // 中断終了＝カメラ復帰可能。待機を解除し、少し待って1回作り直して再接続。
