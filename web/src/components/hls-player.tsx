@@ -8,22 +8,38 @@ import { useEffect, useRef } from "react";
  * - Safari / iOS: <video> がネイティブで HLS を再生できるので src 直指定。
  * - Chrome / Firefox / Android: ネイティブ非対応なので hls.js を CDN から読み込んで再生。
  *
- * hls.js は npm 依存にせず CDN（jsDelivr）から動的ロードする（CSP 未導入なので可・
- * worktree の node_modules を汚さない）。将来 npm バンドルに切替えてもよい。
+ * ★中断耐性（セッション継続性）: 配信者が電話/回線切替/バックグラウンドで一瞬中断すると
+ * MediaMTX の .m3u8 が数秒〜数十秒 404/stale になる。その間プレイヤーを破棄せず、
+ * バックオフで startLoad / src 再ロードを繰り返し、配信が戻ったら自動で再生継続する。
+ * ＝視聴者には「配信終了」と見せず、再共有や再視聴の手間を出さない。
  *
- * スコアは配信端末で映像に焼き込み済み（self-host RTMP 経路）なので、ここでは
- * CSS オーバーレイは重ねない（video のみ）。
+ * スコアは視聴ページ側の CSS オーバーレイ(ViewerScoreboardOverlay)で重ねるため、
+ * ここは video のみを描画する。
  */
 
 const HLS_CDN = "https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js";
+const RETRY_MS = 3000; // 配信中断中の再試行間隔
+
+type HlsInstance = {
+  loadSource: (src: string) => void;
+  attachMedia: (video: HTMLMediaElement) => void;
+  startLoad: (startPosition?: number) => void;
+  recoverMediaError: () => void;
+  destroy: () => void;
+  on: (
+    event: string,
+    cb: (
+      event: string,
+      data: { type: string; details: string; fatal: boolean },
+    ) => void,
+  ) => void;
+};
 
 type HlsLike = {
   isSupported: () => boolean;
-  new (config?: unknown): {
-    loadSource: (src: string) => void;
-    attachMedia: (video: HTMLMediaElement) => void;
-    destroy: () => void;
-  };
+  Events: { ERROR: string };
+  ErrorTypes: { NETWORK_ERROR: string; MEDIA_ERROR: string };
+  new (config?: unknown): HlsInstance;
 };
 
 function loadHls(): Promise<HlsLike | null> {
@@ -55,37 +71,105 @@ export function HlsPlayer({ src }: { src: string }) {
     const video = videoRef.current;
     if (!video || !src) return;
     let cancelled = false;
-    let hls: { destroy: () => void } | null = null;
+    let hls: HlsInstance | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Safari / iOS = ネイティブ HLS
+    const clearRetry = () => {
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
+
+    // === Safari / iOS = ネイティブ HLS ===
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      const reloadNative = () => {
+        if (cancelled) return;
+        // src を貼り直して再読込（配信が戻れば再生継続）
+        video.src = src;
+        video.load();
+        video.play().catch(() => {});
+      };
+      const onError = () => {
+        if (cancelled || retryTimer) return;
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          reloadNative();
+        }, RETRY_MS);
+      };
+      const onStalled = () => {
+        video.play().catch(() => {});
+      };
+      video.addEventListener("error", onError);
+      video.addEventListener("stalled", onStalled);
       video.src = src;
       video.play().catch(() => {});
-      return;
+      return () => {
+        cancelled = true;
+        clearRetry();
+        video.removeEventListener("error", onError);
+        video.removeEventListener("stalled", onStalled);
+      };
     }
 
-    // それ以外 = hls.js（CDN）
+    // === それ以外 = hls.js（CDN） ===
     loadHls()
       .then((Hls) => {
         if (cancelled) return;
-        if (Hls && Hls.isSupported()) {
-          const instance = new Hls();
-          instance.loadSource(src);
-          instance.attachMedia(video);
-          hls = instance;
-          video.play().catch(() => {});
-        } else {
+        if (!Hls || !Hls.isSupported()) {
           // 最終手段（古い環境）
           video.src = src;
           video.play().catch(() => {});
+          return;
         }
+        const instance = new Hls({
+          // ライブの一時断に強くする（配信が戻るまで諦めない）
+          liveDurationInfinity: true,
+          fragLoadingMaxRetry: 8,
+          levelLoadingMaxRetry: 8,
+          manifestLoadingMaxRetry: 8,
+        });
+        hls = instance;
+        instance.loadSource(src);
+        instance.attachMedia(video);
+        video.play().catch(() => {});
+
+        const scheduleReload = () => {
+          if (cancelled || retryTimer) return;
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (cancelled || !hls) return;
+            try {
+              // 配信が戻っていれば startLoad で再開。まだなら次の ERROR で再スケジュール。
+              hls.startLoad();
+              video.play().catch(() => {});
+            } catch {
+              /* noop */
+            }
+          }, RETRY_MS);
+        };
+
+        instance.on(Hls.Events.ERROR, (_evt, data) => {
+          if (!data.fatal) return; // 非fatalはhls.jsが自動再試行するので放置
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            try {
+              instance.recoverMediaError();
+            } catch {
+              scheduleReload();
+            }
+          } else {
+            // NETWORK_ERROR 等（配信中断で manifest/level が 404 継続）→ 破棄せず再試行を続ける
+            scheduleReload();
+          }
+        });
       })
       .catch(() => {
-        video.src = src;
+        if (!cancelled) video.src = src;
       });
 
     return () => {
       cancelled = true;
+      clearRetry();
       if (hls) hls.destroy();
     };
   }, [src]);
