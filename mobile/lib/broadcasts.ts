@@ -202,11 +202,18 @@ export async function endBroadcast(shareCode: string): Promise<void> {
 // fire-and-forget（記録に失敗しても配信は止めない）。
 export async function insertScoreEvent(
   broadcastId: string,
-  scoreboardText: string,
+  fields: {
+    scoreboard_text: string;
+    home_score: number;
+    away_score: number;
+    home_sets: number;
+    away_sets: number;
+    period: string;
+  },
 ): Promise<void> {
   await supabase
     .from("broadcast_score_events")
-    .insert({ broadcast_id: broadcastId, scoreboard_text: scoreboardText });
+    .insert({ broadcast_id: broadcastId, ...fields });
 }
 
 // この配信者の「まだ live のまま残っている」配信を全て終了させる。

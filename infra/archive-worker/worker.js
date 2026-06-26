@@ -1,10 +1,7 @@
 // LIVE SPOtCH アーカイブワーカー（VPS常駐・systemd timer から数分ごとに起動）
-// 役割: 終了した「自前配信(MediaMTX録画)」を、配信者のYouTubeへ限定公開でアップロードする。
-//   1起動 = 最大1配信を処理（YouTube quota ~6本/日なので並列不要）。
+// 終了した「自前配信(MediaMTX録画)」を、配信者のYouTubeへ限定公開でアップロードする。
+//   1起動 = 最大1配信。録画にスコアボード(③)を ffmpeg で焼き込んでからアップ。
 //   既存 web/src/lib/youtube-upload.ts のロジックを移植（OAuth/分類/リトライ/完了処理）。
-//   違い: 録画元 = Supabase Storage ではなく VPS ローカル /var/recordings、
-//         アップロードは fs.createReadStream のストリーム（メモリ一定・大容量対応）。
-// ※ Phase2(③)のスコア焼き込み(ffmpeg)は後で uploadToYouTube の前段に差し込む。
 "use strict";
 
 const fs = require("node:fs");
@@ -12,6 +9,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { createClient } = require("@supabase/supabase-js");
 const { google } = require("googleapis");
+const { buildScoreboardSvg } = require("./scoreboard-svg");
 
 const {
   SUPABASE_URL,
@@ -21,8 +19,7 @@ const {
 } = process.env;
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/var/recordings";
 const MAX_RETRY = 5;
-// 終了からこの時間を過ぎても録画が無ければ、録画OFF時代/取りこぼしと判断して即 failed
-// （新しい配信は録画ファイナライズ待ちの可能性があるので、この時間内は retry）。
+// 終了からこの時間を過ぎても録画が無ければ録画OFF時代/取りこぼしと判断して即 failed。
 const RECORDING_WAIT_MS = 30 * 60 * 1000;
 
 if (
@@ -45,9 +42,7 @@ function log(...a) {
   console.log("[archive]", ...a);
 }
 
-// 録画ファイルを探す。recordPath = /var/recordings/%path/... なので path="live/<code>" →
-// /var/recordings/live/<code>/*.mp4。再接続で複数に割れた場合は最大サイズ(主セグメント)を採用。
-// （複数セグメントの連結は将来対応。v1は最大ファイル）。
+// /var/recordings/live/<code>/*.mp4 のうち最大サイズ（主セグメント）。
 function findRecording(shareCode) {
   const dir = path.join(RECORDINGS_DIR, "live", shareCode);
   let files;
@@ -67,14 +62,11 @@ function findRecording(shareCode) {
   return mp4s.length ? mp4s[0] : null;
 }
 
-// profiles の refresh_token から OAuth クライアントを準備（access_token は必ず再取得）。
 async function getOAuthClient(refreshToken, accessToken, profileId) {
   const oauth = new google.auth.OAuth2(
     YOUTUBE_CLIENT_ID,
     YOUTUBE_CLIENT_SECRET,
   );
-  // access_token をあえて渡さず、必ず refresh して新トークンを得る
-  // （web 版で確立: expiry_date 未保存だと古い token が誤って使われる）。
   oauth.setCredentials({ refresh_token: refreshToken });
   const { token } = await oauth.getAccessToken();
   if (token && token !== accessToken) {
@@ -86,7 +78,6 @@ async function getOAuthClient(refreshToken, accessToken, profileId) {
   return oauth;
 }
 
-// MP4 を配信者の YouTube に unlisted でストリーミングアップロード（メモリ一定）。
 async function uploadToYouTube(filePath, b, oauth) {
   const youtube = google.youtube({ version: "v3", auth: oauth });
   const dateLabel = b.started_at
@@ -94,11 +85,7 @@ async function uploadToYouTube(filePath, b, oauth) {
         timeZone: "Asia/Tokyo",
       })
     : "";
-  const title = [
-    `${b.home_team} vs ${b.away_team}`,
-    dateLabel,
-    b.tournament || "",
-  ]
+  const title = [`${b.home_team} vs ${b.away_team}`, dateLabel, b.tournament || ""]
     .filter((s) => s && s.length > 0)
     .join(" - ")
     .slice(0, 100);
@@ -115,24 +102,19 @@ async function uploadToYouTube(filePath, b, oauth) {
   const tags = ["LIVE SPOtCH", b.sport, "スポーツ", "アーカイブ"].filter(
     (s) => s && s.length > 0,
   );
-
   const res = await youtube.videos.insert({
     part: ["snippet", "status"],
     requestBody: {
       snippet: { title, description, categoryId: "17", tags },
       status: { privacyStatus: "unlisted", selfDeclaredMadeForKids: false },
     },
-    media: {
-      mimeType: "video/mp4",
-      body: fs.createReadStream(filePath), // ストリーム = resumable・メモリ一定
-    },
+    media: { mimeType: "video/mp4", body: fs.createReadStream(filePath) },
   });
   const id = res.data.id;
   if (!id) throw new Error("YouTube upload returned no video id");
   return id;
 }
 
-// googleapis / network エラーを 4 分類（web 版と同じ思想）。
 function classify(err) {
   const e = err || {};
   const msg = e.message || String(err);
@@ -152,19 +134,7 @@ function classify(err) {
   return { type: "retry", msg };
 }
 
-// ===== ③ サーバー側スコア焼き込み（ffmpeg + ASS字幕）=====
-
-// ms → ASS 時刻 H:MM:SS.cc
-function assTime(ms) {
-  if (ms < 0) ms = 0;
-  const cs = Math.floor((ms % 1000) / 10);
-  let s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600);
-  s -= h * 3600;
-  const m = Math.floor(s / 60);
-  s -= m * 60;
-  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
-}
+// ===== ③ サーバー側スコア焼き込み（SVGスコアボード → PNG → ffmpeg overlay）=====
 
 // 録画ファイル名 2026-06-26_14-51-55-830050.mp4 → 開始時刻(epoch ms・VPSローカル=JST)
 function recordingStartMs(recPath, fallbackIso) {
@@ -178,118 +148,159 @@ function recordingStartMs(recPath, fallbackIso) {
   return fallbackIso ? Date.parse(fallbackIso) : Date.now();
 }
 
-function ffprobeDurationSec(p) {
-  return new Promise((resolve) => {
-    const pr = spawn("ffprobe", [
-      "-v", "error",
-      "-show_entries", "format=duration",
-      "-of", "default=noprint_wrappers=1:nokey=1",
-      p,
-    ]);
-    let out = "";
-    pr.stdout.on("data", (d) => (out += d.toString()));
-    pr.on("close", () => resolve(parseFloat(out.trim()) || 0));
-    pr.on("error", () => resolve(0));
-  });
-}
-
-// スコアイベント → ASS（上中央・半透明黒box・白太字＝ライブのオーバーレイ風）
-function buildAss(events, fileStartMs, durationMs) {
-  const header = [
-    "[Script Info]",
-    "ScriptType: v4.00+",
-    "PlayResX: 1280",
-    "PlayResY: 720",
-    "WrapStyle: 2",
-    "[V4+ Styles]",
-    "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    "Style: Score,Noto Sans CJK JP,42,&H00FFFFFF,&H00000000,&H8C000000,1,0,4,0,0,8,40,40,28,1",
-    "[Events]",
-    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-  ];
-  const lines = [];
-  for (let i = 0; i < events.length; i++) {
-    const startMs = Date.parse(events[i].at) - fileStartMs;
-    const rawEnd =
-      i + 1 < events.length
-        ? Date.parse(events[i + 1].at) - fileStartMs
-        : durationMs;
-    const s = Math.max(0, startMs);
-    const e = Math.min(durationMs, rawEnd);
-    if (e <= 0 || s >= durationMs || e <= s) continue;
-    const text = (events[i].scoreboard_text || "")
-      .replace(/[\r\n]+/g, " ")
-      .replace(/[{}]/g, "");
-    lines.push(
-      `Dialogue: 0,${assTime(s)},${assTime(e)},Score,,0,0,0,,${text}`,
-    );
-  }
-  return lines.length ? header.concat(lines).join("\n") + "\n" : null;
-}
-
-function runFfmpegBurn(inPath, assPath, outPath) {
+function spawnP(cmd, args) {
   return new Promise((resolve, reject) => {
-    const pr = spawn("ffmpeg", [
-      "-y",
-      "-i", inPath,
-      "-vf", `ass=${assPath}`,
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "23",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "copy",
-      "-movflags", "+faststart",
-      outPath,
-    ]);
+    const pr = spawn(cmd, args);
+    let out = "";
     let err = "";
-    pr.stderr.on("data", (d) => {
-      err += d.toString();
-      if (err.length > 4000) err = err.slice(-2000);
-    });
+    if (pr.stdout) pr.stdout.on("data", (d) => (out += d.toString()));
+    if (pr.stderr)
+      pr.stderr.on("data", (d) => {
+        err += d.toString();
+        if (err.length > 6000) err = err.slice(-3000);
+      });
     pr.on("close", (code) =>
       code === 0
-        ? resolve()
-        : reject(new Error(`ffmpeg exit ${code}: ${err.slice(-400)}`)),
+        ? resolve(out)
+        : reject(new Error(`${cmd} exit ${code}: ${err.slice(-500)}`)),
     );
     pr.on("error", reject);
   });
 }
 
-// 録画にスコアを焼き込んだ新ファイルパスを返す。イベント無し/失敗時は元ファイル(raw)を返す。
+async function ffprobeDurationSec(p) {
+  try {
+    const out = await spawnP("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      p,
+    ]);
+    return parseFloat(out.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function ffprobeWH(p) {
+  try {
+    const out = await spawnP("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height",
+      "-of", "csv=s=x:p=0",
+      p,
+    ]);
+    const [w, h] = out.trim().split("x").map(Number);
+    return { w: w || 1280, h: h || 720 };
+  } catch {
+    return { w: 1280, h: 720 };
+  }
+}
+
+// 録画にスコアボードを焼き込んだファイルパスを返す。イベント無し/失敗時は元(raw)。
+// 返り値 { path, cleanup:[...一時ファイル/dir] }
 async function burnScoreboard(recPath, b) {
   const { data: events } = await admin
     .from("broadcast_score_events")
-    .select("at, scoreboard_text")
+    .select(
+      "at, scoreboard_text, home_score, away_score, home_sets, away_sets, period",
+    )
     .eq("broadcast_id", b.id)
     .order("at", { ascending: true });
   if (!events || events.length === 0) {
     log("no score events -> raw upload");
-    return { path: recPath, temp: null };
+    return { path: recPath, cleanup: [] };
   }
   const durationMs = (await ffprobeDurationSec(recPath)) * 1000;
   if (!durationMs) {
     log("ffprobe duration 0 -> raw upload");
-    return { path: recPath, temp: null };
+    return { path: recPath, cleanup: [] };
   }
+  const { w, h } = await ffprobeWH(recPath);
   const fileStartMs = recordingStartMs(recPath, b.started_at);
-  const ass = buildAss(events, fileStartMs, durationMs);
-  if (!ass) {
-    log("no ass lines in range -> raw upload");
-    return { path: recPath, temp: null };
+
+  // 各イベントの表示区間（録画ファイル開始基準・秒・クランプ）
+  const segs = [];
+  for (let i = 0; i < events.length; i++) {
+    const s = Math.max(0, Date.parse(events[i].at) - fileStartMs);
+    const eRaw =
+      i + 1 < events.length
+        ? Date.parse(events[i + 1].at) - fileStartMs
+        : durationMs;
+    const e = Math.min(durationMs, eRaw);
+    if (e <= 0 || s >= durationMs || e <= s) continue;
+    segs.push({ ev: events[i], s: s / 1000, e: e / 1000 });
   }
-  const assPath = `/tmp/spotch_${b.id}.ass`;
+  if (segs.length === 0) {
+    log("no score segments in range -> raw upload");
+    return { path: recPath, cleanup: [] };
+  }
+
+  const tmpdir = `/tmp/spotch_${b.id}`;
+  fs.rmSync(tmpdir, { recursive: true, force: true });
+  fs.mkdirSync(tmpdir, { recursive: true });
+  const cleanup = [tmpdir];
+
+  // 各区間の SVG → PNG（全画面・透明＋左上スコアボード）
+  const pngs = [];
+  for (let i = 0; i < segs.length; i++) {
+    const ev = segs[i].ev;
+    const svg = buildScoreboardSvg(
+      {
+        homeTeam: b.home_team,
+        awayTeam: b.away_team,
+        homeScore: ev.home_score,
+        awayScore: ev.away_score,
+        homeSets: ev.home_sets,
+        awaySets: ev.away_sets,
+        period: ev.period,
+      },
+      { width: w, height: h },
+    );
+    const svgPath = `${tmpdir}/s${i}.svg`;
+    const pngPath = `${tmpdir}/s${i}.png`;
+    fs.writeFileSync(svgPath, svg);
+    await spawnP("rsvg-convert", [
+      "-w", String(w),
+      "-h", String(h),
+      "-o", pngPath,
+      svgPath,
+    ]);
+    pngs.push(pngPath);
+  }
+
+  // ffmpeg: 各PNGを区間 enable で重ねる
   const outPath = recPath.replace(/\.mp4$/i, ".scored.mp4");
-  fs.writeFileSync(assPath, ass);
-  log(
-    `burning scoreboard (${events.length} events, dur ${Math.round(durationMs / 1000)}s)`,
+  cleanup.push(outPath);
+  const args = ["-y", "-i", recPath];
+  pngs.forEach((p) => args.push("-i", p));
+  let fc = "";
+  let cur = "0:v";
+  segs.forEach((seg, i) => {
+    const inp = `${i + 1}:v`;
+    const outLabel = i === segs.length - 1 ? "vout" : `v${i}`;
+    fc += `[${cur}][${inp}]overlay=0:0:enable='between(t,${seg.s.toFixed(2)},${seg.e.toFixed(2)})'[${outLabel}];`;
+    cur = outLabel;
+  });
+  fc = fc.replace(/;$/, "");
+  args.push(
+    "-filter_complex", fc,
+    "-map", "[vout]",
+    "-map", "0:a?",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "23",
+    "-pix_fmt", "yuv420p",
+    "-c:a", "copy",
+    "-movflags", "+faststart",
+    outPath,
   );
-  await runFfmpegBurn(recPath, assPath, outPath);
-  try {
-    fs.unlinkSync(assPath);
-  } catch {
-    /* noop */
-  }
-  return { path: outPath, temp: outPath };
+  log(
+    `burning scoreboard SVG (${segs.length} segments, ${w}x${h}, dur ${Math.round(durationMs / 1000)}s)`,
+  );
+  await spawnP("ffmpeg", args);
+  return { path: outPath, cleanup };
 }
 
 async function setStatus(id, fields) {
@@ -320,7 +331,7 @@ async function main() {
   const b = rows[0];
   const retry = b.youtube_retry_count || 0;
 
-  // 2. 配信者の適格性（¥500チーム + 自動アーカイブON + YouTube連携済み）
+  // 2. 適格性（¥500チーム + 自動アーカイブON + YouTube連携済み）
   const { data: prof } = await admin
     .from("profiles")
     .select(
@@ -342,20 +353,18 @@ async function main() {
     return;
   }
 
-  // 3. 録画ファイル（まだ書き込み中/未生成なら retry）
+  // 3. 録画ファイル
   const rec = findRecording(b.share_code);
   if (!rec) {
     const endedMs = b.ended_at ? Date.parse(b.ended_at) : 0;
     const ageMs = endedMs ? Date.now() - endedMs : Infinity;
     if (ageMs > RECORDING_WAIT_MS || retry >= MAX_RETRY - 1) {
-      // 終了から十分経過(録画OFF時代/取りこぼし) or リトライ上限 → 即 failed
       await setStatus(b.id, {
         youtube_upload_status: "failed",
         youtube_upload_error: "recording not found (predates recording or lost)",
         youtube_retry_count: retry,
       });
     } else {
-      // 終了直後 = 録画ファイナライズ待ちの可能性 → retry
       await setStatus(b.id, {
         youtube_upload_status: "pending",
         youtube_retry_count: retry + 1,
@@ -370,7 +379,7 @@ async function main() {
     return;
   }
 
-  // 4. 楽観排他で uploading にマーク（他 tick が先取り済みなら諦める）
+  // 4. 楽観排他で uploading
   const { data: claimed } = await admin
     .from("broadcasts")
     .update({
@@ -386,22 +395,22 @@ async function main() {
     return;
   }
 
-  log("uploading", b.share_code, `${(rec.size / 1e6).toFixed(0)}MB`);
+  log("processing", b.share_code, `${(rec.size / 1e6).toFixed(0)}MB`);
   try {
     const oauth = await getOAuthClient(
       prof.youtube_refresh_token,
       prof.youtube_access_token,
       prof.id,
     );
-    // ③ スコア焼き込み（ffmpeg）。イベント無し/失敗時は raw にフォールバック。
+    // ③ スコア焼き込み（失敗時は raw fallback）
     let finalPath = rec.p;
-    let burnedTemp = null;
+    let burnCleanup = [];
     try {
       const burned = await burnScoreboard(rec.p, b);
       finalPath = burned.path;
-      burnedTemp = burned.temp;
+      burnCleanup = burned.cleanup;
     } catch (e) {
-      log("scoreboard burn failed -> raw upload:", String(e).slice(0, 200));
+      log("scoreboard burn failed -> raw upload:", String(e).slice(0, 300));
       finalPath = rec.p;
     }
     const videoId = await uploadToYouTube(finalPath, b, oauth);
@@ -411,10 +420,10 @@ async function main() {
       youtube_upload_completed_at: new Date().toISOString(),
       youtube_upload_error: null,
     });
-    // 成功 → 焼き込み一時ファイル＋ローカル録画を削除（YouTube unlisted が正本）
-    if (burnedTemp) {
+    // 後始末: 焼き込み一時物 + ローカル録画（YouTube unlisted が正本）
+    for (const c of burnCleanup) {
       try {
-        fs.unlinkSync(burnedTemp);
+        fs.rmSync(c, { recursive: true, force: true });
       } catch {
         /* noop */
       }

@@ -10,8 +10,22 @@ CREATE TABLE IF NOT EXISTS public.broadcast_score_events (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   broadcast_id uuid NOT NULL REFERENCES public.broadcasts(id) ON DELETE CASCADE,
   at timestamptz NOT NULL DEFAULT now(),
-  scoreboard_text text NOT NULL
+  scoreboard_text text NOT NULL,
+  -- ③ SVG スコアボード焼き込み用の構造化スコア（teams は broadcasts 行から取得）
+  home_score int,
+  away_score int,
+  home_sets int,
+  away_sets int,
+  period text
 );
+
+-- 既存テーブル（先に scoreboard_text のみで作成済）への列追加（冪等）。
+ALTER TABLE public.broadcast_score_events
+  ADD COLUMN IF NOT EXISTS home_score int,
+  ADD COLUMN IF NOT EXISTS away_score int,
+  ADD COLUMN IF NOT EXISTS home_sets int,
+  ADD COLUMN IF NOT EXISTS away_sets int,
+  ADD COLUMN IF NOT EXISTS period text;
 
 CREATE INDEX IF NOT EXISTS idx_bse_broadcast_at
   ON public.broadcast_score_events(broadcast_id, at);

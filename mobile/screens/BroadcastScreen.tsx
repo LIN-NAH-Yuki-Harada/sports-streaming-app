@@ -837,7 +837,14 @@ export function BroadcastScreen() {
     if (phase !== "live") return;
     const bid = broadcastIdRef.current;
     if (!bid || !scoreboardLine) return;
-    insertScoreEvent(bid, scoreboardLine).catch(() => {});
+    insertScoreEvent(bid, {
+      scoreboard_text: scoreboardLine,
+      home_score: homeScore,
+      away_score: awayScore,
+      home_sets: homeSets,
+      away_sets: awaySets,
+      period,
+    }).catch(() => {});
   }, [scoreboardLine, phase]);
 
   // ネイティブ RTMP の状態通知。LiveKit の onConnected/onError/onDisconnected と対応。
