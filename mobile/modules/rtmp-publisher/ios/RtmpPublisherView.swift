@@ -18,6 +18,7 @@ class RtmpPublisherView: ExpoView {
   private let mixer = MediaMixer()
   private var session: (any Session)?
   private var readyStateTask: Task<Void, Never>?
+  private var interruptTask: Task<Void, Never>?
 
   // Props（JS から設定）
   var streamUrl: String?
@@ -56,6 +57,15 @@ class RtmpPublisherView: ExpoView {
       name: UIDevice.orientationDidChangeNotification,
       object: nil
     )
+    // 通話(AVAudioSession割り込み)終了後に audio session を再有効化する。HaishinKit は
+    // audioIO.resume()(マイク再attach)はするが setActive(true) を呼ばないため、端末によって
+    // マイク route が戻らない事象を補う（映像は通話中も継続している）。
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleAudioInterruption(_:)),
+      name: AVAudioSession.interruptionNotification,
+      object: nil
+    )
     Task { await self.setupMixer() }
   }
 
@@ -75,6 +85,20 @@ class RtmpPublisherView: ExpoView {
           }
         }
       }
+    }
+  }
+
+  // 通話終了(.ended .shouldResume)時に audio session を再有効化（音声 route 復帰の確実化）。
+  @objc private func handleAudioInterruption(_ note: Notification) {
+    guard
+      let info = note.userInfo,
+      let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+      let type = AVAudioSession.InterruptionType(rawValue: raw),
+      type == .ended
+    else { return }
+    let optRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+    if AVAudioSession.InterruptionOptions(rawValue: optRaw).contains(.shouldResume) {
+      try? AVAudioSession.sharedInstance().setActive(true)
     }
   }
 
@@ -158,6 +182,16 @@ class RtmpPublisherView: ExpoView {
       return l
     }.value
     scoreboardObject = label
+
+    // 通話等で映像キャプチャ(AVCaptureSession)ごと中断される端末向け: isInterputted を購読し
+    // JS へ interrupted/resumed を emit（JS側で同一パスへ remount=再接続）。
+    // 音声のみの割り込み(着信)は HaishinKit が自動処理＝映像は継続するのでここには来ない。
+    interruptTask?.cancel()
+    interruptTask = Task { [weak self] in
+      for await interrupted in await mixer.isInterputted {
+        self?.emit(interrupted ? "interrupted" : "resumed")
+      }
+    }
 
     isMixerReady = true
     await reconcile()
@@ -265,6 +299,7 @@ class RtmpPublisherView: ExpoView {
 
   deinit {
     readyStateTask?.cancel()
+    interruptTask?.cancel()
     NotificationCenter.default.removeObserver(self)
   }
 }

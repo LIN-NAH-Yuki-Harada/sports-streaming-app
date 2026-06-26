@@ -78,6 +78,7 @@ import {
 import { type MyTeam, fetchMyTeams } from "../lib/teams";
 import { fetchMyProfile } from "../lib/mypage-data";
 import { useNavigation } from "@react-navigation/native";
+import NetInfo from "@react-native-community/netinfo";
 
 // 配信専用ネイティブアプリ。カメラをネイティブ(ハードエンコーダ)で publish しつつ、
 // 配信者がアプリ内で 競技選択・スコア・ピリオド/セット を操作 → broadcasts 行を UPDATE →
@@ -131,6 +132,12 @@ function formatScoreboardLine(a: {
   if (a.setBased && a.pointLabel) line += `  ${a.pointLabel}`;
   return line;
 }
+
+// セッション継続性: 中断(電話/回線切替/背景)から「同じ配信」へ復帰する許容時間。
+// BACKGROUND_GRACE_MS = 背景化(ハンズフリー通話で離脱含む)から復帰を待つ最大。超えたら終了。
+// RECONNECT_TIMEOUT_MS = remount 後に再接続(open/connected)が来るのを待つ最大。
+const BACKGROUND_GRACE_MS = 180_000; // 3分
+const RECONNECT_TIMEOUT_MS = 60_000;
 
 export function BroadcastScreen() {
   const navigation = useNavigation<any>();
@@ -588,8 +595,6 @@ export function BroadcastScreen() {
   // ・90秒超の離脱、または 15秒以内に onConnected が来なければ終了（視聴者を宙ぶらりんにしない）。
   useEffect(() => {
     if (phase !== "live") return;
-    const GRACE_MS = 90_000;
-    const RECONNECT_TIMEOUT_MS = 15_000;
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "background") {
         bgAtRef.current = Date.now();
@@ -597,7 +602,7 @@ export function BroadcastScreen() {
         if (bgAtRef.current === 0) return;
         const awayMs = Date.now() - bgAtRef.current;
         bgAtRef.current = 0;
-        if (awayMs > GRACE_MS) {
+        if (awayMs > BACKGROUND_GRACE_MS) {
           finishLive(
             "長時間の離脱で配信を終了しました。再開するには「配信開始」を押してください。",
           );
@@ -618,6 +623,37 @@ export function BroadcastScreen() {
       }
     });
     return () => sub.remove();
+  }, [phase, finishLive]);
+
+  // 回線切替(WiFi↔5G)の主動検知: 回線種別が変わったら古い TCP の timeout を待たず即再接続。
+  // ＝同じ共有コードのまま新回線へ再 publish（視聴URL不変）。配信中のみ監視。
+  useEffect(() => {
+    if (phase !== "live") return;
+    let prevType: string | null = null;
+    const unsub = NetInfo.addEventListener((state) => {
+      const type = state.type;
+      if (
+        prevType !== null &&
+        type !== prevType &&
+        state.isConnected === true &&
+        !remountingRef.current &&
+        !endedRef.current
+      ) {
+        remountingRef.current = true;
+        setLiveKey((k) => k + 1);
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = setTimeout(() => {
+          if (remountingRef.current) {
+            remountingRef.current = false;
+            finishLive(
+              "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
+            );
+          }
+        }, RECONNECT_TIMEOUT_MS);
+      }
+      prevType = type;
+    });
+    return () => unsub();
   }, [phase, finishLive]);
 
   // 無料トライアル: 残り時間が 0 になったら自動終了（1秒ごとの elapsed 変化で判定）
@@ -767,7 +803,25 @@ export function BroadcastScreen() {
               "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
             );
           }
-        }, 20000);
+        }, RECONNECT_TIMEOUT_MS);
+      } else if (state === "interrupted") {
+        // 通話等で映像キャプチャが中断（音声のみの割り込みは HaishinKit が自動処理＝映像は継続するのでここに来ない）。
+        // 終了させず復帰(resumed)を待つ。長時間(3分)戻らなければ終了。
+        if (endedRef.current) return;
+        remountingRef.current = true;
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = setTimeout(() => {
+          if (remountingRef.current) {
+            remountingRef.current = false;
+            finishLive(
+              "通話/中断が長引いたため配信を終了しました。再開するには「配信開始」を押してください。",
+            );
+          }
+        }, BACKGROUND_GRACE_MS);
+      } else if (state === "resumed") {
+        // 中断終了＝映像復帰可能。同じ共有コードへ作り直して再接続（HaishinKit 自動復帰の補強）。
+        if (endedRef.current) return;
+        setLiveKey((k) => k + 1);
       }
     },
     [finishLive],
@@ -867,7 +921,7 @@ export function BroadcastScreen() {
                 "再接続できなかったため配信を終了しました。再開するには「配信開始」を押してください。",
               );
             }
-          }, 20000);
+          }, RECONNECT_TIMEOUT_MS);
         }}
       >
         <LiveView

@@ -2,7 +2,14 @@ import { requireNativeView } from "expo";
 import * as React from "react";
 import type { ViewProps } from "react-native";
 
-export type RtmpStatus = "connecting" | "open" | "closing" | "closed" | "error";
+export type RtmpStatus =
+  | "connecting"
+  | "open"
+  | "closing"
+  | "closed"
+  | "error"
+  | "interrupted"
+  | "resumed";
 
 export type RtmpStatusEvent = {
   nativeEvent: { state: RtmpStatus; message?: string | null };
