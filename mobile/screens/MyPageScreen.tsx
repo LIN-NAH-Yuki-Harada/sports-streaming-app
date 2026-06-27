@@ -11,9 +11,11 @@ import {
   Text,
   View,
 } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { supabase } from "../lib/supabase";
 import { SITE_URL } from "../config";
+import type { RootStackParamList } from "../navigation-types";
 import {
   type MyProfile,
   fetchMyProfile,
@@ -32,6 +34,8 @@ const APP_VERSION = "1.0.0";
 const IS_IOS = Platform.OS === "ios";
 
 export function MyPageScreen() {
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
   const [profile, setProfile] = useState<MyProfile | null>(null);
@@ -179,13 +183,23 @@ export function MyPageScreen() {
               ) : null}
               <Text style={styles.cardNote}>
                 {IS_IOS
-                  ? "プランの確認・変更は Web 版（live-spotch.com）のマイページから行えます。"
+                  ? "プランの解約・確認は iOS の「設定 > Apple ID > サブスクリプション」から行えます。"
                   : "プランの変更・解約・お支払いはWebのマイページから行えます。"}
               </Text>
-              {/* iOS は外部Web決済への誘導を一切出さない（Apple 3.1.1 / Netflix・Spotify方式）。
-                  /mypage は ¥価格・Stripe決済を含むページのため、iOS ではタップ可能なボタンを
-                  置かずテキスト案内のみにする。Android は従来どおり Web 管理導線を出す。 */}
-              {IS_IOS ? null : (
+              {/* iOS は Apple 準拠のアプリ内課金（IAP）で購入・変更（RevenueCat 経由）。
+                  Android は IAP 未対応のため従来どおり Web のプラン管理へ誘導する。 */}
+              {IS_IOS ? (
+                <Pressable
+                  style={styles.webButton}
+                  onPress={() => navigation.navigate("Paywall")}
+                >
+                  <Text style={styles.webButtonText}>
+                    {!profile?.plan || profile.plan === "free"
+                      ? "プランをアップグレード"
+                      : "プランを変更"}
+                  </Text>
+                </Pressable>
+              ) : (
                 <Pressable
                   style={styles.webButton}
                   onPress={() => openWeb("/mypage")}

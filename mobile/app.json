@@ -10,7 +10,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.linnah.spotch",
+      "bundleIdentifier": "com.linnah.livespotch",
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "試合をライブ配信するためにカメラを使用します",
@@ -20,7 +20,7 @@
       "bitcode": false
     },
     "android": {
-      "package": "com.linnah.spotch",
+      "package": "com.linnah.livespotch",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

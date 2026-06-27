@@ -352,14 +352,21 @@ export function BroadcastScreen() {
         return;
       }
 
+      // 開始直前に最新プランを取得（ペイウォール購入直後のplan反映を確実に拾う）。
+      const currentPlan = await fetchPlan(session.user.id);
+      if (currentPlan !== plan) setPlan(currentPlan);
+
       // 無料プランで体験時間（10分）を使い切っている場合は開始させない
-      if (plan === "free" && trialRemainingAtStart <= 0) {
-        // iOS は購入を促す表現を出さない（Apple 3.1.1・身軽モデル）。Webへ誘導する文言も置かない。
-        setMessage(
-          Platform.OS === "ios"
-            ? "無料体験（10分）の時間に達しました。引き続きのご利用は Web 版（live-spotch.com）でご確認ください。"
-            : "無料体験（10分）は終了しています。続けるには有料プランへの登録が必要です。",
-        );
+      if (currentPlan === "free" && trialRemainingAtStart <= 0) {
+        if (Platform.OS === "ios") {
+          // iOS はアプリ内課金（IAP）。配信は開始せずペイウォールを表示して購入を促す。
+          setMessage("無料体験（10分）が終了しています。プランの登録で続けてご利用いただけます。");
+          setBusy(false);
+          navigation.navigate("Paywall");
+          return;
+        }
+        // Android は IAP 未対応のため従来どおり（Web のプラン管理へ）。
+        setMessage("無料体験（10分）は終了しています。続けるには有料プランへの登録が必要です。");
         setBusy(false);
         return;
       }

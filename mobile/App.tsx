@@ -16,6 +16,8 @@ import { TeamScreen } from "./screens/TeamScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
 import { MyPageScreen } from "./screens/MyPageScreen";
 import { WatchScreen } from "./screens/WatchScreen";
+import { PaywallScreen } from "./screens/PaywallScreen";
+import { configureRevenueCat, rcLogIn, rcLogOut } from "./lib/revenuecat";
 import type { RootStackParamList } from "./navigation-types";
 
 // 下タブのアイコン（@expo/vector-icons 未導入のため絵文字で代用）
@@ -68,6 +70,11 @@ function RootNavigator() {
           orientation: "all",
         }}
       />
+      <RootStack.Screen
+        name="Paywall"
+        component={PaywallScreen}
+        options={{ presentation: "fullScreenModal", animation: "slide_from_bottom" }}
+      />
     </RootStack.Navigator>
   );
 }
@@ -94,6 +101,20 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  // RevenueCat（アプリ内課金）を一度だけ初期化。
+  useEffect(() => {
+    configureRevenueCat();
+  }, []);
+
+  // ログイン状態に応じて RevenueCat に logIn/logOut（webhook の app_user_id を Supabase user.id に一致させる）。
+  useEffect(() => {
+    if (session?.user) {
+      rcLogIn(session.user.id);
+    } else if (session === null) {
+      rcLogOut();
+    }
+  }, [session]);
 
   // 保険: 何らかの理由で ready にならなくても 8 秒でネイティブスプラッシュを必ず剥がす
   // （無反応スプラッシュに閉じ込めない）。
