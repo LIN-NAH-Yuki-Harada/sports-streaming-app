@@ -162,6 +162,13 @@ export function HlsPlayer({ src }: { src: string }) {
           fragLoadingMaxRetry: 8,
           levelLoadingMaxRetry: 8,
           manifestLoadingMaxRetry: 8,
+          // 配信側がセルラー(4G/5G)の場合、上り帯域不足で送信がバースト化し
+          // 一時的にセグメント供給が数秒途切れる。視聴位置をライブ端から少し後方に取り、
+          // 前方バッファを厚めに保つことで、その数秒を吸収して映像が止まりにくくする
+          // （トレードオフで遅延は数秒増える。スポーツ視聴では許容範囲）。
+          liveSyncDurationCount: 4, // ライブ端から約4セグメント(≈8秒)後方を再生位置に
+          maxBufferLength: 30,
+          backBufferLength: 30,
         });
         hls = instance;
         instance.loadSource(src);
