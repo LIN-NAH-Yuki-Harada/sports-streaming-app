@@ -161,9 +161,9 @@ class RtmpPublisherView: ExpoView {
     //   .audioEngine 構成に合わせる）。AudioSession のカテゴリ/activate は startStreaming で行う。
     // start() は AudioSession を activate する startStreaming 側で呼ぶ（engine.start は activate 後が安全）。
     let mixerForAudio = self.mixer
-    audioSource = AudioEngineSource { buffer, when in
-      Task { await mixerForAudio.append(buffer, when: when) }
-    }
+    audioSource = AudioEngineSource(append: { buffer, when in
+      await mixerForAudio.append(buffer, when: when)
+    })
 
     // passthrough（既定）＝カメラの capture バッファをそのまま出力する経路。
     // スコアは視聴側 Web CSS オーバーレイに移したので端末 GPU 合成(offscreen)は不要。
@@ -327,28 +327,46 @@ class RtmpPublisherView: ExpoView {
   deinit {
     readyStateTask?.cancel()
     interruptTask?.cancel()
-    audioSource?.stop()
+    audioSource?.dispose()
     NotificationCenter.default.removeObserver(self)
   }
 }
 
 // 音声を AVCaptureSession から切り離し AVAudioEngine で別取得する小クラス（着信継続のため）。
 // capture session を映像専用にすると着信(音声HW占有)で映像が止まらない代わりに、音声はここで取得して
-// mixer.append で配信に供給する。onBuffer は @Sendable（MainActor self を捕捉しない）。
-// start()/stop() は MainActor から呼ぶ前提（engine/running の直列化）。start ごとに engine を新規化し
-// 通話後の stale を回避。マイク未使用可能時(着信直後等)は installTap せず音声なしで継続（クラッシュ回避）。
+// mixer.append で配信に供給する。
+//
+// ★「音が重なる/順不同/積み上がる」を構造的に不可能にする設計:
+//   - 配信への入口は AsyncStream の continuation 一本のみ。実マイク tap と無音タイマーは
+//     beginInterruption で排他切替＝同時に yield することはない（二重供給なし）。
+//   - 取り出しは単一の consumerTask が FIFO で1個ずつ await append＝順序保証・並列appendなし。
+//   - bufferingNewest(8) で有界化＝コンシューマが遅れても古いバッファを捨てるだけで遅延が増え続けない。
+//   - start は running 中なら何もしない＋毎回 engine 新規化＝同一バスへ二重 installTap しない。
+//   - dispose() で consumer も終了＝view 破棄/再接続(remount)で古い経路が残らない。
+// start()/stop()/begin/endInterruption は MainActor から呼ぶ前提（engine/running/timer の直列化）。
 final class AudioEngineSource: @unchecked Sendable {
   private var engine = AVAudioEngine()
   private var running = false
   private var lastFormat: AVAudioFormat?
   private var silenceTimer: DispatchSourceTimer?
-  private let onBuffer: @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void
+  private var consumerTask: Task<Void, Never>?
+  private let continuation: AsyncStream<(AVAudioPCMBuffer, AVAudioTime)>.Continuation
 
-  init(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void) {
-    self.onBuffer = onBuffer
+  init(append: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) async -> Void) {
+    var cont: AsyncStream<(AVAudioPCMBuffer, AVAudioTime)>.Continuation!
+    let stream = AsyncStream<(AVAudioPCMBuffer, AVAudioTime)>(
+      bufferingPolicy: .bufferingNewest(8)
+    ) { cont = $0 }
+    self.continuation = cont
+    // 単一コンシューマが FIFO で1個ずつ append（順序保証・並列appendなし・積み上がりなし）。
+    self.consumerTask = Task {
+      for await pair in stream {
+        await append(pair.0, pair.1)
+      }
+    }
   }
 
-  // 通常配信: 実マイクをタップして配信に供給。
+  // 通常配信: 実マイクをタップして配信へ。running 中の二重 start はしない（二重tap防止）。
   func start() {
     stopSilence()
     if running { return }
@@ -357,9 +375,9 @@ final class AudioEngineSource: @unchecked Sendable {
     let fmt = input.inputFormat(forBus: 0)
     guard fmt.channelCount > 0, fmt.sampleRate > 0 else { return }
     lastFormat = fmt
-    let cb = onBuffer
+    let cont = continuation
     input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { buffer, when in
-      cb(buffer, when)
+      cont.yield((buffer, when))
     }
     engine.prepare()
     do {
@@ -371,7 +389,7 @@ final class AudioEngineSource: @unchecked Sendable {
   }
 
   // 着信(.began): 実マイクは使えないので停止し、代わりに「無音」を流し続けて
-  // ストリーム(エンコーダ/多重化)を生かす＝映像が止まらない（着信継続の核心）。
+  // ストリーム(エンコーダ/多重化)を生かす＝映像が止まらない（着信継続の核心）。実マイクと無音は排他。
   func beginInterruption() {
     guard running else { return } // 配信(タップ)中でなければ何もしない
     engine.stop()
@@ -387,12 +405,21 @@ final class AudioEngineSource: @unchecked Sendable {
     if wasSilencing { start() }
   }
 
+  // 配信停止時: 取り込み(マイク/無音)を止める。consumer は view 存続中は維持（次の start に備える）。
   func stop() {
     stopSilence()
     if !running { return }
     engine.stop()
     engine.inputNode.removeTap(onBus: 0)
     running = false
+  }
+
+  // view 破棄時: 取り込み停止＋コンシューマ終了＋ストリーム終端（経路を完全解放＝再接続で残らない）。
+  func dispose() {
+    stop()
+    consumerTask?.cancel()
+    consumerTask = nil
+    continuation.finish()
   }
 
   // 直近の音声フォーマットで無音バッファを 20ms ごとに append し続ける（着信中の継続用）。
@@ -404,7 +431,7 @@ final class AudioEngineSource: @unchecked Sendable {
       let fmt = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channels)
     else { return }
     let frames = AVAudioFrameCount(max(1.0, sampleRate * 0.02)) // 20ms
-    let cb = onBuffer
+    let cont = continuation
     let timer = DispatchSource.makeTimerSource(
       queue: DispatchQueue.global(qos: .userInitiated)
     )
@@ -417,7 +444,7 @@ final class AudioEngineSource: @unchecked Sendable {
           memset(f[c], 0, Int(frames) * MemoryLayout<Float>.size)
         }
       }
-      cb(buf, AVAudioTime(hostTime: mach_absolute_time()))
+      cont.yield((buf, AVAudioTime(hostTime: mach_absolute_time())))
     }
     timer.resume()
     silenceTimer = timer
