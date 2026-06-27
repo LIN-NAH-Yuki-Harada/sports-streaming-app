@@ -1,0 +1,476 @@
+// LIVE SPOtCH アーカイブワーカー（VPS常駐・systemd timer から数分ごとに起動）
+// 終了した「自前配信(MediaMTX録画)」を、配信者のYouTubeへ限定公開でアップロードする。
+//   1起動 = 最大1配信。録画にスコアボード(③)を ffmpeg で焼き込んでからアップ。
+//   既存 web/src/lib/youtube-upload.ts のロジックを移植（OAuth/分類/リトライ/完了処理）。
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawn } = require("node:child_process");
+const { createClient } = require("@supabase/supabase-js");
+const { google } = require("googleapis");
+const { buildScoreboardSvg } = require("./scoreboard-svg");
+
+const {
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  YOUTUBE_CLIENT_ID,
+  YOUTUBE_CLIENT_SECRET,
+} = process.env;
+const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/var/recordings";
+const MAX_RETRY = 5;
+// 終了からこの時間を過ぎても録画が無ければ録画OFF時代/取りこぼしと判断して即 failed。
+const RECORDING_WAIT_MS = 30 * 60 * 1000;
+
+if (
+  !SUPABASE_URL ||
+  !SUPABASE_SERVICE_ROLE_KEY ||
+  !YOUTUBE_CLIENT_ID ||
+  !YOUTUBE_CLIENT_SECRET
+) {
+  console.error(
+    "[archive] missing env (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / YOUTUBE_CLIENT_ID / YOUTUBE_CLIENT_SECRET)",
+  );
+  process.exit(1);
+}
+
+const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false },
+});
+
+function log(...a) {
+  console.log("[archive]", ...a);
+}
+
+// /var/recordings/live/<code>/*.mp4 のうち最大サイズ（主セグメント）。
+function findRecording(shareCode) {
+  const dir = path.join(RECORDINGS_DIR, "live", shareCode);
+  let files;
+  try {
+    files = fs.readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const mp4s = files
+    .filter((f) => f.toLowerCase().endsWith(".mp4"))
+    .map((f) => {
+      const p = path.join(dir, f);
+      return { p, size: fs.statSync(p).size };
+    })
+    .filter((x) => x.size > 0)
+    .sort((a, b) => b.size - a.size);
+  return mp4s.length ? mp4s[0] : null;
+}
+
+async function getOAuthClient(refreshToken, accessToken, profileId) {
+  const oauth = new google.auth.OAuth2(
+    YOUTUBE_CLIENT_ID,
+    YOUTUBE_CLIENT_SECRET,
+  );
+  oauth.setCredentials({ refresh_token: refreshToken });
+  const { token } = await oauth.getAccessToken();
+  if (token && token !== accessToken) {
+    await admin
+      .from("profiles")
+      .update({ youtube_access_token: token })
+      .eq("id", profileId);
+  }
+  return oauth;
+}
+
+async function uploadToYouTube(filePath, b, oauth) {
+  const youtube = google.youtube({ version: "v3", auth: oauth });
+  const dateLabel = b.started_at
+    ? new Date(b.started_at).toLocaleDateString("ja-JP", {
+        timeZone: "Asia/Tokyo",
+      })
+    : "";
+  const title = [`${b.home_team} vs ${b.away_team}`, dateLabel, b.tournament || ""]
+    .filter((s) => s && s.length > 0)
+    .join(" - ")
+    .slice(0, 100);
+  const description = [
+    b.sport,
+    b.tournament ? `大会: ${b.tournament}` : "",
+    b.venue ? `会場: ${b.venue}` : "",
+    "",
+    "LIVE SPOtCH (https://live-spotch.com) で配信された試合のアーカイブです。",
+  ]
+    .filter((s) => s && s.length > 0)
+    .join("\n")
+    .slice(0, 5000);
+  const tags = ["LIVE SPOtCH", b.sport, "スポーツ", "アーカイブ"].filter(
+    (s) => s && s.length > 0,
+  );
+  const res = await youtube.videos.insert({
+    part: ["snippet", "status"],
+    requestBody: {
+      snippet: { title, description, categoryId: "17", tags },
+      status: { privacyStatus: "unlisted", selfDeclaredMadeForKids: false },
+    },
+    media: { mimeType: "video/mp4", body: fs.createReadStream(filePath) },
+  });
+  const id = res.data.id;
+  if (!id) throw new Error("YouTube upload returned no video id");
+  return id;
+}
+
+function classify(err) {
+  const e = err || {};
+  const msg = e.message || String(err);
+  const codeNum = typeof e.code === "number" ? e.code : Number(e.code);
+  const status = !Number.isNaN(codeNum) ? codeNum : e.response && e.response.status;
+  if (
+    msg.includes("invalid_grant") ||
+    msg.includes("Token has been expired or revoked") ||
+    msg.includes("re-link")
+  ) {
+    return { type: "token-revoked", msg };
+  }
+  if (status === 401 || status === 403) return { type: "auth-refresh", msg };
+  if (status === 429 || (status >= 500 && status < 600))
+    return { type: "retry", msg };
+  if (status >= 400 && status < 500) return { type: "fatal", msg };
+  return { type: "retry", msg };
+}
+
+// ===== ③ サーバー側スコア焼き込み（SVGスコアボード → PNG → ffmpeg overlay）=====
+
+// 録画ファイル名 2026-06-26_14-51-55-830050.mp4 → 開始時刻(epoch ms・VPSローカル=JST)
+function recordingStartMs(recPath, fallbackIso) {
+  const m = path
+    .basename(recPath)
+    .match(/(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})-(\d+)/);
+  if (m) {
+    const ms = Math.floor(Number(`0.${m[7]}`) * 1000);
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], ms).getTime();
+  }
+  return fallbackIso ? Date.parse(fallbackIso) : Date.now();
+}
+
+function spawnP(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const pr = spawn(cmd, args);
+    let out = "";
+    let err = "";
+    if (pr.stdout) pr.stdout.on("data", (d) => (out += d.toString()));
+    if (pr.stderr)
+      pr.stderr.on("data", (d) => {
+        err += d.toString();
+        if (err.length > 6000) err = err.slice(-3000);
+      });
+    pr.on("close", (code) =>
+      code === 0
+        ? resolve(out)
+        : reject(new Error(`${cmd} exit ${code}: ${err.slice(-500)}`)),
+    );
+    pr.on("error", reject);
+  });
+}
+
+async function ffprobeDurationSec(p) {
+  try {
+    const out = await spawnP("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      p,
+    ]);
+    return parseFloat(out.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function ffprobeWH(p) {
+  try {
+    const out = await spawnP("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height",
+      "-of", "csv=s=x:p=0",
+      p,
+    ]);
+    const [w, h] = out.trim().split("x").map(Number);
+    return { w: w || 1280, h: h || 720 };
+  } catch {
+    return { w: 1280, h: 720 };
+  }
+}
+
+// 録画にスコアボードを焼き込んだファイルパスを返す。イベント無し/失敗時は元(raw)。
+// 返り値 { path, cleanup:[...一時ファイル/dir] }
+async function burnScoreboard(recPath, b) {
+  const { data: events } = await admin
+    .from("broadcast_score_events")
+    .select(
+      "at, scoreboard_text, home_score, away_score, home_sets, away_sets, period",
+    )
+    .eq("broadcast_id", b.id)
+    .order("at", { ascending: true });
+  if (!events || events.length === 0) {
+    log("no score events -> raw upload");
+    return { path: recPath, cleanup: [] };
+  }
+  const durationMs = (await ffprobeDurationSec(recPath)) * 1000;
+  if (!durationMs) {
+    log("ffprobe duration 0 -> raw upload");
+    return { path: recPath, cleanup: [] };
+  }
+  const { w, h } = await ffprobeWH(recPath);
+  const fileStartMs = recordingStartMs(recPath, b.started_at);
+
+  // 各イベントの表示区間（録画ファイル開始基準・秒・クランプ）
+  const segs = [];
+  for (let i = 0; i < events.length; i++) {
+    const s = Math.max(0, Date.parse(events[i].at) - fileStartMs);
+    const eRaw =
+      i + 1 < events.length
+        ? Date.parse(events[i + 1].at) - fileStartMs
+        : durationMs;
+    const e = Math.min(durationMs, eRaw);
+    if (e <= 0 || s >= durationMs || e <= s) continue;
+    segs.push({ ev: events[i], s: s / 1000, e: e / 1000 });
+  }
+  if (segs.length === 0) {
+    log("no score segments in range -> raw upload");
+    return { path: recPath, cleanup: [] };
+  }
+
+  const tmpdir = `/tmp/spotch_${b.id}`;
+  fs.rmSync(tmpdir, { recursive: true, force: true });
+  fs.mkdirSync(tmpdir, { recursive: true });
+  const cleanup = [tmpdir];
+
+  // 各区間の SVG → PNG（全画面・透明＋左上スコアボード）
+  const pngs = [];
+  for (let i = 0; i < segs.length; i++) {
+    const ev = segs[i].ev;
+    // 競技別の追加情報（野球=B/S/O、バレー=セットポイント等）= scoreboard_text の period より後ろ
+    const periodStr = ev.period || "";
+    const txt = ev.scoreboard_text || "";
+    let extra = "";
+    if (periodStr && txt.includes(periodStr)) {
+      extra = txt.slice(txt.lastIndexOf(periodStr) + periodStr.length).trim();
+    }
+    const svg = buildScoreboardSvg(
+      {
+        homeTeam: b.home_team,
+        awayTeam: b.away_team,
+        homeScore: ev.home_score,
+        awayScore: ev.away_score,
+        homeSets: ev.home_sets,
+        awaySets: ev.away_sets,
+        period: ev.period,
+        extra,
+      },
+      { width: w, height: h },
+    );
+    const svgPath = `${tmpdir}/s${i}.svg`;
+    const pngPath = `${tmpdir}/s${i}.png`;
+    fs.writeFileSync(svgPath, svg);
+    await spawnP("rsvg-convert", [
+      "-w", String(w),
+      "-h", String(h),
+      "-o", pngPath,
+      svgPath,
+    ]);
+    pngs.push(pngPath);
+  }
+
+  // ffmpeg: 各PNGを区間 enable で重ねる
+  const outPath = recPath.replace(/\.mp4$/i, ".scored.mp4");
+  cleanup.push(outPath);
+  const args = ["-y", "-i", recPath];
+  pngs.forEach((p) => args.push("-i", p));
+  let fc = "";
+  let cur = "0:v";
+  segs.forEach((seg, i) => {
+    const inp = `${i + 1}:v`;
+    const outLabel = i === segs.length - 1 ? "vout" : `v${i}`;
+    fc += `[${cur}][${inp}]overlay=0:0:enable='between(t,${seg.s.toFixed(2)},${seg.e.toFixed(2)})'[${outLabel}];`;
+    cur = outLabel;
+  });
+  fc = fc.replace(/;$/, "");
+  args.push(
+    "-filter_complex", fc,
+    "-map", "[vout]",
+    "-map", "0:a?",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "23",
+    "-pix_fmt", "yuv420p",
+    "-c:a", "copy",
+    "-movflags", "+faststart",
+    outPath,
+  );
+  log(
+    `burning scoreboard SVG (${segs.length} segments, ${w}x${h}, dur ${Math.round(durationMs / 1000)}s)`,
+  );
+  await spawnP("ffmpeg", args);
+  return { path: outPath, cleanup };
+}
+
+async function setStatus(id, fields) {
+  await admin.from("broadcasts").update(fields).eq("id", id);
+}
+
+async function main() {
+  // 1. 対象 = 終了した自前配信(stream_playback_url 有)で未処理(null/pending)・retry 未超過
+  const { data: rows, error } = await admin
+    .from("broadcasts")
+    .select(
+      "id, share_code, broadcaster_id, home_team, away_team, sport, tournament, venue, started_at, ended_at, youtube_retry_count",
+    )
+    .eq("status", "ended")
+    .not("stream_playback_url", "is", null)
+    .or("youtube_upload_status.is.null,youtube_upload_status.eq.pending")
+    .lt("youtube_retry_count", MAX_RETRY)
+    .order("ended_at", { ascending: true })
+    .limit(1);
+  if (error) {
+    console.error("[archive] select failed:", error.message);
+    process.exit(1);
+  }
+  if (!rows || rows.length === 0) {
+    log("no pending");
+    return;
+  }
+  const b = rows[0];
+  const retry = b.youtube_retry_count || 0;
+
+  // 2. 適格性（¥500チーム + 自動アーカイブON + YouTube連携済み）
+  const { data: prof } = await admin
+    .from("profiles")
+    .select(
+      "id, plan, youtube_auto_archive, youtube_access_token, youtube_refresh_token",
+    )
+    .eq("id", b.broadcaster_id)
+    .single();
+  const eligible =
+    prof &&
+    prof.plan === "team" &&
+    prof.youtube_auto_archive !== false &&
+    !!prof.youtube_refresh_token;
+  if (!eligible) {
+    await setStatus(b.id, {
+      youtube_upload_status: "cancelled",
+      youtube_upload_error: "not eligible (plan/auto_archive/youtube link)",
+    });
+    log("cancelled (not eligible):", b.share_code);
+    return;
+  }
+
+  // 3. 録画ファイル
+  const rec = findRecording(b.share_code);
+  if (!rec) {
+    const endedMs = b.ended_at ? Date.parse(b.ended_at) : 0;
+    const ageMs = endedMs ? Date.now() - endedMs : Infinity;
+    if (ageMs > RECORDING_WAIT_MS || retry >= MAX_RETRY - 1) {
+      await setStatus(b.id, {
+        youtube_upload_status: "failed",
+        youtube_upload_error: "recording not found (predates recording or lost)",
+        youtube_retry_count: retry,
+      });
+    } else {
+      await setStatus(b.id, {
+        youtube_upload_status: "pending",
+        youtube_retry_count: retry + 1,
+        youtube_upload_error: "recording not found yet (finalizing?)",
+      });
+    }
+    log(
+      "recording not found:",
+      b.share_code,
+      `age=${ageMs === Infinity ? "?" : Math.round(ageMs / 60000) + "min"}`,
+    );
+    return;
+  }
+
+  // 4. 楽観排他で uploading
+  const { data: claimed } = await admin
+    .from("broadcasts")
+    .update({
+      youtube_upload_status: "uploading",
+      youtube_upload_started_at: new Date().toISOString(),
+    })
+    .eq("id", b.id)
+    .or("youtube_upload_status.is.null,youtube_upload_status.eq.pending")
+    .select("id")
+    .maybeSingle();
+  if (!claimed) {
+    log("claimed by another tick:", b.share_code);
+    return;
+  }
+
+  log("processing", b.share_code, `${(rec.size / 1e6).toFixed(0)}MB`);
+  try {
+    const oauth = await getOAuthClient(
+      prof.youtube_refresh_token,
+      prof.youtube_access_token,
+      prof.id,
+    );
+    // ③ スコア焼き込み（失敗時は raw fallback）
+    let finalPath = rec.p;
+    let burnCleanup = [];
+    try {
+      const burned = await burnScoreboard(rec.p, b);
+      finalPath = burned.path;
+      burnCleanup = burned.cleanup;
+    } catch (e) {
+      log("scoreboard burn failed -> raw upload:", String(e).slice(0, 300));
+      finalPath = rec.p;
+    }
+    const videoId = await uploadToYouTube(finalPath, b, oauth);
+    await setStatus(b.id, {
+      youtube_upload_status: "completed",
+      youtube_video_id: videoId,
+      youtube_upload_completed_at: new Date().toISOString(),
+      youtube_upload_error: null,
+    });
+    // 後始末: 焼き込み一時物 + ローカル録画（YouTube unlisted が正本）
+    for (const c of burnCleanup) {
+      try {
+        fs.rmSync(c, { recursive: true, force: true });
+      } catch {
+        /* noop */
+      }
+    }
+    try {
+      fs.rmSync(path.join(RECORDINGS_DIR, "live", b.share_code), {
+        recursive: true,
+        force: true,
+      });
+    } catch (e) {
+      log("local cleanup failed (ignored):", String(e));
+    }
+    log("completed", b.share_code, "->", videoId);
+  } catch (err) {
+    const c = classify(err);
+    log("upload failed", b.share_code, c.type, c.msg);
+    const retryable = c.type === "retry" || c.type === "auth-refresh";
+    if (retryable && retry < MAX_RETRY - 1) {
+      await setStatus(b.id, {
+        youtube_upload_status: "pending",
+        youtube_retry_count: retry + 1,
+        youtube_upload_error: c.msg.slice(0, 500),
+      });
+    } else {
+      await setStatus(b.id, {
+        youtube_upload_status: "failed",
+        youtube_upload_error: (c.type === "token-revoked"
+          ? c.msg + " (再連携が必要です)"
+          : c.msg
+        ).slice(0, 500),
+        youtube_retry_count: retry,
+      });
+    }
+  }
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((e) => {
+    console.error("[archive] fatal", e);
+    process.exit(1);
+  });
