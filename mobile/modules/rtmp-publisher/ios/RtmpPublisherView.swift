@@ -102,12 +102,13 @@ class RtmpPublisherView: ExpoView {
     else { return }
     switch type {
     case .began:
-      audioSource?.stop()
+      // 実マイクは使えなくなるが、無音を流し続けてストリーム(エンコーダ/多重化)を生かす＝映像継続。
+      audioSource?.beginInterruption()
     case .ended:
       let optRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
       if AVAudioSession.InterruptionOptions(rawValue: optRaw).contains(.shouldResume) {
         try? AVAudioSession.sharedInstance().setActive(true)
-        audioSource?.start()
+        audioSource?.endInterruption() // 無音を止めて実マイクへ復帰
       }
     @unknown default:
       break
@@ -339,18 +340,23 @@ class RtmpPublisherView: ExpoView {
 final class AudioEngineSource: @unchecked Sendable {
   private var engine = AVAudioEngine()
   private var running = false
+  private var lastFormat: AVAudioFormat?
+  private var silenceTimer: DispatchSourceTimer?
   private let onBuffer: @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void
 
   init(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void) {
     self.onBuffer = onBuffer
   }
 
+  // 通常配信: 実マイクをタップして配信に供給。
   func start() {
+    stopSilence()
     if running { return }
     engine = AVAudioEngine()
     let input = engine.inputNode
     let fmt = input.inputFormat(forBus: 0)
     guard fmt.channelCount > 0, fmt.sampleRate > 0 else { return }
+    lastFormat = fmt
     let cb = onBuffer
     input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { buffer, when in
       cb(buffer, when)
@@ -364,10 +370,61 @@ final class AudioEngineSource: @unchecked Sendable {
     }
   }
 
+  // 着信(.began): 実マイクは使えないので停止し、代わりに「無音」を流し続けて
+  // ストリーム(エンコーダ/多重化)を生かす＝映像が止まらない（着信継続の核心）。
+  func beginInterruption() {
+    guard running else { return } // 配信(タップ)中でなければ何もしない
+    engine.stop()
+    engine.inputNode.removeTap(onBus: 0)
+    running = false
+    startSilence()
+  }
+
+  // 着信終了(.ended): 無音を止めて実マイクへ復帰（音声自動復帰）。
+  func endInterruption() {
+    let wasSilencing = silenceTimer != nil
+    stopSilence()
+    if wasSilencing { start() }
+  }
+
   func stop() {
+    stopSilence()
     if !running { return }
     engine.stop()
     engine.inputNode.removeTap(onBus: 0)
     running = false
+  }
+
+  // 直近の音声フォーマットで無音バッファを 20ms ごとに append し続ける（着信中の継続用）。
+  private func startSilence() {
+    if silenceTimer != nil { return }
+    let sampleRate = lastFormat?.sampleRate ?? 48000
+    let channels = lastFormat?.channelCount ?? 1
+    guard
+      let fmt = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channels)
+    else { return }
+    let frames = AVAudioFrameCount(max(1.0, sampleRate * 0.02)) // 20ms
+    let cb = onBuffer
+    let timer = DispatchSource.makeTimerSource(
+      queue: DispatchQueue.global(qos: .userInitiated)
+    )
+    timer.schedule(deadline: .now(), repeating: .milliseconds(20))
+    timer.setEventHandler {
+      guard let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frames) else { return }
+      buf.frameLength = frames
+      if let f = buf.floatChannelData {
+        for c in 0..<Int(fmt.channelCount) {
+          memset(f[c], 0, Int(frames) * MemoryLayout<Float>.size)
+        }
+      }
+      cb(buf, AVAudioTime(hostTime: mach_absolute_time()))
+    }
+    timer.resume()
+    silenceTimer = timer
+  }
+
+  private func stopSilence() {
+    silenceTimer?.cancel()
+    silenceTimer = nil
   }
 }
