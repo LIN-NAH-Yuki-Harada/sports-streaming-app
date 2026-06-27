@@ -19,6 +19,9 @@ class RtmpPublisherView: ExpoView {
   private var session: (any Session)?
   private var readyStateTask: Task<Void, Never>?
   private var interruptTask: Task<Void, Never>?
+  // 音声を映像と別キャプチャ(AVAudioEngine)で取得するための音声ソース。
+  // capture session を映像専用にして着信で映像が止まらないようにするため（着信継続）。
+  private var audioSource: AudioEngineSource?
 
   // Props（JS から設定）
   var streamUrl: String?
@@ -88,17 +91,26 @@ class RtmpPublisherView: ExpoView {
     }
   }
 
-  // 通話終了(.ended .shouldResume)時に audio session を再有効化（音声 route 復帰の確実化）。
+  // 着信(.began)=音声HWが電話に占有される → 音声エンジン停止（音声のみ無音。映像は capture 専用化で継続）。
+  // 通話終了(.ended .shouldResume)=audio session 再有効化＋音声エンジン再起動で音声だけ自動復帰
+  //   （映像は音声と別キャプチャなので、着信中も通話後も無関係に流れ続ける）。
   @objc private func handleAudioInterruption(_ note: Notification) {
     guard
       let info = note.userInfo,
       let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-      let type = AVAudioSession.InterruptionType(rawValue: raw),
-      type == .ended
+      let type = AVAudioSession.InterruptionType(rawValue: raw)
     else { return }
-    let optRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-    if AVAudioSession.InterruptionOptions(rawValue: optRaw).contains(.shouldResume) {
-      try? AVAudioSession.sharedInstance().setActive(true)
+    switch type {
+    case .began:
+      audioSource?.stop()
+    case .ended:
+      let optRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+      if AVAudioSession.InterruptionOptions(rawValue: optRaw).contains(.shouldResume) {
+        try? AVAudioSession.sharedInstance().setActive(true)
+        audioSource?.start()
+      }
+    @unknown default:
+      break
     }
   }
 
@@ -138,8 +150,19 @@ class RtmpPublisherView: ExpoView {
         }
       }
     }
-    try? await mixer.attachAudio(AVCaptureDevice.default(for: .audio))
+    // ★着信継続: 音声は capture session に attach しない（映像専用）。音声+映像を同一セッションに
+    //   同居させると、着信で音声HW(audioDeviceInUseByAnotherClient)が奪われた時にセッションごと
+    //   中断され映像も止まる。映像専用セッションは音声HWに依存しないので着信に巻き込まれない。
+    //   音声は AVAudioEngine で別取得し mixer.append で供給する（HaishinKit Example の .audioEngine 構成）。
     await mixer.addOutput(mtView)
+    // 音声ソースを用意（self を @Sendable クロージャに捕えないよう mixer をローカルへ）。
+    // ※ automaticallyConfiguresApplicationAudioSession は既定 true のまま（HaishinKit Example の
+    //   .audioEngine 構成に合わせる）。AudioSession のカテゴリ/activate は startStreaming で行う。
+    // start() は AudioSession を activate する startStreaming 側で呼ぶ（engine.start は activate 後が安全）。
+    let mixerForAudio = self.mixer
+    audioSource = AudioEngineSource { buffer, when in
+      Task { await mixerForAudio.append(buffer, when: when) }
+    }
 
     // passthrough（既定）＝カメラの capture バッファをそのまま出力する経路。
     // スコアは視聴側 Web CSS オーバーレイに移したので端末 GPU 合成(offscreen)は不要。
@@ -253,6 +276,8 @@ class RtmpPublisherView: ExpoView {
       vs.expectedFrameRate = fps
       try await stream.setVideoSettings(vs)
       await mixer.addOutput(stream)
+      // 音声エンジン開始（AudioSession activate 後・stream 配線後）。映像とは独立した音声経路。
+      audioSource?.start()
 
       readyStateTask?.cancel()
       readyStateTask = Task { [weak self] in
@@ -278,6 +303,7 @@ class RtmpPublisherView: ExpoView {
   }
 
   private func stopStreaming() async {
+    audioSource?.stop()
     readyStateTask?.cancel()
     readyStateTask = nil
     if let session {
@@ -300,6 +326,48 @@ class RtmpPublisherView: ExpoView {
   deinit {
     readyStateTask?.cancel()
     interruptTask?.cancel()
+    audioSource?.stop()
     NotificationCenter.default.removeObserver(self)
+  }
+}
+
+// 音声を AVCaptureSession から切り離し AVAudioEngine で別取得する小クラス（着信継続のため）。
+// capture session を映像専用にすると着信(音声HW占有)で映像が止まらない代わりに、音声はここで取得して
+// mixer.append で配信に供給する。onBuffer は @Sendable（MainActor self を捕捉しない）。
+// start()/stop() は MainActor から呼ぶ前提（engine/running の直列化）。start ごとに engine を新規化し
+// 通話後の stale を回避。マイク未使用可能時(着信直後等)は installTap せず音声なしで継続（クラッシュ回避）。
+final class AudioEngineSource: @unchecked Sendable {
+  private var engine = AVAudioEngine()
+  private var running = false
+  private let onBuffer: @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void
+
+  init(onBuffer: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void) {
+    self.onBuffer = onBuffer
+  }
+
+  func start() {
+    if running { return }
+    engine = AVAudioEngine()
+    let input = engine.inputNode
+    let fmt = input.inputFormat(forBus: 0)
+    guard fmt.channelCount > 0, fmt.sampleRate > 0 else { return }
+    let cb = onBuffer
+    input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { buffer, when in
+      cb(buffer, when)
+    }
+    engine.prepare()
+    do {
+      try engine.start()
+      running = true
+    } catch {
+      // 音声のみ失敗。映像配信は継続する。
+    }
+  }
+
+  func stop() {
+    if !running { return }
+    engine.stop()
+    engine.inputNode.removeTap(onBus: 0)
+    running = false
   }
 }
