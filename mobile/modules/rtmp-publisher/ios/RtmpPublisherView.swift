@@ -340,7 +340,7 @@ class RtmpPublisherView: ExpoView {
 //   - 配信への入口は AsyncStream の continuation 一本のみ。実マイク tap と無音タイマーは
 //     beginInterruption で排他切替＝同時に yield することはない（二重供給なし）。
 //   - 取り出しは単一の consumerTask が FIFO で1個ずつ await append＝順序保証・並列appendなし。
-//   - bufferingNewest(8) で有界化＝コンシューマが遅れても古いバッファを捨てるだけで遅延が増え続けない。
+//   - unbounded＝音声を捨てない（捨てると多重化が音声待ちで映像が止まる）。append は軽量で追いつくため積み上がらない。
 //   - start は running 中なら何もしない＋毎回 engine 新規化＝同一バスへ二重 installTap しない。
 //   - dispose() で consumer も終了＝view 破棄/再接続(remount)で古い経路が残らない。
 // start()/stop()/begin/endInterruption は MainActor から呼ぶ前提（engine/running/timer の直列化）。
@@ -354,8 +354,11 @@ final class AudioEngineSource: @unchecked Sendable {
 
   init(append: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) async -> Void) {
     var cont: AsyncStream<(AVAudioPCMBuffer, AVAudioTime)>.Continuation!
+    // ★unbounded＝音声バッファを捨てない。有界(bufferingNewest)だと高負荷時に音声が欠落し、
+    //   多重化が音声待ちになって映像まで止まる（着信時の停止と同じ機序）。append は軽量で
+    //   コンシューマが追いつくため実際に積み上がらない＝前の動作実績ある「捨てない」挙動と同じ。
     let stream = AsyncStream<(AVAudioPCMBuffer, AVAudioTime)>(
-      bufferingPolicy: .bufferingNewest(8)
+      bufferingPolicy: .unbounded
     ) { cont = $0 }
     self.continuation = cont
     // 単一コンシューマが FIFO で1個ずつ append（順序保証・並列appendなし・積み上がりなし）。
