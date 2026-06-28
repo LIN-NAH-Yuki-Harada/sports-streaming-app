@@ -1069,6 +1069,9 @@ export function BroadcastScreen() {
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
+        // iOS: チーム名入力時にキーボードが入力欄に被らないよう、キーボード分の余白を自動確保し
+        // フォーカス中の入力欄をキーボードの上へスクロールして見えるようにする。
+        automaticallyAdjustKeyboardInsets={true}
       >
         <Text style={styles.title}>LIVE SPOtCH 配信</Text>
 
@@ -1687,8 +1690,10 @@ function RtmpLiveView(
         active={true}
         videoWidth={1280}
         videoHeight={720}
-        videoBitrate={6_000_000}
-        fps={60}
+        // 4G/5G(セルラー)前提。上限3.5Mbpsから帯域に応じてネイティブ側がアダプティブに調整。
+        // 6M/60fps固定は4Gに過大で、バースト化(定期フリーズ)・再接続(録画分割)・発熱の原因だった。
+        videoBitrate={3_500_000}
+        fps={30}
         cameraPosition="back"
         scoreboardText={scoreboardText}
         // 端末焼き込み(プレーンテキスト)はOFF。視聴側で綺麗な CSS オーバーレイ

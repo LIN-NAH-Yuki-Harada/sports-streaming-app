@@ -280,6 +280,14 @@ class RtmpPublisherView: ExpoView {
       // 音声エンジン開始（AudioSession activate 後・stream 配線後）。映像とは独立した音声経路。
       audioSource?.start()
 
+      // アダプティブビットレート：上り帯域(4G/5G)に応じて自動調整する。
+      // 帯域不足時は videoBitrate を実効スループットまで下げ（必要ならフレームも間引き）、
+      // 回復したら段階的に上限(videoBitrate)へ戻す。＝弱い4Gでも送信がバースト化せず、
+      // 視聴側の定期フリーズ・録画分割・発熱を抑える（HaishinKit組み込み戦略）。
+      await stream.setBitRateStrategy(
+        StreamVideoAdaptiveBitRateStrategy(mamimumVideoBitrate: videoBitrate)
+      )
+
       readyStateTask?.cancel()
       readyStateTask = Task { [weak self] in
         guard let self else { return }
