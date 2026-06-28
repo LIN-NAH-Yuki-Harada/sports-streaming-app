@@ -728,13 +728,15 @@ export function BroadcastScreen() {
   useEffect(() => {
     if (phase !== "live" || plan !== "free") return;
     if (trialRemainingAtStart - elapsed <= 0) {
+      // iOS は Apple 3.1.1 準拠で外部Web決済へ誘導しない（中立メッセージ＋アプリ内ペイウォール）。
       finishLive(
         Platform.OS === "ios"
-          ? "無料体験の時間（10分）が終了しました。引き続きのご利用は Web 版（live-spotch.com）でご確認ください。"
+          ? "無料体験の時間（10分）が終了しました。プランのアップグレードで続けてご利用いただけます。"
           : "無料体験の時間（10分）が終了しました。続けるには有料プランへ。",
       );
+      if (Platform.OS === "ios") navigation.navigate("Paywall");
     }
-  }, [phase, plan, trialRemainingAtStart, elapsed, finishLive]);
+  }, [phase, plan, trialRemainingAtStart, elapsed, finishLive, navigation]);
 
   // YouTube ID 読み戻し: live/start の応答が電波で届かなくても、サーバーがDBに書く
   // live_youtube_broadcast_id をポーリングして取得し、共有リンク/表示を確実に出す。
