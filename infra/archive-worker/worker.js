@@ -305,14 +305,33 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
     "-r", "30",
     "-af", "aresample=async=1:first_pts=0",
     "-c:a", "aac",
+    "-ar", "48000",
+    "-ac", "2",
     "-movflags", "+faststart",
     outPath,
   );
   log(
     `seg${idx}: burning scoreboard SVG (${segs.length} score segments, ${w}x${h}, dur ${Math.round(durationMs / 1000)}s)`,
   );
-  await spawnP("ffmpeg", args);
-  return { path: outPath, scored: true };
+  try {
+    await spawnP("ffmpeg", args);
+    return { path: outPath, scored: true };
+  } catch (e) {
+    // 焼き込み失敗（短い断片のPNG生成失敗等）でも、生のまま返さず必ず canonical に正規化する。
+    // 生(元params)のまま連結に渡すと、焼き込み済(libx264)セグメントとparam不一致で連結が
+    // 境界で打ち切られる（seg1を落として2秒になる事象）。オーバーレイ無しで同一paramsに揃える。
+    log(`seg${idx}: burn failed -> normalize without overlay: ${String(e).slice(0, 120)}`);
+    await spawnP("ffmpeg", [
+      "-y", "-i", recPath,
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+      "-pix_fmt", "yuv420p", "-r", "30",
+      "-af", "aresample=async=1:first_pts=0",
+      "-c:a", "aac", "-ar", "48000", "-ac", "2",
+      "-movflags", "+faststart",
+      outPath,
+    ]);
+    return { path: outPath, scored: false };
+  }
 }
 
 // 複数の mp4 を1本に連結する。concat demuxer で繋ぎ、必ずデコード→CFR30で再エンコードする。
