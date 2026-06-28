@@ -299,7 +299,12 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
     "-preset", "veryfast",
     "-crf", "23",
     "-pix_fmt", "yuv420p",
-    "-c:a", "copy",
+    // 固定フレームレート(CFR 30)に正規化。配信側アダプティブが可変fpsにすると
+    // 再生不可/尺崩れになるため、ここで30fps一定に焼き直す。音声も再エンコード＋
+    // aresample で映像タイムラインに同期（着信中の無音区間のズレも吸収）。
+    "-r", "30",
+    "-af", "aresample=async=1:first_pts=0",
+    "-c:a", "aac",
     "-movflags", "+faststart",
     outPath,
   );
@@ -310,37 +315,38 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
   return { path: outPath, scored: true };
 }
 
-// ffmpeg concat demuxer で複数の mp4 を1本に連結する。
-// 全て同じ h264/aac で出るので -c copy。失敗時は再エンコードで fallback。
+// 複数の mp4 を1本に連結する。各セグメントをデコード→正規化(1280x720 / 30fps CFR /
+// yuv420p / 48kHz)→concatフィルタで再タイムして再エンコードする。
+// ★ -c copy は使わない：配信側アダプティブで可変fpsになった録画や、焼き込み失敗で生のまま
+//   混ざったセグメントを -c copy で繋ぐと尺が壊れる/再生不可になる（実際に25分配信が416秒に
+//   切り詰められた）。filter_complex concat ならfps混在・可変でも崩れず1本の正常動画になる。
 async function concatSegments(paths, workDir) {
-  const listPath = path.join(workDir, "list.txt");
-  // concat demuxer の list は file '...' 形式。シングルクォートは '\'' でエスケープ。
-  const listBody = paths
-    .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
-    .join("\n");
-  fs.writeFileSync(listPath, listBody + "\n");
   const outPath = path.join(workDir, "concat.mp4");
-  const baseArgs = ["-y", "-f", "concat", "-safe", "0", "-i", listPath];
-  try {
-    await spawnP("ffmpeg", [
-      ...baseArgs,
-      "-c", "copy",
-      "-movflags", "+faststart",
-      outPath,
-    ]);
-  } catch (e) {
-    log("concat -c copy failed -> re-encode fallback:", String(e).slice(0, 200));
-    await spawnP("ffmpeg", [
-      ...baseArgs,
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "23",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "aac",
-      "-movflags", "+faststart",
-      outPath,
-    ]);
-  }
+  const inputs = [];
+  paths.forEach((p) => inputs.push("-i", p));
+  // 各入力を正規化してから concat（解像度/fps/pix_fmt/SAR/音声サンプルレートを揃える）。
+  let fc = "";
+  paths.forEach((_, i) => {
+    fc += `[${i}:v:0]scale=1280:720,fps=30,format=yuv420p,setsar=1[v${i}];`;
+    fc += `[${i}:a:0]aresample=48000:async=1:first_pts=0[a${i}];`;
+  });
+  const cat = paths.map((_, i) => `[v${i}][a${i}]`).join("");
+  fc += `${cat}concat=n=${paths.length}:v=1:a=1[v][a]`;
+  await spawnP("ffmpeg", [
+    "-y",
+    ...inputs,
+    "-filter_complex", fc,
+    "-map", "[v]",
+    "-map", "[a]",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "23",
+    "-pix_fmt", "yuv420p",
+    "-r", "30",
+    "-c:a", "aac",
+    "-movflags", "+faststart",
+    outPath,
+  ]);
   return outPath;
 }
 
