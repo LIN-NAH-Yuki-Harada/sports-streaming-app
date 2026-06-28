@@ -334,27 +334,33 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
   }
 }
 
-// 複数の mp4 を1本に連結する。concat demuxer で繋ぎ、必ずデコード→CFR30で再エンコードする。
-// ★ -c copy は使わない：可変fps録画や混在セグメントを copy で繋ぐと尺が壊れる/再生不可になる
-//   （25分配信が416秒に切り詰められた実績）。再エンコードなら全フレームを読み直すので尺が正しい。
-// ★ filter_complex は使わない：微小/不完全な再接続断片(数秒)で stream specifier が
-//   "matches no streams" になり全体が失敗したため、よりlenientな demuxer に統一する。
+// 複数の mp4 を1本に連結する。各入力を独立にデコード→正規化(1280x720/30fps/yuv420p/SAR1/
+// 48kHz)→concatフィルタで再タイムして再エンコードする。
+// ★ -c copy も concat demuxer も使わない：パラメータ/タイムスタンプ不一致で尺が打ち切られる
+//   （25分が4秒に切れる事象）。filter_complex は各入力を独立にデコードして連結するので、
+//   別々にエンコードされたセグメントでも崩れない。極小/壊れた断片は呼び出し側(3-2)で除外済み。
 async function concatSegments(paths, workDir) {
-  const listPath = path.join(workDir, "list.txt");
-  // concat demuxer の list は file '...' 形式。シングルクォートは '\'' でエスケープ。
-  const listBody = paths
-    .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
-    .join("\n");
-  fs.writeFileSync(listPath, listBody + "\n");
   const outPath = path.join(workDir, "concat.mp4");
+  const inputs = [];
+  paths.forEach((p) => inputs.push("-i", p));
+  let fc = "";
+  paths.forEach((_, i) => {
+    fc += `[${i}:v:0]scale=1280:720,fps=30,format=yuv420p,setsar=1[v${i}];`;
+    fc += `[${i}:a:0]aresample=48000:async=1:first_pts=0[a${i}];`;
+  });
+  const cat = paths.map((_, i) => `[v${i}][a${i}]`).join("");
+  fc += `${cat}concat=n=${paths.length}:v=1:a=1[v][a]`;
   await spawnP("ffmpeg", [
-    "-y", "-f", "concat", "-safe", "0", "-i", listPath,
+    "-y",
+    ...inputs,
+    "-filter_complex", fc,
+    "-map", "[v]",
+    "-map", "[a]",
     "-c:v", "libx264",
     "-preset", "veryfast",
     "-crf", "23",
     "-pix_fmt", "yuv420p",
     "-r", "30",
-    "-af", "aresample=async=1:first_pts=0",
     "-c:a", "aac",
     "-movflags", "+faststart",
     outPath,
@@ -413,7 +419,7 @@ async function main() {
   }
 
   // 3. 録画ファイル（4G再接続で複数セグメントに分割されている場合がある → 全部取る）
-  const recs = findRecordings(b.share_code);
+  let recs = findRecordings(b.share_code);
   if (recs.length === 0) {
     const endedMs = b.ended_at ? Date.parse(b.ended_at) : 0;
     const ageMs = endedMs ? Date.now() - endedMs : Infinity;
@@ -436,6 +442,25 @@ async function main() {
       `age=${ageMs === Infinity ? "?" : Math.round(ageMs / 60000) + "min"}`,
     );
     return;
+  }
+
+  // 3-2. 極小セグメント(数秒)を除外。4G再接続でできる断片はキーフレーム前から始まり壊れている
+  //      ことがあり、連結を破壊する（filter_complexで stream 不在 / demuxerで尺打ち切り）。
+  //      5秒未満は捨てる。全部短い極端ケースは最長1本だけ残す（空にしない）。
+  {
+    const MIN_SEG_SEC = 5;
+    const withDur = [];
+    for (const r of recs) {
+      withDur.push({ r, d: await ffprobeDurationSec(r.p).catch(() => 0) });
+    }
+    let kept = withDur.filter((x) => x.d >= MIN_SEG_SEC).map((x) => x.r);
+    if (kept.length === 0 && withDur.length > 0) {
+      kept = [withDur.sort((a, b) => b.d - a.d)[0].r];
+    }
+    if (kept.length !== recs.length) {
+      log(`dropped ${recs.length - kept.length} tiny segment(s) (<${MIN_SEG_SEC}s)`);
+    }
+    recs = kept;
   }
 
   // 4. 楽観排他で uploading
