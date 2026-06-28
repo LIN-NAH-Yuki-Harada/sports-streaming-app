@@ -315,34 +315,27 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
   return { path: outPath, scored: true };
 }
 
-// 複数の mp4 を1本に連結する。各セグメントをデコード→正規化(1280x720 / 30fps CFR /
-// yuv420p / 48kHz)→concatフィルタで再タイムして再エンコードする。
-// ★ -c copy は使わない：配信側アダプティブで可変fpsになった録画や、焼き込み失敗で生のまま
-//   混ざったセグメントを -c copy で繋ぐと尺が壊れる/再生不可になる（実際に25分配信が416秒に
-//   切り詰められた）。filter_complex concat ならfps混在・可変でも崩れず1本の正常動画になる。
+// 複数の mp4 を1本に連結する。concat demuxer で繋ぎ、必ずデコード→CFR30で再エンコードする。
+// ★ -c copy は使わない：可変fps録画や混在セグメントを copy で繋ぐと尺が壊れる/再生不可になる
+//   （25分配信が416秒に切り詰められた実績）。再エンコードなら全フレームを読み直すので尺が正しい。
+// ★ filter_complex は使わない：微小/不完全な再接続断片(数秒)で stream specifier が
+//   "matches no streams" になり全体が失敗したため、よりlenientな demuxer に統一する。
 async function concatSegments(paths, workDir) {
+  const listPath = path.join(workDir, "list.txt");
+  // concat demuxer の list は file '...' 形式。シングルクォートは '\'' でエスケープ。
+  const listBody = paths
+    .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
+    .join("\n");
+  fs.writeFileSync(listPath, listBody + "\n");
   const outPath = path.join(workDir, "concat.mp4");
-  const inputs = [];
-  paths.forEach((p) => inputs.push("-i", p));
-  // 各入力を正規化してから concat（解像度/fps/pix_fmt/SAR/音声サンプルレートを揃える）。
-  let fc = "";
-  paths.forEach((_, i) => {
-    fc += `[${i}:v:0]scale=1280:720,fps=30,format=yuv420p,setsar=1[v${i}];`;
-    fc += `[${i}:a:0]aresample=48000:async=1:first_pts=0[a${i}];`;
-  });
-  const cat = paths.map((_, i) => `[v${i}][a${i}]`).join("");
-  fc += `${cat}concat=n=${paths.length}:v=1:a=1[v][a]`;
   await spawnP("ffmpeg", [
-    "-y",
-    ...inputs,
-    "-filter_complex", fc,
-    "-map", "[v]",
-    "-map", "[a]",
+    "-y", "-f", "concat", "-safe", "0", "-i", listPath,
     "-c:v", "libx264",
     "-preset", "veryfast",
     "-crf", "23",
     "-pix_fmt", "yuv420p",
     "-r", "30",
+    "-af", "aresample=async=1:first_pts=0",
     "-c:a", "aac",
     "-movflags", "+faststart",
     outPath,
