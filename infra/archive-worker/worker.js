@@ -201,6 +201,22 @@ async function ffprobeWH(p) {
   }
 }
 
+// 音声トラックの有無を返す（正規化時に -af aresample を付けるか判定する）。
+async function ffprobeHasAudio(p) {
+  try {
+    const out = await spawnP("ffprobe", [
+      "-v", "error",
+      "-select_streams", "a",
+      "-show_entries", "stream=index",
+      "-of", "csv=p=0",
+      p,
+    ]);
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // 1セグメントにスコアボードを焼き込んだファイルパスを返す。イベント無し/失敗時は元(raw)。
 // workDir = このセグメント専用の一時ディレクトリ（中間生成物の置き場・呼び出し側で削除）。
 // idx = 同一配信内のセグメント番号（一時ファイル名の衝突回避用）。
@@ -341,12 +357,44 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
 //   別々にエンコードされたセグメントでも崩れない。極小/壊れた断片は呼び出し側(3-2)で除外済み。
 async function concatSegments(paths, workDir) {
   const outPath = path.join(workDir, "concat.mp4");
+
+  // ★ 各セグメントの音声有無を事前に調べる。4G再接続や着信で「音声トラックが無い
+  //   セグメント」が混ざると、全入力に [i:a:0] を要求する連結は ffmpeg が
+  //   「Stream specifier :a:0 matches no streams」で全失敗→アーカイブ0本になる。
+  //   音声が有るセグメントの音声は保持しつつ、欠落セグメントだけ無音(anullsrc)で
+  //   補って連結を必ず成立させる（全セグメント音声有りなら従来と同一グラフ）。
+  const meta = [];
+  for (const p of paths) {
+    meta.push({
+      p,
+      hasAudio: await ffprobeHasAudio(p),
+      dur: await ffprobeDurationSec(p),
+    });
+  }
+
   const inputs = [];
-  paths.forEach((p) => inputs.push("-i", p));
+  meta.forEach((m) => inputs.push("-i", m.p)); // 入力 0..N-1 = 実セグメント
+  // 音声欠落セグメント用の無音入力を後ろに足す（各セグメント尺に合わせる）。
+  const silenceIdx = {};
+  let nextIdx = paths.length;
+  meta.forEach((m, i) => {
+    if (!m.hasAudio) {
+      const d = m.dur > 0 ? m.dur : 1;
+      inputs.push(
+        "-f", "lavfi",
+        "-t", d.toFixed(3),
+        "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+      );
+      silenceIdx[i] = nextIdx;
+      nextIdx += 1;
+    }
+  });
+
   let fc = "";
-  paths.forEach((_, i) => {
+  meta.forEach((m, i) => {
     fc += `[${i}:v:0]scale=1280:720,fps=30,format=yuv420p,setsar=1[v${i}];`;
-    fc += `[${i}:a:0]aresample=48000:async=1:first_pts=0[a${i}];`;
+    const aSrc = m.hasAudio ? `${i}:a:0` : `${silenceIdx[i]}:a:0`;
+    fc += `[${aSrc}]aresample=48000:async=1:first_pts=0[a${i}];`;
   });
   const cat = paths.map((_, i) => `[v${i}][a${i}]`).join("");
   fc += `${cat}concat=n=${paths.length}:v=1:a=1[v][a]`;
@@ -365,6 +413,44 @@ async function concatSegments(paths, workDir) {
     "-movflags", "+faststart",
     outPath,
   ]);
+  return outPath;
+}
+
+// ★ アップロード直前に必ず通す「YouTube安全化」正規化。
+// 配信側アダプティブビットレートで録画が可変fps/壊れたPTSになり得る。raw無加工や
+// 不十分な正規化のままアップすると YouTube が「処理を中止しました（この動画は処理されません
+// でした）」で再生不可になる。raw/焼き込み/連結いずれの結果でも最終的に
+// CFR30・H.264 High・yuv420p・AAC48k/2ch・faststart・PTS再生成 に揃える。
+// 音声が無い録画でも落ちないよう、音声トラックがある時だけ音声処理を付ける。
+async function canonicalize(inputPath, outPath) {
+  const hasAudio = await ffprobeHasAudio(inputPath);
+  const args = [
+    "-y",
+    "-fflags", "+genpts", // 非単調/欠落PTSを再生成（RTMP再接続録画対策）
+    "-i", inputPath,
+    "-map", "0:v:0",
+    // 奇数寸法を偶数化（yuv420p要件・"width not divisible by 2"でのffmpeg失敗を防ぐ防御）。
+    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+    "-vsync", "cfr", // 出力を固定フレームレート化（可変fpsをYouTube処理可能に）
+    "-r", "30",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "23",
+    "-profile:v", "high",
+    "-level", "4.1",
+    "-pix_fmt", "yuv420p",
+  ];
+  if (hasAudio) {
+    args.push(
+      "-map", "0:a:0",
+      "-af", "aresample=async=1:first_pts=0",
+      "-c:a", "aac",
+      "-ar", "48000",
+      "-ac", "2",
+    );
+  }
+  args.push("-max_muxing_queue_size", "1024", "-movflags", "+faststart", outPath);
+  await spawnP("ffmpeg", args);
   return outPath;
 }
 
@@ -534,7 +620,23 @@ async function main() {
       );
     }
 
-    const videoId = await uploadToYouTube(finalPath, b, oauth);
+    // ★ アップ直前に必ず YouTube 安全プロファイルへ正規化（可変fps録画の
+    //   「処理を中止しました」根治）。正規化に失敗したら raw を上げず例外で retry に倒す
+    //   （壊れた動画を作って元録画を消す事故を防ぐ）。
+    let uploadPath;
+    try {
+      uploadPath = await canonicalize(finalPath, path.join(workDir, "final.mp4"));
+    } catch (e) {
+      throw new Error(`canonicalize failed: ${String(e).slice(0, 200)}`);
+    }
+    // アップ前の検証: 中身が壊れていないか（尺>0）。0なら上げずに例外（completed化＋元録画削除を防ぐ）。
+    const finalDur = await ffprobeDurationSec(uploadPath);
+    if (!finalDur || finalDur < 1) {
+      throw new Error(`normalized output invalid (duration=${finalDur}s) — not uploading`);
+    }
+    log(`canonicalized & verified: ${Math.round(finalDur)}s -> uploading`);
+
+    const videoId = await uploadToYouTube(uploadPath, b, oauth);
     await setStatus(b.id, {
       youtube_upload_status: "completed",
       youtube_video_id: videoId,
