@@ -115,7 +115,11 @@ export function PaywallScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
-      <Pressable onPress={close} style={styles.closeBtn} hitSlop={12}>
+      <Pressable
+        onPress={close}
+        style={[styles.closeBtn, { top: insets.top + 8 }]}
+        hitSlop={16}
+      >
         <Text style={styles.closeTxt}>×</Text>
       </Pressable>
       <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 32 }]}>
@@ -188,7 +192,7 @@ export function PaywallScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
-  closeBtn: { position: "absolute", right: 12, top: 8, zIndex: 10, padding: 8 },
+  closeBtn: { position: "absolute", right: 12, zIndex: 10, padding: 10 },
   closeTxt: { color: "#fff", fontSize: 30, lineHeight: 30 },
   scroll: { paddingHorizontal: 20, paddingTop: 36 },
   title: { color: "#fff", fontSize: 26, fontWeight: "800", textAlign: "center" },
