@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -166,8 +167,10 @@ export function PaywallScreen() {
         </Pressable>
 
         <Text style={styles.note}>
-          月額の自動更新サブスクリプションです。期間終了の24時間前までに解約しない限り自動更新され、
-          Apple ID に課金されます。解約は iOS の「設定 &gt; Apple ID &gt; サブスクリプション」から行えます。
+          月額の自動更新サブスクリプションです。期間終了の24時間前までに解約しない限り自動更新されます。
+          {Platform.OS === "android"
+            ? "お支払いは Google アカウントに課金され、解約は Google Play ストアの「お支払いと定期購入 > 定期購入」から行えます。"
+            : "お支払いは Apple ID に課金され、解約は iOS の「設定 > Apple ID > サブスクリプション」から行えます。"}
         </Text>
         <View style={styles.links}>
           <Text style={styles.link} onPress={() => Linking.openURL(`${SITE_URL}/terms`)}>

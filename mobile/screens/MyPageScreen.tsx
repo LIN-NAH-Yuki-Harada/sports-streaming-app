@@ -184,33 +184,19 @@ export function MyPageScreen() {
               <Text style={styles.cardNote}>
                 {IS_IOS
                   ? "プランの解約・確認は iOS の「設定 > Apple ID > サブスクリプション」から行えます。"
-                  : "プランの変更・解約・お支払いはWebのマイページから行えます。"}
+                  : "プランの解約・確認は Google Play ストアの「お支払いと定期購入 > 定期購入」から行えます。"}
               </Text>
-              {/* iOS は Apple 準拠のアプリ内課金（IAP）で購入・変更（RevenueCat 経由）。
-                  Android は IAP 未対応のため従来どおり Web のプラン管理へ誘導する。 */}
-              {IS_IOS ? (
-                <Pressable
-                  style={styles.webButton}
-                  onPress={() => navigation.navigate("Paywall")}
-                >
-                  <Text style={styles.webButtonText}>
-                    {!profile?.plan || profile.plan === "free"
-                      ? "プランをアップグレード"
-                      : "プランを変更"}
-                  </Text>
-                </Pressable>
-              ) : (
-                <Pressable
-                  style={styles.webButton}
-                  onPress={() => openWeb("/mypage")}
-                >
-                  <Text style={styles.webButtonText}>
-                    {profile?.plan === "free"
-                      ? "プランを選ぶ（Webへ）"
-                      : "プラン管理（Webへ）"}
-                  </Text>
-                </Pressable>
-              )}
+              {/* iOS / Android ともにアプリ内課金（IAP）で購入・変更（RevenueCat 経由）。 */}
+              <Pressable
+                style={styles.webButton}
+                onPress={() => navigation.navigate("Paywall")}
+              >
+                <Text style={styles.webButtonText}>
+                  {!profile?.plan || profile.plan === "free"
+                    ? "プランをアップグレード"
+                    : "プランを変更"}
+                </Text>
+              </Pressable>
             </View>
 
             {/* YouTube 連携（状態表示のみ。連携/解除は Web へ） */}
@@ -254,20 +240,8 @@ export function MyPageScreen() {
               <Text style={styles.cardNote}>
                 連携・解除・同時配信のON/OFFは Web 版（live-spotch.com）のマイページから設定できます。
               </Text>
-              {/* iOS では /mypage（価格・決済を含む）へのタップ導線を出さない（3.1.1）。
-                  Android のみ Web 連携導線を出す。 */}
-              {IS_IOS ? null : (
-                <Pressable
-                  style={styles.webButtonGhost}
-                  onPress={() => openWeb("/mypage")}
-                >
-                  <Text style={styles.webButtonGhostText}>
-                    {youtubeLinked
-                      ? "連携設定を見る（Webへ）"
-                      : "YouTubeと連携する（Webへ）"}
-                  </Text>
-                </Pressable>
-              )}
+              {/* YouTube 連携は Web 版（live-spotch.com）で行う。iOS/Android とも
+                  アプリ内に /mypage（価格・決済を含む）への導線は置かない。 */}
             </View>
 
             {/* チーム管理 → チームタブ案内 ＋ Web 誘導 */}

@@ -358,16 +358,10 @@ export function BroadcastScreen() {
 
       // 無料プランで体験時間（10分）を使い切っている場合は開始させない
       if (currentPlan === "free" && trialRemainingAtStart <= 0) {
-        if (Platform.OS === "ios") {
-          // iOS はアプリ内課金（IAP）。配信は開始せずペイウォールを表示して購入を促す。
-          setMessage("無料体験（10分）が終了しています。プランの登録で続けてご利用いただけます。");
-          setBusy(false);
-          navigation.navigate("Paywall");
-          return;
-        }
-        // Android は IAP 未対応のため従来どおり（Web のプラン管理へ）。
-        setMessage("無料体験（10分）は終了しています。続けるには有料プランへの登録が必要です。");
+        // iOS / Android ともにアプリ内課金（IAP）。配信は開始せずペイウォールを表示して購入を促す。
+        setMessage("無料体験（10分）が終了しています。プランの登録で続けてご利用いただけます。");
         setBusy(false);
+        navigation.navigate("Paywall");
         return;
       }
 
@@ -414,7 +408,13 @@ export function BroadcastScreen() {
       // まず自前配信サーバー(ネイティブRTMP→MediaMTX＋端末スコア焼き込み)を試す。サーバーフラグ
       // (NEXT_PUBLIC_STREAM_SELFHOST) がOFF/未設定なら null が返るので、従来の LiveKit 経路へ
       // 自動フォールバックする（=本番が壊れない・サーバー側フラグ1つで全体切替）。
-      const stream = created.id ? await fetchStreamTarget(created.id) : null;
+      // RTMP 自前配信は iOS 専用モジュール（modules/rtmp-publisher = apple only）。
+      // Android はサーバーフラグに関わらず必ず LiveKit にフォールバックする
+      // （Android で RTMP を選ぶとネイティブビューが無くクラッシュするため）。
+      const stream =
+        created.id && Platform.OS === "ios"
+          ? await fetchStreamTarget(created.id)
+          : null;
       if (stream) {
         transportRef.current = "rtmp";
         endedRef.current = false;
@@ -728,13 +728,11 @@ export function BroadcastScreen() {
   useEffect(() => {
     if (phase !== "live" || plan !== "free") return;
     if (trialRemainingAtStart - elapsed <= 0) {
-      // iOS は Apple 3.1.1 準拠で外部Web決済へ誘導しない（中立メッセージ＋アプリ内ペイウォール）。
+      // iOS / Android ともにアプリ内課金（IAP）。中立メッセージ＋アプリ内ペイウォール。
       finishLive(
-        Platform.OS === "ios"
-          ? "無料体験の時間（10分）が終了しました。プランのアップグレードで続けてご利用いただけます。"
-          : "無料体験の時間（10分）が終了しました。続けるには有料プランへ。",
+        "無料体験の時間（10分）が終了しました。プランのアップグレードで続けてご利用いただけます。",
       );
-      if (Platform.OS === "ios") navigation.navigate("Paywall");
+      navigation.navigate("Paywall");
     }
   }, [phase, plan, trialRemainingAtStart, elapsed, finishLive, navigation]);
 
