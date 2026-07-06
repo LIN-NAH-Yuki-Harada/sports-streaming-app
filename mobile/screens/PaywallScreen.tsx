@@ -33,6 +33,11 @@ const TIERS: Record<string, { name: string; features: string[]; order: number }>
   },
 };
 
+// RevenueCat の product.identifier は、Google Play では "{subscriptionId}:{basePlanId}"
+// （例 "broadcaster_monthly:monthly"）の形式になる。iOS は ":" を含まないのでそのまま。
+// TIERS のキー（サブスクID）と突き合わせるため、":" より前の基本商品IDに正規化する。
+const tierKey = (identifier: string) => identifier.split(":")[0];
+
 export function PaywallScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -54,9 +59,11 @@ export function PaywallScreen() {
         const offerings = await Purchases.getOfferings();
         const pkgs = offerings.current?.availablePackages ?? [];
         const sorted = pkgs
-          .filter((p) => TIERS[p.product.identifier])
+          .filter((p) => TIERS[tierKey(p.product.identifier)])
           .sort(
-            (a, b) => TIERS[a.product.identifier].order - TIERS[b.product.identifier].order,
+            (a, b) =>
+              TIERS[tierKey(a.product.identifier)].order -
+              TIERS[tierKey(b.product.identifier)].order,
           );
         if (!cancelled) setPackages(sorted);
       } catch {
@@ -138,7 +145,7 @@ export function PaywallScreen() {
         )}
 
         {packages?.map((pkg) => {
-          const tier = TIERS[pkg.product.identifier];
+          const tier = TIERS[tierKey(pkg.product.identifier)];
           return (
             <View key={pkg.identifier} style={styles.card}>
               <Text style={styles.planName}>{tier.name}</Text>
