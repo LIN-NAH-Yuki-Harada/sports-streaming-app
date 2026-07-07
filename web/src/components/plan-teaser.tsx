@@ -15,7 +15,7 @@ const PLANS = [
     title: "無料",
     price: "¥0",
     subtitle: "視聴する人",
-    bullets: ["ライブ視聴", "1ヶ月以内のアーカイブ視聴"],
+    bullets: ["ライブ視聴", "アーカイブ視聴（チームプラン配信）"],
   },
   {
     key: "broadcaster" as const,
@@ -91,7 +91,7 @@ export function PlanTeaser({ contextLabel, highlight = "broadcaster" }: Props) {
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] md:text-xs text-[#e63946] font-bold leading-tight">
-            今ならクーポン <span className="font-mono">SPOT1W</span> で1週間無料
+            今ならクーポン <span className="font-mono">SPOT</span> で初月無料
           </p>
           <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
             配信者プラン・チームプランどちらもお試し可
@@ -100,7 +100,7 @@ export function PlanTeaser({ contextLabel, highlight = "broadcaster" }: Props) {
       </div>
 
       <Link
-        href="/pricing?promo=SPOT1W"
+        href="/pricing?promo=SPOT"
         className="mt-3 flex items-center justify-center gap-1 w-full bg-[#e63946] hover:bg-[#d62836] text-white text-sm font-semibold py-2.5 rounded-md transition"
       >
         プランを詳しく見る

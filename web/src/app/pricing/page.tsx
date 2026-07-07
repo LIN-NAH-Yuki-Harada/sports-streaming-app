@@ -317,7 +317,7 @@ function PricingPageInner() {
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="例: SPOT1W"
+                placeholder="例: SPOT"
                 value={promoInput}
                 onChange={(e) => {
                   setPromoInput(e.target.value.toUpperCase());
@@ -362,8 +362,8 @@ function PricingPageInner() {
               共有コードで配信・アーカイブを視聴。
             </p>
             <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-500 flex-1">
-              <li>✓ ライブ視聴</li>
-              <li>✓ 1ヶ月以内のアーカイブ視聴</li>
+              <li>✓ ライブ視聴（登録不要）</li>
+              <li>✓ アーカイブ視聴（チームプラン配信のYouTube限定公開）</li>
             </ul>
             <button
               disabled
@@ -438,8 +438,14 @@ function PricingPageInner() {
               <li>✓ チーム作成・メンバー招待</li>
               <li>✓ 試合スケジュール管理</li>
               <li>✓ 共有コードのチーム自動配布</li>
-              <li className="text-gray-500">🔜 YouTube Live 同時配信（自社プレイヤーと並行で YouTube にもリアルタイム push）</li>
-              <li className="text-gray-500">🔜 YouTube に自動アーカイブ（配信者ご自身のチャンネルに長期保存）</li>
+              <li className="text-gray-200 flex items-center gap-1.5 flex-wrap">
+                <span>✓ YouTube Live 同時配信（YouTube にもリアルタイム push）</span>
+                <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
+              </li>
+              <li className="text-gray-200 flex items-center gap-1.5 flex-wrap">
+                <span>✓ YouTube に自動アーカイブ（ご自身のチャンネルに長期保存）</span>
+                <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
+              </li>
               <li className="text-gray-500">🔜 リモコンでスコア操作（別端末から）</li>
               <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
             </ul>
