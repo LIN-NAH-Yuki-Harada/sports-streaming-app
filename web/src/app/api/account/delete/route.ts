@@ -26,6 +26,23 @@ export async function POST(request: Request) {
       }
     }
 
+    // アバター画像ファイルをStorageから削除
+    // （ユーザー削除のCASCADEはDBのprofiles行だけを消し、Storageの実ファイルは残るため、
+    //   ここで avatars/<user_id>/ 配下のファイルを明示的に削除する）
+    try {
+      const { data: avatarFiles } = await admin.storage
+        .from("avatars")
+        .list(user.id);
+      if (avatarFiles && avatarFiles.length > 0) {
+        await admin.storage
+          .from("avatars")
+          .remove(avatarFiles.map((f) => `${user.id}/${f.name}`));
+      }
+    } catch (e) {
+      console.error("Avatar storage cleanup error:", e);
+      // アバター削除に失敗しても退会は続行
+    }
+
     // Admin権限でユーザーを削除（CASCADE でプロフィール・チーム・配信も削除）
     const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
 

@@ -21,10 +21,11 @@ let cachedClient: EgressClient | null = null;
 let cachedRoomService: RoomServiceClient | null = null;
 
 /**
- * LiveKit env から HTTP RPC エンドポイント URL を構築する内部ヘルパ。
+ * LiveKit env から HTTP RPC エンドポイント URL を構築するヘルパ。
  * wss:// のクライアント URL を https:// に変換する。
+ * Egress / Ingress 双方のクライアント生成で共有する。
  */
-function buildLiveKitHttpUrl(): { httpUrl: string; apiKey: string; apiSecret: string } {
+export function buildLiveKitHttpUrl(): { httpUrl: string; apiKey: string; apiSecret: string } {
   const url = process.env.NEXT_PUBLIC_LIVEKIT_URL;
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;

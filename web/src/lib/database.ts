@@ -23,6 +23,11 @@ export type Profile = {
   stripe_subscription_id: string | null;
   subscription_status: string | null;
   current_period_end: string | null;
+  // Apple IAP 連携（RevenueCat 経由・2026-06-22追加）。iOSアプリ内課金。
+  // subscription_status / current_period_end / plan は Stripe と共有。
+  // 下記は「課金ソースが IAP である」ことの追跡用 内部列（クライアント非公開）。
+  iap_product_id: string | null;
+  iap_original_transaction_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -40,6 +45,13 @@ export type Broadcast = {
   home_sets: number;
   away_sets: number;
   set_results: { home: number; away: number }[];
+  // セットポイント/マッチポイント表示（配信者アプリが書き込み・null/未設定で非表示）
+  point_label?: string | null;
+  // 野球カウント（甲子園風 B/S/O＋走者・配信者アプリが書き込み・野球のみ）
+  balls?: number | null;
+  strikes?: number | null;
+  outs?: number | null;
+  runners?: { first?: boolean; second?: boolean; third?: boolean } | null;
   tournament: string | null;
   venue: string | null;
   period: string;
@@ -73,6 +85,13 @@ export type Broadcast = {
   live_started_at: string | null;
   live_ended_at: string | null;
   live_error: string | null;
+  // ネイティブ RTMP 配信（LiveKit Ingress）の ingress ID。配信終了時の破棄に使う内部列。
+  // クライアントには非公開（列レベル GRANT 対象外＝admin/service-role のみ参照）。
+  live_ingress_id: string | null;
+  // 自前配信サーバー(MediaMTX)の HLS 視聴 URL（/api/stream/provision が設定・2026-06-24追加）。
+  // 公開列（列レベル SELECT GRANT 済）だが、視聴プレイヤー対応 PR で BROADCAST_PUBLIC_COLUMNS に
+  // 追加するまで SELECT には含めない（migration 適用前に本番 SELECT を壊さないため）。
+  stream_playback_url: string | null;
 };
 
 // broadcasts テーブルからクライアント（anon/authenticated）でも取得できる公開列リスト。
@@ -81,7 +100,8 @@ export type Broadcast = {
 // youtube_video_id / youtube_upload_status は視聴 UI の YouTube iframe 切替判定に使う。
 export const BROADCAST_PUBLIC_COLUMNS =
   "id, share_code, broadcaster_id, team_id, sport, home_team, away_team, " +
-  "tournament, venue, home_score, away_score, home_sets, away_sets, period, " +
+  "tournament, venue, home_score, away_score, home_sets, away_sets, period, point_label, " +
+  "balls, strikes, outs, runners, " +
   "status, started_at, ended_at, scoreboard_burned_in, youtube_video_id, youtube_upload_status, " +
   "live_youtube_broadcast_id, live_status";
 
@@ -639,6 +659,25 @@ export async function getBroadcastByCode(
     return null;
   }
   return data as unknown as Broadcast;
+}
+
+// 自前配信サーバー(MediaMTX)の HLS 視聴 URL を単独取得する。
+// この列だけを別クエリで引くことで、migration 未適用の環境でも安全に null を返す
+// （stream_playback_url 列が無いと 42703 等の error → null → 従来 LiveKit 経路へフォールバック）。
+// これにより BROADCAST_PUBLIC_COLUMNS を変更せず＝既存の全 broadcast SELECT を壊さない。
+export async function getStreamPlaybackUrl(
+  shareCode: string,
+): Promise<string | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("stream_playback_url")
+    .eq("share_code", shareCode.toUpperCase())
+    .single();
+  if (error || !data) return null;
+  return (
+    (data as { stream_playback_url: string | null }).stream_playback_url ?? null
+  );
 }
 
 // ===== チームスケジュール =====

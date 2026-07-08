@@ -17,6 +17,7 @@ import { useAudioCompressor } from "@/lib/use-audio-compressor";
 import { useShareKeepalive } from "@/lib/use-share-keepalive";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import type { BroadcastResolution } from "@/lib/user-agent";
+import { pickCameraCaptureResolution } from "@/lib/user-agent";
 
 // Reconnecting 状態の経過秒数を計測するフック
 export function useReconnectDuration(connectionState: ConnectionState): number {
@@ -461,7 +462,8 @@ export function LiveKitBroadcaster({
           dynacast: true,
           videoCaptureDefaults: {
             facingMode: "environment",
-            resolution: { width: 1280, height: 720, frameRate: 30 },
+            // 配信開始時の端末の向きに合わせて要求（Android のみ縦横入替・iOS/PCは1280x720固定）。
+            resolution: pickCameraCaptureResolution(),
           },
           audioCaptureDefaults: {
             // 5/05 RAW 化: 上の焼き込みパスと同じ理由で OS 側音声処理を全 OFF
@@ -481,8 +483,18 @@ export function LiveKitBroadcaster({
             simulcast: false,
             videoCodec: "h264",
             videoEncoding: {
-              // 単層 2.5Mbps。変動下で更に不安定なら 2.0Mbps（合成経路の実績値）へ下げる。
-              maxBitrate: 2_500_000,
+              // 2026-06-21: 単層 2.5 → 4.0Mbps に引き上げ（自社プレイヤー画質 + YouTube アーカイブ品質）。
+              // 理由①: この WebRTC publish が自社プレイヤー視聴と YouTube Egress(再エンコード)の
+              //   "唯一の源泉"。源泉が 2.5Mbps だと、Egress を 6Mbps(#190)にしても再エンコードで
+              //   ディテールは足せず無駄になる。源泉を上げて初めて #190 が活きる。
+              // 理由②: #189 で常時横向き(全体ショット)化 → 1 画面の情報量(被写体数・動き)が増えたため、
+              //   同じ 2.5Mbps では 1 人あたりのビット配分が痩せて「荒い」。配分を増やす。
+              // 安全性: maxBitrate は"上限"。4G で帯域が足りなければ WebRTC の帯域推定が自動で
+              //   実送出を絞るため、弱回線では実質 2.5Mbps 相当で変わらず（悪化しない）。良回線(WiFi/
+              //   強い 4G/5G)でのみ最大 4.0Mbps まで使い鮮明になる＝Pareto 改善。
+              //   simulcast OFF 維持(レイヤー取り合いなし) + 720p 維持(発熱対策)はそのまま。
+              //   変動下で不安定なら 3.0 → 2.5Mbps へ段階的に戻す。
+              maxBitrate: 4_000_000,
               maxFramerate: 30,
             },
             // 128kbps Opus stereo で歓声・ホイッスル・スパイク音を立体的に伝送

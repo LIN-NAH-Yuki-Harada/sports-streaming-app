@@ -24,13 +24,25 @@ export async function GET(request: Request) {
 
   const admin = getAdminClient();
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  // 心拍(last_seen_at)が STALE_MINUTES 途絶した live 配信はゴーストとみなす。
+  // 配信者クライアントは配信中 60 秒ごとに last_seen_at を更新する（broadcast/page.tsx）。
+  const STALE_MINUTES = 5;
+  const staleThreshold = new Date(
+    Date.now() - STALE_MINUTES * 60 * 1000,
+  ).toISOString();
 
-  // 1. 2時間以上経った live 配信を自動終了
+  // 1. ゴースト live 配信を自動終了する。
+  //   (a) 心拍が STALE_MINUTES 途絶（last_seen_at < staleThreshold）＝配信者が落ちた/離脱した
+  //   (b) 心拍が無い旧/他経路の配信（last_seen_at IS NULL）は従来どおり started_at > 2h で終了
+  // ※ (a) により、心拍が続く限り長い試合は誤終了しない（旧「開始2時間で一律終了」の改善）。
+  // ※ 検知の速さは cron 頻度に依存。日次のままでも安全に機能し、高頻度化(Vercel Pro)で数分検知になる。
   const { data, error } = await admin
     .from("broadcasts")
     .update({ status: "ended", ended_at: new Date().toISOString() })
     .eq("status", "live")
-    .lt("started_at", twoHoursAgo)
+    .or(
+      `last_seen_at.lt.${staleThreshold},and(last_seen_at.is.null,started_at.lt.${twoHoursAgo})`,
+    )
     .select("id");
 
   if (error) {

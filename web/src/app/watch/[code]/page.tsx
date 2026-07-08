@@ -2,16 +2,58 @@
 
 import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
-import { getBroadcastByCode, type Broadcast } from "@/lib/database";
+import { useRouter } from "next/navigation";
+import { getBroadcastByCode, getStreamPlaybackUrl, type Broadcast } from "@/lib/database";
 import { createClient } from "@/lib/supabase";
 import { LiveKitViewer } from "@/components/livekit-video";
+import { HlsPlayer } from "@/components/hls-player";
 import { ViewerScoreboardOverlay } from "@/components/viewer-scoreboard-overlay";
 import { Logo } from "@/components/logo";
 import { ShareButtons } from "@/components/share-buttons";
+import { LiveReactions } from "@/components/live-reactions";
+import { AdSlot } from "@/components/ad-slot";
 import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
+
+// HLS視聴は映像が数秒〜10秒遅延するため、リアルタイムのスコアをそのまま重ねると
+// 得点が映像より先に出る（ネタバレ）。スコアオーバーレイを映像の遅延ぶん遅らせて同期する。
+// ※固定値（平均的なHLSライブ遅延）。ズレが残るならこの値を調整。LiveKit経路は ~リアルタイム
+//   なので遅延させない（HLS分岐のみ delayedBroadcast を渡す）。
+const OVERLAY_DELAY_MS = 7000;
+
+// broadcast を delayMs ぶん遅らせて返す（スコア表示を映像に同期させるため）。
+function useDelayedBroadcast(
+  broadcast: Broadcast | null,
+  delayMs: number,
+): Broadcast | null {
+  const [delayed, setDelayed] = useState<Broadcast | null>(broadcast);
+  const queueRef = useRef<{ value: Broadcast; at: number }[]>([]);
+  useEffect(() => {
+    if (broadcast) queueRef.current.push({ value: broadcast, at: Date.now() });
+  }, [broadcast]);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const cutoff = Date.now() - delayMs;
+      const q = queueRef.current;
+      let chosen: Broadcast | null = null;
+      let pruneTo = 0;
+      for (let i = 0; i < q.length; i++) {
+        if (q[i].at <= cutoff) {
+          chosen = q[i].value;
+          pruneTo = i;
+        } else break;
+      }
+      if (chosen) {
+        if (pruneTo > 0) queueRef.current = q.slice(pruneTo);
+        setDelayed(chosen);
+      }
+    }, 500);
+    return () => clearInterval(id);
+  }, [delayMs]);
+  return delayed;
+}
 
 export default function WatchPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
@@ -20,14 +62,24 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [notFound, setNotFound] = useState(false);
   const [viewerToken, setViewerToken] = useState<string | null>(null);
   const [isWatching, setIsWatching] = useState(false);
+  // 自前配信サーバー(MediaMTX)の HLS 視聴 URL。set されていれば HLS プレイヤーで直接再生
+  // （タップ不要・スコアは映像に焼き込み済み）。null なら従来 LiveKit 経路。
+  const [hlsUrl, setHlsUrl] = useState<string | null>(null);
   const [videoPaused, setVideoPaused] = useState(false);
   // 焼き込み OFF の配信は、スコアが映像に乗っていないので視聴側 CSS オーバーレイで表示する。
   // その場合 iPhone は「動画ネイティブ全画面」だと HTML オーバーレイが消えるため、
   // フェイク全画面（CSS）に切り替える（allowVideoFallback=false）。
   // 焼き込みありの従来配信（既定 true）は従来どおりネイティブ全画面を許可。
   const scoreboardBurnedIn = broadcast?.scoreboard_burned_in ?? true;
+  const router = useRouter();
+  // HLS視聴用：映像遅延に合わせてスコアを遅らせた broadcast（同期表示）
+  const delayedBroadcast = useDelayedBroadcast(broadcast, OVERLAY_DELAY_MS);
   const { stageRef, isFullscreen, isFakeFullscreen, toggleFullscreen } =
-    useStageFullscreen<HTMLDivElement>({ allowVideoFallback: scoreboardBurnedIn });
+    useStageFullscreen<HTMLDivElement>({
+      allowVideoFallback: scoreboardBurnedIn,
+      // Android 視聴者は端末を横にしたら自動で没入横画面に（iOS は既存挙動を維持）。
+      autoLandscapeFullscreen: isWatching,
+    });
 
   // ステージ内の <video> 要素の一時停止状態を追従。
   // LiveKit 再接続で video 要素が再生成された場合に備えて、現在 attach 済みの要素を
@@ -87,6 +139,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       const data = await getBroadcastByCode(code);
       if (data) {
         setBroadcast(data);
+        // 自前サーバー配信なら HLS 視聴URLを取得（migration未適用環境では null）
+        if (data.status === "live") {
+          getStreamPlaybackUrl(code).then(setHlsUrl).catch(() => {});
+        }
       } else {
         setNotFound(true);
       }
@@ -154,6 +210,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       const updated = await getBroadcastByCode(shareCodeRef.current);
       if (updated) {
         setBroadcast(updated);
+        // 配信開始がページ読み込み後の場合に備え、HLS URL も追従取得
+        if (updated.status === "live") {
+          getStreamPlaybackUrl(updated.share_code).then(setHlsUrl).catch(() => {});
+        }
         if (updated.status === "ended") {
           clearInterval(interval);
         }
@@ -262,6 +322,14 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   }
 
   const isLive = broadcast.status === "live";
+  // 終了後のYouTubeアーカイブ動画ID。youtube_video_id は egress_ended webhook が
+  // コピーするまで遅延するため、live配信が正常終了(live_status='ended')していれば
+  // live_youtube_broadcast_id（=同じ動画ID）をフォールバックに使い、即アーカイブ誘導する。
+  const archiveYoutubeId =
+    broadcast.youtube_video_id ??
+    (broadcast.live_status === "ended"
+      ? broadcast.live_youtube_broadcast_id
+      : null);
 
   return (
     <div className="min-h-screen bg-black flex flex-col">
@@ -275,7 +343,18 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         }
         style={isFakeFullscreen ? undefined : { minHeight: "60vh" }}
       >
-        {isWatching && viewerToken && isLive ? (
+        {isLive && hlsUrl ? (
+          // 自前配信サーバー(MediaMTX)の HLS を直接再生。タップ不要で自動再生。
+          // スコアは端末焼き込み(プレーンテキスト)ではなく、視聴側で CSS の綺麗な
+          // オーバーレイ(配信者画面と同デザイン・DBからリアルタイム)を重ねる。
+          // ＝端末は焼き込みOFF(scoreboardVisible=false)・provision は burned_in=false。
+          <>
+            <HlsPlayer src={hlsUrl} />
+            {!scoreboardBurnedIn && (
+              <ViewerScoreboardOverlay broadcast={delayedBroadcast ?? broadcast} />
+            )}
+          </>
+        ) : isWatching && viewerToken && isLive ? (
           // 視聴者が「自社プレイヤーで見る」を選択中（WebRTC、リアルタイム）
           <>
             <LiveKitViewer
@@ -321,7 +400,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               </a>
             )}
           </div>
-        ) : broadcast.youtube_video_id ? (
+        ) : archiveYoutubeId ? (
           // 配信終了 + YouTube アーカイブあり
           // ※ Made for Kids 配信のアーカイブは iframe 埋め込みが拒否されるため、
           //   YouTube で開くリンクをメインの導線として置く（iframe での再生失敗を回避）。
@@ -339,7 +418,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               </p>
             </div>
             <a
-              href={`https://www.youtube.com/watch?v=${broadcast.youtube_video_id}`}
+              href={`https://www.youtube.com/watch?v=${archiveYoutubeId}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-5 py-2.5 rounded-md transition"
@@ -349,11 +428,20 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               </svg>
               YouTube で視聴する
             </a>
+            {/* ブランクタイムCM枠（アーカイブ導線画面）。フラグOFF/在庫なし時は非表示。 */}
+            <div className="w-full pt-1">
+              <AdSlot placement="archive_pre" sport={broadcast.sport} />
+            </div>
           </div>
         ) : (
           <div className="text-center px-6 max-w-md">
             <p className="text-sm text-gray-400">この配信は終了しました</p>
             <p className="text-[10px] text-gray-600 mt-1 mb-5">ご視聴ありがとうございました</p>
+
+            {/* ブランクタイムCM枠（postroll）。フラグOFF/在庫なし時は何も描画しない。 */}
+            <div className="mb-6">
+              <AdSlot placement="postroll" sport={broadcast.sport} />
+            </div>
 
             {/* 明示的な「ホームへ戻る」ボタン（LP 宣伝の前に配置して戻り導線を分かりやすく） */}
             <Link
@@ -454,13 +542,17 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
         {/* スコア/経過時間は、焼き込みあり配信では映像内、焼き込み OFF 配信では
             ViewerScoreboardOverlay（ステージ内に重畳）で表示する。 */}
 
-        {/* 右下: コントロール群（視聴中のみ表示） */}
-        {isWatching && viewerToken && (
+        {/* 右下: コントロール群（LiveKit視聴中 or HLS再生中に表示） */}
+        {((isWatching && viewerToken) || (isLive && hlsUrl)) && (
           <div className="absolute bottom-3 right-3 z-[2] flex items-center gap-2">
-            {/* 視聴を終了する: setIsWatching(false) で LiveKitViewer をアンマウント
-                → リスナー接続が自動切断 → 「タップして視聴」状態に戻り、再開可能 */}
+            {/* 視聴を終了する:
+                - LiveKit: setIsWatching(false) でアンマウント→「タップして視聴」に戻り再開可能
+                - HLS(自前配信): 自動再生で「タップして視聴」状態が無いため、ホームへ戻る */}
             <button
-              onClick={() => setIsWatching(false)}
+              onClick={() => {
+                if (isWatching) setIsWatching(false);
+                else router.push("/");
+              }}
               aria-label="視聴を終了する"
               className="flex items-center gap-1.5 h-9 px-3 rounded-md bg-black/70 hover:bg-black/85 backdrop-blur-sm text-white transition"
             >
@@ -487,6 +579,9 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             </button>
           </div>
         )}
+
+        {/* ライブ応援スタンプ（❤️/👍・配信中のみ・全視聴者と配信者にリアルタイム共有） */}
+        {isLive && <LiveReactions shareCode={broadcast.share_code} />}
       </div>
 
       {/* 試合情報（映像下部） */}

@@ -18,7 +18,7 @@ import {
   type Broadcast,
   type Team,
 } from "@/lib/database";
-import { pickBroadcastResolution } from "@/lib/user-agent";
+import { pickBroadcastResolution, detectInAppBrowser } from "@/lib/user-agent";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
 import { isArchiveEnabled } from "@/lib/archive-flag";
@@ -112,6 +112,23 @@ function BroadcastPageInner() {
   const trialSecondsRemainingInitial = Math.max(0, 600 - trialSecondsUsed);
   const trialExhausted = trialSecondsRemainingInitial <= 0;
 
+  // Android横向きゲート: Android で縦持ちのまま配信を開始すると
+  // 視聴側で映像が 90° 倒れる（Android Chrome が CVO を送らない仕様）。
+  // 横向きになるまでオーバーレイで案内し、なった瞬間自動解除する。
+  const [isAndroid, setIsAndroid] = useState(false);
+  const [isPortraitMode, setIsPortraitMode] = useState(false);
+  useEffect(() => {
+    if (typeof navigator === "undefined" || typeof window === "undefined") return;
+    const android = detectInAppBrowser().platform === "android";
+    setIsAndroid(android);
+    if (!android) return;
+    const mq = window.matchMedia("(orientation: portrait)");
+    setIsPortraitMode(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsPortraitMode(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
   const [myTeams, setMyTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string>("");
 
@@ -177,6 +194,13 @@ function BroadcastPageInner() {
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
+  // 野球カウント（甲子園風 B/S/O＋走者・アプリ版と同仕様）
+  const [balls, setBalls] = useState(0);
+  const [strikes, setStrikes] = useState(0);
+  const [outs, setOuts] = useState(0);
+  const [runners, setRunners] = useState<{ first: boolean; second: boolean; third: boolean }>(
+    { first: false, second: false, third: false },
+  );
   // 配信終了後に表示するサマリモーダル用の state（次のアクションへの導線として使う）
   const [endedSummary, setEndedSummary] = useState<{
     durationSec: number;
@@ -374,6 +398,30 @@ function BroadcastPageInner() {
     return () => clearInterval(interval);
   }, [broadcastStartedAt]);
 
+  // ゴースト対策の心拍: 配信中は 60 秒ごとに last_seen_at を更新する。
+  // 異常終了（クラッシュ/スリープ/回線断）で停止処理(pagehide/stop)が飛ばなくても、
+  // サーバー cron(/api/cron/cleanup) が last_seen の途絶を見て自動で ended に補正できる
+  // （恒久対策の心臓）。失敗は次の心拍で再送するので無視する。
+  useEffect(() => {
+    if (!broadcastStartedAt) return;
+    const supabase = createClient();
+    const beat = async () => {
+      const id = broadcastRef.current?.id;
+      if (!id) return;
+      try {
+        await supabase
+          .from("broadcasts")
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq("id", id);
+      } catch {
+        // 失敗は無視（次の心拍で再送）
+      }
+    };
+    void beat();
+    const interval = setInterval(() => void beat(), 60_000);
+    return () => clearInterval(interval);
+  }, [broadcastStartedAt]);
+
   const scoreboardState: ScoreboardState = {
     home_team: home || "HOME",
     away_team: away || "AWAY",
@@ -489,6 +537,64 @@ function BroadcastPageInner() {
     setPeriodIndex(clamped);
     const newPeriod = periods[clamped] || periods[0];
     saveScoreToDb(homeScore, awayScore, newPeriod);
+    // 野球はイニングが変わったらカウント（B/S/O・走者）をリセット
+    if (sport === "野球") resetBaseballCount();
+  }
+
+  // ── 野球カウント（B/S/O＋走者）。アプリ版 sports.ts と同ロジック ──
+  // カウントは broadcasts に直接 UPDATE（updateBroadcastScore は固定シグネチャのため別経路）。
+  const saveBaseballCountToDb = useCallback(
+    (b: number, s: number, o: number, r: { first: boolean; second: boolean; third: boolean }) => {
+      if (!broadcastRef.current) return;
+      const supabase = createClient();
+      supabase
+        .from("broadcasts")
+        .update({ balls: b, strikes: s, outs: o, runners: r })
+        .eq("id", broadcastRef.current.id)
+        .then(undefined, () => {});
+    },
+    [],
+  );
+  function resetBaseballCount() {
+    const empty = { first: false, second: false, third: false };
+    setBalls(0);
+    setStrikes(0);
+    setOuts(0);
+    setRunners(empty);
+    saveBaseballCountToDb(0, 0, 0, empty);
+  }
+  function addBallW() {
+    const nb = balls >= 3 ? 0 : balls + 1; // 4球目=フォアボール→B/Sリセット
+    const ns = balls >= 3 ? 0 : strikes;
+    setBalls(nb);
+    setStrikes(ns);
+    saveBaseballCountToDb(nb, ns, outs, runners);
+  }
+  function recordOutW() {
+    const no = outs + 1;
+    if (no >= 3) {
+      // 3アウト＝攻守交代。次イニングへ（changePeriod が野球時にカウントもリセット）
+      changePeriod(periodIndex + 1);
+      return;
+    }
+    setBalls(0);
+    setStrikes(0);
+    setOuts(no);
+    saveBaseballCountToDb(0, 0, no, runners);
+  }
+  function addStrikeW() {
+    if (strikes >= 2) {
+      recordOutW(); // 3ストライク＝三振→アウト
+      return;
+    }
+    const ns = strikes + 1;
+    setStrikes(ns);
+    saveBaseballCountToDb(balls, ns, outs, runners);
+  }
+  function toggleRunnerW(base: "first" | "second" | "third") {
+    const nr = { ...runners, [base]: !runners[base] };
+    setRunners(nr);
+    saveBaseballCountToDb(balls, strikes, outs, nr);
   }
 
   // 配信開始
@@ -739,6 +845,10 @@ function BroadcastPageInner() {
     setHomeSets(0);
     setAwaySets(0);
     setSetResults([]);
+    setBalls(0);
+    setStrikes(0);
+    setOuts(0);
+    setRunners({ first: false, second: false, third: false });
     historyRef.current = [];
     setHistoryLength(0);
     setPeriodIndex(0);
@@ -776,6 +886,41 @@ function BroadcastPageInner() {
           }).catch(() => {
             /* ignore */
           });
+        }
+
+        // 終了時に進行中セットの得点を最終確定として set_results に記録する
+        // （バレーのみ＝Web の set 制競技。オーナー要望 2026-06-13・アプリ版 finishLive と同じ思想）。
+        // 「次のセットへ」を押さず終了するのが普通なので、これが無いと最後のセット得点が失われる。
+        // セット数は勝利点（通常/最終セット）＋2点差を満たした時だけ加算し、未達なら
+        // スコアだけ記録（途中終了でセット数が過剰加算されないように）。
+        // ※ homeScore 等はリセット前の値を closure で参照している（setHomeScore(0) は当該描画の const を変えない）。
+        if (
+          sport === "バレー" &&
+          vbRule &&
+          endedBroadcastId &&
+          (homeScore > 0 || awayScore > 0)
+        ) {
+          const finalSetResults = [...setResults, { home: homeScore, away: awayScore }];
+          const isFinalSet = homeSets + awaySets >= vbRule.setsToWin * 2 - 2;
+          const target = isFinalSet ? vbRule.finalSetPoint : vbRule.setPoint;
+          const setWon =
+            Math.max(homeScore, awayScore) >= target &&
+            Math.abs(homeScore - awayScore) >= 2;
+          let fHomeSets = homeSets;
+          let fAwaySets = awaySets;
+          if (setWon) {
+            if (homeScore > awayScore) fHomeSets = homeSets + 1;
+            else if (awayScore > homeScore) fAwaySets = awaySets + 1;
+          }
+          await updateBroadcastScore(
+            endedBroadcastId,
+            homeScore,
+            awayScore,
+            currentPeriod,
+            fHomeSets,
+            fAwaySets,
+            finalSetResults,
+          ).catch(() => {});
         }
 
         if (endedBroadcastId) {
@@ -1166,6 +1311,41 @@ function BroadcastPageInner() {
 
           {/* スコア操作パネル — 縦画面では2段構成 */}
           <div className="absolute bottom-[calc(12px+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-sm rounded-lg px-2 sm:px-3 py-2 max-w-[95vw]">
+            {/* 野球: B/S/O カウント＋走者ダイヤ（甲子園風・タップで+1／3S自動アウト・3アウト自動交代） */}
+            {sport === "野球" && (
+              <div className="flex items-center justify-center gap-3 mb-1.5 pb-1.5 border-b border-white/10">
+                {([
+                  { label: "B", val: balls, on: addBallW },
+                  { label: "S", val: strikes, on: addStrikeW },
+                  { label: "O", val: outs, on: recordOutW },
+                ] as const).map(({ label, val, on }) => (
+                  <button
+                    key={label}
+                    onClick={on}
+                    className="flex flex-col items-center px-1.5 active:scale-90 transition"
+                  >
+                    <span className="text-[9px] font-bold text-gray-400">{label}</span>
+                    <span className="text-base font-black tabular-nums leading-tight">{val}</span>
+                  </button>
+                ))}
+                {/* 走者ダイヤ（二塁=上/三塁=左/一塁=右・タップで進塁/帰塁） */}
+                <div className="relative" style={{ width: 24, height: 24 }}>
+                  {([
+                    { base: "second", style: { top: 1, left: 8 } },
+                    { base: "third", style: { top: 9, left: 0 } },
+                    { base: "first", style: { top: 9, left: 16 } },
+                  ] as const).map(({ base, style }) => (
+                    <button
+                      key={base}
+                      onClick={() => toggleRunnerW(base)}
+                      className={runners[base] ? "absolute bg-yellow-400" : "absolute bg-white/20"}
+                      style={{ width: 9, height: 9, transform: "rotate(45deg)", ...style }}
+                      aria-label={`${base} runner`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
             {/* スコア行 */}
             <div className="flex items-center justify-center gap-2 sm:gap-3">
               <div className="flex items-center gap-1">
@@ -1486,6 +1666,24 @@ function BroadcastPageInner() {
   // ===== 入力フォーム（ログイン済み）=====
   return (
     <div>
+      {/* Android 縦持ちゲート: 横向きになるまでオーバーレイで案内（自動解除） */}
+      {isAndroid && isPortraitMode && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center gap-5 px-8 text-center">
+          <svg className="w-16 h-16 text-[#e63946]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+            <rect x="5" y="2" width="14" height="20" rx="2" />
+            <path strokeLinecap="round" d="M12 18h.01" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l3 3-3 3M7 8l-3 3 3 3" />
+          </svg>
+          <div>
+            <h2 className="text-lg font-bold text-white">横向きにしてください</h2>
+            <p className="mt-2 text-sm text-gray-400 leading-relaxed">
+              Androidは横向き（ランドスケープ）で配信すると<br />
+              視聴者に正しい向きで映像が届きます。
+            </p>
+          </div>
+          <p className="text-xs text-gray-600">端末を横向きにすると自動で次に進みます</p>
+        </div>
+      )}
       <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
         <div className="flex items-center justify-between">
           <Logo />

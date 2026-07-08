@@ -21,6 +21,12 @@ type Options = {
    * canvas の場合は false にして、Fake Fullscreen に直接フォールバックする。
    */
   allowVideoFallback?: boolean;
+  /**
+   * Android のみ: この値が true の間、端末を横向きにしたら自動でフェイク全画面
+   * （没入横画面）にする。iOS Safari は全画面ボタンでネイティブ動画プレイヤーが
+   * 回転に追従するため対象外（既存挙動を壊さない）。視聴ページが視聴中だけ true を渡す。
+   */
+  autoLandscapeFullscreen?: boolean;
 };
 
 /**
@@ -37,10 +43,31 @@ type Options = {
 export function useStageFullscreen<T extends HTMLElement = HTMLDivElement>(
   options: Options = {},
 ) {
-  const { allowVideoFallback = true } = options;
+  const { allowVideoFallback = true, autoLandscapeFullscreen = false } = options;
   const stageRef = useRef<T | null>(null);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [isFakeFullscreen, setIsFakeFullscreen] = useState(false);
+
+  // Android: 視聴中に端末を横向きにしたら自動で没入横画面（フェイク全画面）にする。
+  // YouTube モバイル視聴と同じ挙動。CSS の fixed inset-0 なので確実に横いっぱいに広がる
+  // （screen.orientation.lock や全画面ボタンのタップ無しで成立）。iOS は対象外＝既存挙動を維持。
+  useEffect(() => {
+    if (!autoLandscapeFullscreen) return;
+    if (typeof navigator === "undefined" || !/Android/i.test(navigator.userAgent)) {
+      return;
+    }
+    const mq = window.matchMedia("(orientation: landscape)");
+    const apply = () => setIsFakeFullscreen(mq.matches);
+    apply();
+    // Safari 14 以前互換のため addEventListener / addListener 両対応
+    if (mq.addEventListener) mq.addEventListener("change", apply);
+    else mq.addListener(apply);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", apply);
+      else mq.removeListener(apply);
+      setIsFakeFullscreen(false); // 視聴終了時は解除
+    };
+  }, [autoLandscapeFullscreen]);
 
   // ネイティブ全画面状態を追従（ESC・iOS のスワイプ離脱に対応）。
   // 解除直後にステージ内の <video> が一時停止することがあるので resume を複数回 retry する。

@@ -3,6 +3,7 @@
 :root {
   --background: #0a0a0a;
   --foreground: #ededed;
+  --accent-red: #e63946;
 }
 
 @theme inline {
@@ -16,6 +17,57 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ===== LP 演出（CSSのみ・JSなし） ===== */
+
+/* スコアボードのカウントアップ（数字を縦スライドで 0→3 / 0→1 に切替）
+   ※ 各桁は h-[1.2em]・leading-[1.2em] の縦積み。em 指定なので桁の
+     フォントサイズに追従する（% だとトラック全高基準になり桁ズレする） */
+@keyframes lp-score-home {
+  0%, 18% { transform: translateY(0); }        /* 0 */
+  22%, 48% { transform: translateY(-1.2em); }  /* 1 */
+  52%, 78% { transform: translateY(-2.4em); }  /* 2 */
+  82%, 96% { transform: translateY(-3.6em); }  /* 3 */
+  100% { transform: translateY(-3.6em); }
+}
+@keyframes lp-score-away {
+  0%, 48% { transform: translateY(0); }        /* 0 */
+  52%, 100% { transform: translateY(-1.2em); } /* 1 */
+}
+.lp-score-home-track {
+  animation: lp-score-home 12s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.lp-score-away-track {
+  animation: lp-score-away 12s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* LIVE バッジのパルスリング */
+@keyframes lp-live-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(230, 57, 70, 0.55); }
+  50% { box-shadow: 0 0 0 6px rgba(230, 57, 70, 0); }
+}
+.lp-live-glow {
+  animation: lp-live-glow 1.6s ease-out infinite;
+}
+
+/* ヒーロー背景グローのゆっくりした呼吸 */
+@keyframes lp-glow-breathe {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+.lp-glow-breathe {
+  animation: lp-glow-breathe 7s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-score-home-track,
+  .lp-score-away-track,
+  .lp-live-glow,
+  .lp-glow-breathe {
+    animation: none;
+  }
 }
 
 /* PC表示時にフォントサイズを拡大（モバイルファーストアプリのため） */

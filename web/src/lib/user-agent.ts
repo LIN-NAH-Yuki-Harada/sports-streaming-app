@@ -77,3 +77,13 @@ export function buildExternalBrowserUrl(currentUrl: string, platform: Platform):
 export function pickBroadcastResolution(): BroadcastResolution {
   return { width: 1280, height: 720, frameRate: 30 };
 }
+
+// 生配信（カメラ直 publish）のカメラ要求解像度。iOS・Android・PC すべて 1280x720 固定。
+//
+// Android Chrome は WebRTC の向きメタデータ (CVO) を送らない仕様のため、縦寸法
+// (720x1280) で要求すると視聴側が 90° 倒れて表示される。横寸法 (1280x720) で
+// 要求すれば映像の縦横比自体が「横」になり、CVO なしでも視聴側が正しく表示できる。
+// broadcast/page.tsx の横向きゲートで配信前に端末を横向きにさせることと組み合わせて動作する。
+export function pickCameraCaptureResolution(): BroadcastResolution {
+  return { width: 1280, height: 720, frameRate: 30 };
+}

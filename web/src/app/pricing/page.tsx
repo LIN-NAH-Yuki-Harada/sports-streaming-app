@@ -35,6 +35,8 @@ function PricingPageInner() {
   const { user, profile, loading: authLoading } = useAuth();
   const [loadingPlan, setLoadingPlan] = useState<Plan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 未ログインで「加入」を押したらログイン/登録フォームを出す（クーポン有無に関わらず）。
+  const [showAuth, setShowAuth] = useState(false);
 
   // プロモコード関連
   const [promoInput, setPromoInput] = useState("");
@@ -91,18 +93,26 @@ function PricingPageInner() {
 
   const currentPlan = profile?.plan ?? "free";
   const hasValidPromo = promoState.status === "valid";
-  // 未ログインかつ有効コード → 先にアカウント作成が必要なので強調する
-  const mustLoginFirst = hasValidPromo && !user && !authLoading;
+  // ログイン/登録フォームを表示する条件: 未ログインで、(有効クーポンがある or 加入を押した)。
+  const showAuthSection = !user && !authLoading && (hasValidPromo || showAuth);
   // ログイン後に現在プラン（このページの URL）に戻る
   const loginReturnUrl = hasValidPromo
     ? `/pricing?promo=${encodeURIComponent(promoState.code)}`
     : "/pricing";
 
+  // 「加入」押下でフォームを出したら、描画後にスクロールして見せる。
+  useEffect(() => {
+    if (showAuth) {
+      authSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [showAuth]);
+
   const handleSubscribe = async (plan: "broadcaster" | "team") => {
     if (!user) {
-      // 未ログイン → ページ内のログインセクションへ誘導（従来は `/` に飛ばしていた）
-      setError("プラン加入にはアカウントが必要です。下のフォームからアカウント作成／ログインしてください。");
-      authSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      // 未ログイン → ページ内のログイン/登録フォームを表示して誘導する。
+      // （スクロールは showAuth の useEffect 側でフォーム描画後に実行する）
+      setShowAuth(true);
+      setError("プラン加入にはアカウントが必要です。下のフォームからログイン／アカウント作成をしてください。");
       return;
     }
     setLoadingPlan(plan);
@@ -265,8 +275,8 @@ function PricingPageInner() {
           </div>
         )}
 
-        {/* ── 未ログイン + 有効クーポン → インラインでアカウント作成/ログイン ──── */}
-        {mustLoginFirst && (
+        {/* ── 未ログイン（加入を押した or 有効クーポン）→ インラインでログイン/作成 ──── */}
+        {showAuthSection && (
           <div
             ref={authSectionRef}
             className="mb-8 rounded-xl bg-[#111] border border-[#e63946]/30 p-5 md:p-6"
@@ -274,13 +284,15 @@ function PricingPageInner() {
             <div className="flex items-center gap-2 mb-2">
               <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#e63946] text-white text-xs font-black">1</span>
               <h3 className="text-sm md:text-base font-bold">
-                まずアカウントを作成 or ログインしてください
+                まずログイン（または新規登録）してください
               </h3>
             </div>
             <p className="text-xs text-gray-400 leading-relaxed mb-4">
-              無料トライアルの適用にはユーザー登録が必要です。
+              {hasValidPromo
+                ? "無料トライアルの適用にはユーザー登録が必要です。"
+                : "プランのお申し込みにはログインが必要です。アプリと同じアカウントでログインできます。"}
               <strong className="text-white">Google でログインが最速</strong>
-              （30秒で完了）。ログイン後、自動でこのページに戻り、② のプラン選択に進めます。
+              （30秒で完了）。ログイン後、自動でこのページに戻り、プランを選べます。
             </p>
             <AuthForm redirectTo={loginReturnUrl} />
           </div>
@@ -305,7 +317,7 @@ function PricingPageInner() {
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="例: SPOT1W"
+                placeholder="例: SPOT"
                 value={promoInput}
                 onChange={(e) => {
                   setPromoInput(e.target.value.toUpperCase());
@@ -350,8 +362,8 @@ function PricingPageInner() {
               共有コードで配信・アーカイブを視聴。
             </p>
             <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-500 flex-1">
-              <li>✓ ライブ視聴</li>
-              <li>✓ 1ヶ月以内のアーカイブ視聴</li>
+              <li>✓ ライブ視聴（登録不要）</li>
+              <li>✓ アーカイブ視聴（チームプラン配信のYouTube限定公開）</li>
             </ul>
             <button
               disabled
@@ -426,8 +438,14 @@ function PricingPageInner() {
               <li>✓ チーム作成・メンバー招待</li>
               <li>✓ 試合スケジュール管理</li>
               <li>✓ 共有コードのチーム自動配布</li>
-              <li className="text-gray-500">🔜 YouTube Live 同時配信（自社プレイヤーと並行で YouTube にもリアルタイム push）</li>
-              <li className="text-gray-500">🔜 YouTube に自動アーカイブ（配信者ご自身のチャンネルに長期保存）</li>
+              <li className="text-gray-200 flex items-center gap-1.5 flex-wrap">
+                <span>✓ YouTube Live 同時配信（YouTube にもリアルタイム push）</span>
+                <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
+              </li>
+              <li className="text-gray-200 flex items-center gap-1.5 flex-wrap">
+                <span>✓ YouTube に自動アーカイブ（ご自身のチャンネルに長期保存）</span>
+                <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
+              </li>
               <li className="text-gray-500">🔜 リモコンでスコア操作（別端末から）</li>
               <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
             </ul>
