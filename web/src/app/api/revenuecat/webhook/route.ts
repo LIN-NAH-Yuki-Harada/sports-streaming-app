@@ -32,10 +32,14 @@ function productToPlan(
   productId: string | null | undefined,
   entitlementIds: string[] | null | undefined,
 ): "broadcaster" | "team" | null {
-  const team = process.env.REVENUECAT_PRODUCT_TEAM;
-  const broadcaster = process.env.REVENUECAT_PRODUCT_BROADCASTER;
-  if (productId && team && productId === team) return "team";
-  if (productId && broadcaster && productId === broadcaster) return "broadcaster";
+  // Google Play の product_id は "{subscriptionId}:{basePlanId}"（例 "team_monthly:monthly"）で
+  // 届くため、basePlanId 接尾辞を落としてから比較する（クライアント側 558fb58 と同じ正規化のサーバー版）。
+  // iOS は接尾辞なしなので split は無害。env 側に接尾辞付きで設定されていても同様に吸収する。
+  const baseId = productId ? productId.split(":")[0] : null;
+  const team = process.env.REVENUECAT_PRODUCT_TEAM?.split(":")[0];
+  const broadcaster = process.env.REVENUECAT_PRODUCT_BROADCASTER?.split(":")[0];
+  if (baseId && team && baseId === team) return "team";
+  if (baseId && broadcaster && baseId === broadcaster) return "broadcaster";
   // フォールバック: RevenueCat の entitlement 名で判定
   if (entitlementIds?.includes("team")) return "team";
   if (entitlementIds?.includes("broadcaster")) return "broadcaster";
