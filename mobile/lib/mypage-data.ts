@@ -43,23 +43,9 @@ const PROFILE_PUBLIC_COLUMNS =
   "id, display_name, plan, youtube_channel_id, youtube_channel_name, " +
   "youtube_live_enabled, subscription_status";
 
-/**
- * 指定ユーザーのプロフィール（マイページ表示用）を取得する。
- * 取得失敗時は null を返す。plan が想定外の値なら安全側に "free" 扱い。
- */
-export async function fetchMyProfile(userId: string): Promise<MyProfile | null> {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select(PROFILE_PUBLIC_COLUMNS)
-    .eq("id", userId)
-    .single();
-
-  if (error || !data) {
-    if (error) console.error("プロフィール取得エラー:", error.message);
-    return null;
-  }
-
-  const row = data as unknown as {
+/** profiles の行（明示列 SELECT の結果）を MyProfile に正規化する。 */
+function mapProfileRow(data: unknown): MyProfile {
+  const row = data as {
     id: string;
     display_name: string | null;
     plan: Plan | null;
@@ -81,6 +67,50 @@ export async function fetchMyProfile(userId: string): Promise<MyProfile | null> 
     youtube_live_enabled: Boolean(row.youtube_live_enabled),
     subscription_status: row.subscription_status,
   };
+}
+
+/**
+ * 指定ユーザーのプロフィール（マイページ表示用）を取得する。
+ * 取得失敗時は null を返す。plan が想定外の値なら安全側に "free" 扱い。
+ */
+export async function fetchMyProfile(userId: string): Promise<MyProfile | null> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select(PROFILE_PUBLIC_COLUMNS)
+    .eq("id", userId)
+    .single();
+
+  if (error || !data) {
+    if (error) console.error("プロフィール取得エラー:", error.message);
+    return null;
+  }
+
+  return mapProfileRow(data);
+}
+
+/**
+ * 表示名を更新する（Web 版 updateProfile の display_name 限定版）。
+ * profiles は機密列が列レベル GRANT で遮断されているため、RETURNING * 相当の
+ * .select()（引数なし）は 42501 になる。Web と同じく明示列リストで取得する。
+ * 成功時は更新後のプロフィール、失敗時は null を返す。
+ */
+export async function updateDisplayName(
+  userId: string,
+  displayName: string,
+): Promise<MyProfile | null> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ display_name: displayName })
+    .eq("id", userId)
+    .select(PROFILE_PUBLIC_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    if (error) console.error("表示名の更新エラー:", error.message);
+    return null;
+  }
+
+  return mapProfileRow(data);
 }
 
 /** プランの日本語表示ラベル（Web の PLAN_LABELS と一致させる）。 */
