@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -19,6 +20,7 @@ import type { RootStackParamList } from "../navigation-types";
 import {
   type MyProfile,
   fetchMyProfile,
+  updateDisplayName,
   PLAN_LABELS,
   PLAN_LABELS_NO_PRICE,
 } from "../lib/mypage-data";
@@ -39,11 +41,18 @@ export function MyPageScreen() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
   const [profile, setProfile] = useState<MyProfile | null>(null);
+  // 表示名のインライン編集（Web 版マイページと同じ UX：編集 → 保存/キャンセル）
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [savingName, setSavingName] = useState(false);
 
   // セッション（email）＋ プロフィール（plan / 表示名 / YouTube連携）を読み込む。
-  const load = useCallback(async () => {
+  // isActive: フォーカスが外れた後に古い取得結果で state を上書きしないためのガード
+  // （例: 表示名の保存直後にタブ切替→復帰したときの巻き戻り防止）。
+  const load = useCallback(async (isActive?: () => boolean) => {
     const { data } = await supabase.auth.getSession();
     const session = data.session;
+    if (isActive && !isActive()) return;
     if (!session) {
       setEmail(null);
       setProfile(null);
@@ -52,6 +61,7 @@ export function MyPageScreen() {
     }
     setEmail(session.user.email ?? null);
     const p = await fetchMyProfile(session.user.id);
+    if (isActive && !isActive()) return;
     setProfile(p);
     setLoading(false);
   }, []);
@@ -59,13 +69,11 @@ export function MyPageScreen() {
   // タブを開く / 戻ってくるたびに最新化（Web で課金・連携した結果を反映するため）。
   useFocusEffect(
     useCallback(() => {
-      let cancelled = false;
+      let active = true;
       setLoading(true);
-      load().finally(() => {
-        if (cancelled) return;
-      });
+      load(() => active);
       return () => {
-        cancelled = true;
+        active = false;
       };
     }, [load]),
   );
@@ -73,6 +81,32 @@ export function MyPageScreen() {
   const openWeb = useCallback((path: string) => {
     Linking.openURL(`${SITE_URL}${path}`).catch(() => {});
   }, []);
+
+  // 表示名を保存する。成功したら更新後プロフィールで置き換えて編集モードを閉じる。
+  const handleSaveName = useCallback(async () => {
+    if (savingName) return;
+    const trimmed = nameInput.trim();
+    if (!trimmed) {
+      Alert.alert("表示名を入力してください");
+      return;
+    }
+    if (!profile) return;
+    setSavingName(true);
+    try {
+      const updated = await updateDisplayName(profile.id, trimmed);
+      if (updated) {
+        setProfile(updated);
+        setEditingName(false);
+      } else {
+        Alert.alert(
+          "保存に失敗しました",
+          "電波状況をご確認のうえ、再度お試しください。",
+        );
+      }
+    } finally {
+      setSavingName(false);
+    }
+  }, [nameInput, profile, savingName]);
 
   const handleLogout = useCallback(() => {
     Alert.alert("ログアウトしますか？", undefined, [
@@ -143,7 +177,13 @@ export function MyPageScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      {/* keyboardShouldPersistTaps: 表示名編集中、キーボードを出したまま
+          「保存/キャンセル」が1タップで効くようにする（既定だと1タップ目が
+          キーボードのdismissに消費される）。 */}
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>マイページ</Text>
 
         {loading ? (
@@ -158,9 +198,57 @@ export function MyPageScreen() {
                 <Text style={styles.avatarText}>{initial}</Text>
               </View>
               <View style={styles.profileMeta}>
-                <Text style={styles.name} numberOfLines={1}>
-                  {displayName}
-                </Text>
+                {editingName ? (
+                  /* 表示名の編集モード: 入力 ＋ 保存/キャンセル */
+                  <View style={styles.nameEditRow}>
+                    <TextInput
+                      style={styles.nameInput}
+                      value={nameInput}
+                      onChangeText={setNameInput}
+                      placeholder="表示名"
+                      placeholderTextColor="#666"
+                      maxLength={30}
+                      autoFocus
+                      returnKeyType="done"
+                      onSubmitEditing={handleSaveName}
+                      editable={!savingName}
+                    />
+                    <Pressable
+                      style={[styles.nameSaveButton, savingName && styles.nameButtonDisabled]}
+                      onPress={handleSaveName}
+                      disabled={savingName}
+                    >
+                      <Text style={styles.nameSaveText}>
+                        {savingName ? "…" : "保存"}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.nameCancelButton}
+                      onPress={() => setEditingName(false)}
+                      disabled={savingName}
+                    >
+                      <Text style={styles.nameCancelText}>キャンセル</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={styles.nameRow}>
+                    <Text style={styles.name} numberOfLines={1}>
+                      {displayName}
+                    </Text>
+                    {/* profile 取得失敗時は保存先がないため編集導線を出さない */}
+                    {profile ? (
+                      <Pressable
+                        hitSlop={8}
+                        onPress={() => {
+                          setNameInput(profile.display_name || "");
+                          setEditingName(true);
+                        }}
+                      >
+                        <Text style={styles.nameEditLink}>編集</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                )}
                 {email ? (
                   <Text style={styles.email} numberOfLines={1}>
                     {email}
@@ -328,7 +416,32 @@ const styles = StyleSheet.create({
   },
   avatarText: { color: "#e63946", fontSize: 24, fontWeight: "800" },
   profileMeta: { flex: 1, minWidth: 0, gap: 3 },
-  name: { color: "#fff", fontSize: 17, fontWeight: "700" },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  name: { color: "#fff", fontSize: 17, fontWeight: "700", flexShrink: 1 },
+  nameEditLink: { color: "#888", fontSize: 12, fontWeight: "600" },
+  nameEditRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  nameInput: {
+    flex: 1,
+    minWidth: 0,
+    color: "#fff",
+    fontSize: 15,
+    backgroundColor: "#1a1a1a",
+    borderWidth: 1,
+    borderColor: "#333",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  nameSaveButton: {
+    backgroundColor: "#e63946",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  nameButtonDisabled: { opacity: 0.5 },
+  nameSaveText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  nameCancelButton: { paddingVertical: 8, paddingHorizontal: 2 },
+  nameCancelText: { color: "#888", fontSize: 12 },
   email: { color: "#888", fontSize: 12 },
   planBadge: {
     alignSelf: "flex-start",
