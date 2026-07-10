@@ -4,6 +4,9 @@ import Image from "next/image";
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
 
+// iOS アプリ（App Store 公開中・2026-07-09 リリース）
+const APP_STORE_URL = "https://apps.apple.com/jp/app/live-spotch/id6785001863";
+
 const FAQ_ITEMS = [
   {
     q: "子どもの顔が映るのが心配です。大丈夫ですか？",
@@ -31,7 +34,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "アプリのダウンロードは必要ですか？",
-    a: "不要です。Webブラウザからアクセスできます。スマホのホーム画面に追加すれば、アプリと同じように使えます。",
+    a: "不要です。Webブラウザからそのまま使えます。iPhoneをお使いの方には、より安定して配信できるiOSアプリもApp Storeで公開中です（Android版は準備中）。視聴する側はアプリ不要で、リンクを開くだけで観戦できます。",
   },
   {
     q: "解約はかんたんにできますか？",
@@ -103,9 +106,10 @@ const SOFTWARE_APP_JSONLD = {
   "@type": "SoftwareApplication",
   name: "LIVE SPOtCH",
   applicationCategory: "SportsApplication",
-  operatingSystem: "Any (Web, iOS, Android PWA)",
+  operatingSystem: "Web, iOS",
+  installUrl: APP_STORE_URL,
   description:
-    "保護者のスマホ1台でスポーツ少年団・部活・地域大会の試合をライブ配信。スコアボード・限定公開に対応したUGC型スポーツライブ配信プラットフォーム。",
+    "保護者のスマホ1台でスポーツ少年団・部活・地域大会の試合をライブ配信。スコアボード・限定公開に対応したUGC型スポーツライブ配信プラットフォーム。iOSアプリはApp Storeで配信中。",
   url: `${SITE_URL}/`,
   image: `${SITE_URL}/opengraph-image.jpg`,
   offers: [
@@ -206,15 +210,17 @@ export default function LandingPage() {
         </nav>
       </header>
 
-      {/* NEW リリースバナー: YouTube Live 同時配信機能 */}
+      {/* NEW リリースバナー: iOS アプリ App Store 配信開始 */}
       <a
-        href="#pricing"
+        href={APP_STORE_URL}
+        target="_blank"
+        rel="noopener noreferrer"
         className="block bg-gradient-to-r from-[#e63946]/90 via-[#d62836] to-[#e63946]/90 text-white text-center text-[11px] sm:text-xs py-2 px-4 hover:from-[#e63946] hover:to-[#e63946] transition group"
       >
         <span className="inline-flex items-center gap-2 font-semibold">
           <span className="bg-white text-[#e63946] text-[9px] font-black px-1.5 py-0.5 rounded">NEW</span>
-          <span>📺 YouTube Live 同時配信に対応！スマートテレビでも家族で応援できます（チームプラン・ベータ）</span>
-          <span className="hidden sm:inline opacity-70 group-hover:opacity-100 transition">→ 料金プランを見る</span>
+          <span>📱 iOSアプリ、App Storeで配信開始！配信がもっと安定・かんたんに</span>
+          <span className="hidden sm:inline opacity-70 group-hover:opacity-100 transition">→ ダウンロード</span>
         </span>
       </a>
 
@@ -272,6 +278,31 @@ export default function LandingPage() {
                 </a>
                 <span className="text-sm text-gray-600 px-2 sm:px-4 py-1 sm:py-3">
                   Webブラウザで今すぐ使えます
+                </span>
+              </div>
+
+              {/* iOS アプリ（App Store 公開中）。バッジは Apple 公式SVG（self-host） */}
+              <div className="mt-4 flex items-center gap-3">
+                <a
+                  href={APP_STORE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block hover:opacity-80 transition"
+                  aria-label="App Store で LIVE SPOtCH をダウンロード"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/appstore-badge-ja.svg"
+                    alt="App Store でダウンロード"
+                    width={136}
+                    height={50}
+                    className="h-[44px] w-auto"
+                  />
+                </a>
+                <span className="text-[11px] text-gray-600 leading-relaxed">
+                  iOSアプリ配信開始
+                  <br />
+                  Android版は準備中
                 </span>
               </div>
             </div>
@@ -583,8 +614,24 @@ export default function LandingPage() {
               まずは10分間、無料で試す
             </a>
             <p className="mt-4 text-[10px] sm:text-xs text-gray-300">
-              Webブラウザで今すぐ使えます / ホーム画面に追加でアプリ感覚
+              Webブラウザで今すぐ使えます / iPhoneならアプリでもっと安定
             </p>
+            <a
+              href={APP_STORE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block mt-4 hover:opacity-80 transition"
+              aria-label="App Store で LIVE SPOtCH をダウンロード"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/appstore-badge-ja.svg"
+                alt="App Store でダウンロード"
+                width={136}
+                height={50}
+                className="h-[40px] w-auto mx-auto"
+              />
+            </a>
           </div>
         </div>
       </section>
@@ -594,6 +641,14 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-600">
           <p>© 2026 LIVE SPOtCH / LIN-NAH株式会社</p>
           <div className="flex flex-wrap gap-4 sm:gap-6 justify-center">
+            <a
+              href={APP_STORE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-gray-400 transition"
+            >
+              iOSアプリ（App Store）
+            </a>
             <a href="/terms" className="hover:text-gray-400 transition">利用規約</a>
             <a href="/privacy" className="hover:text-gray-400 transition">プライバシーポリシー</a>
             <a href="/tokusho" className="hover:text-gray-400 transition">特定商取引法に基づく表示</a>
