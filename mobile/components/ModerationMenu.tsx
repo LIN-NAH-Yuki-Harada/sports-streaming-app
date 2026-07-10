@@ -42,8 +42,21 @@ export function ModerationMenu({
   if (!target) return null;
   const isSelf = currentUserId != null && currentUserId === target.broadcasterId;
 
+  // セッション未取得（通信不良等）のとき、無反応にせず案内を出す。
+  function alertNoSession() {
+    onClose();
+    Alert.alert(
+      "操作できませんでした",
+      "ログイン情報を確認できません。電波の良い場所で、アプリを開き直してからお試しください。",
+    );
+  }
+
   async function handleReport(reason: string) {
-    if (!currentUserId || !target) return;
+    if (!target) return;
+    if (!currentUserId) {
+      alertNoSession();
+      return;
+    }
     setBusy(true);
     const r = await submitReport({
       reporterId: currentUserId,
@@ -65,7 +78,11 @@ export function ModerationMenu({
   }
 
   function confirmBlock() {
-    if (!currentUserId || !target) return;
+    if (!target) return;
+    if (!currentUserId) {
+      alertNoSession();
+      return;
+    }
     Alert.alert(
       "このユーザーをブロック",
       "ブロックすると、この配信者の配信・履歴が今後表示されなくなります。",

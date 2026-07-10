@@ -29,6 +29,7 @@ import {
   type WatchBroadcast,
 } from "../lib/watch-data";
 import { ScoreboardOverlay } from "../components/ScoreboardOverlay";
+import { ModerationMenu } from "../components/ModerationMenu";
 import type { RootStackParamList } from "../navigation-types";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Watch">;
@@ -42,6 +43,8 @@ export function WatchScreen({ route, navigation }: Props) {
   const [broadcast, setBroadcast] = useState<WatchBroadcast | null>(null);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string | null>(null);
+  // 通報・ブロック用の自分のユーザーID（Play/App Store の UGC ポリシー対応）。
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [tokenError, setTokenError] = useState(false);
   const [connectError, setConnectError] = useState(false);
   // 再読込（接続失敗/映像不達のリカバリ）用カウンタ。増やすと token 再取得＋LiveKitRoom 再マウント。
@@ -57,6 +60,22 @@ export function WatchScreen({ route, navigation }: Props) {
     setTokenError(false);
     setToken(null);
     setAttempt((a) => a + 1);
+  }, []);
+
+  // 自分のユーザーIDを取得（通報・ブロックの reporter として使う）。
+  useEffect(() => {
+    let active = true;
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (active) setCurrentUserId(data.session?.user.id ?? null);
+      })
+      .catch(() => {
+        /* 取得失敗時は null のまま（ModerationMenu 側が案内を出す） */
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   // 配信取得（shareCode 変化で必ず初期状態へ戻す＝別コードへ遷移しても古い試合が残らない）。
@@ -245,22 +264,31 @@ export function WatchScreen({ route, navigation }: Props) {
         setConnectError(true);
       }}
     >
-      <Stage broadcast={broadcast} onClose={close} onReload={retry} />
+      <Stage
+        broadcast={broadcast}
+        currentUserId={currentUserId}
+        onClose={close}
+        onReload={retry}
+      />
     </LiveKitRoom>
   );
 }
 
-// LiveKit 接続後のステージ（映像 + オーバーレイ + 右上情報 + 終了/再読込）。
+// LiveKit 接続後のステージ（映像 + オーバーレイ + 右上情報 + 終了/再読込 + 通報）。
 function Stage({
   broadcast,
+  currentUserId,
   onClose,
   onReload,
 }: {
   broadcast: WatchBroadcast;
+  currentUserId: string | null;
   onClose: () => void;
   onReload: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  // 通報・ブロックメニュー（UGC ポリシー: コンテンツの消費地点に通報手段を置く）。
+  const [modVisible, setModVisible] = useState(false);
   const connState = useConnectionState();
   const tracks = useTracks([Track.Source.Camera]);
   const participants = useParticipants();
@@ -347,14 +375,39 @@ function Stage({
         ) : null}
       </View>
 
-      {/* 右下: 視聴を終了 */}
-      <Pressable
-        style={[styles.closeInline, { bottom: insets.bottom + 14, right: 14 }]}
-        onPress={onClose}
-        hitSlop={8}
+      {/* 右下: 通報・ブロック（⋯）＋ 視聴を終了。
+          左下はスコアボードの経過時間表示が使うため、操作ボタンは右下に集約する。 */}
+      <View
+        style={[styles.bottomActions, { bottom: insets.bottom + 14, right: 14 }]}
       >
-        <Text style={styles.closeInlineText}>✕ 視聴を終了</Text>
-      </Pressable>
+        <Pressable
+          style={styles.actionBtn}
+          onPress={() => setModVisible(true)}
+          hitSlop={8}
+        >
+          <Text style={styles.closeInlineText}>⋯</Text>
+        </Pressable>
+        <Pressable style={styles.actionBtn} onPress={onClose} hitSlop={8}>
+          <Text style={styles.closeInlineText}>✕ 視聴を終了</Text>
+        </Pressable>
+      </View>
+
+      {/* 通報・ブロックメニュー。ブロックしたら視聴画面から退出する。 */}
+      <ModerationMenu
+        visible={modVisible}
+        currentUserId={currentUserId}
+        target={{
+          broadcastId: broadcast.id,
+          broadcasterId: broadcast.broadcaster_id,
+          shareCode: broadcast.share_code,
+          label: `${broadcast.home_team} vs ${broadcast.away_team}`,
+        }}
+        onClose={() => setModVisible(false)}
+        onBlocked={() => {
+          setModVisible(false);
+          onClose();
+        }}
+      />
     </View>
   );
 }
@@ -451,7 +504,22 @@ const styles = StyleSheet.create({
   },
   matchText: { color: "#e5e7eb", fontSize: 12, fontWeight: "600" },
 
-  // 視聴を終了（右下）
+  // 右下の操作ボタン行（⋯ / ✕ 視聴を終了）
+  bottomActions: {
+    position: "absolute",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  actionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.7)",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  // 視聴を終了（読み込み中などの単独表示用）
   closeInline: {
     position: "absolute",
     flexDirection: "row",

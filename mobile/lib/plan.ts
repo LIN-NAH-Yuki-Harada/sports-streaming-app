@@ -49,16 +49,21 @@ export async function fetchPlan(userId: string): Promise<Plan> {
 /**
  * 購入直後、RevenueCat → webhook が profiles.plan を更新するまで数秒の遅延がある。
  * 有料プラン（broadcaster/team）になるまで fetchPlan をポーリングして返す。
- * timeoutMs を超えたら現在の plan（多くは free）を返す（UX を止めない）。
+ * expectedPlan を渡すと「そのプランになるまで」待つ（プラン変更購入では現在値が
+ * すでに non-free のため、free 判定だけだと反映前に即リターンしてしまう）。
+ * timeoutMs を超えたら現在の plan をそのまま返す（UX を止めない）。
  */
 export async function waitForPaidPlan(
   userId: string,
+  expectedPlan?: Plan,
   timeoutMs = 12000,
   intervalMs = 1500
 ): Promise<Plan> {
+  const satisfied = (p: Plan) =>
+    expectedPlan ? p === expectedPlan : p !== "free";
   const deadline = Date.now() + timeoutMs;
   let plan = await fetchPlan(userId);
-  while (plan === "free" && Date.now() < deadline) {
+  while (!satisfied(plan) && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, intervalMs));
     plan = await fetchPlan(userId);
   }

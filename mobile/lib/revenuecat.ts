@@ -49,7 +49,8 @@ export async function rcLogIn(userId: string): Promise<void> {
   try {
     await Purchases.logIn(userId);
   } catch {
-    /* 失敗してもアプリは続行（購入時に再ログインされる） */
+    /* 失敗してもアプリは続行（PaywallScreen の purchase()/restore() が
+       実行前に rcLogIn を再試行して app_user_id を保証する） */
   }
 }
 

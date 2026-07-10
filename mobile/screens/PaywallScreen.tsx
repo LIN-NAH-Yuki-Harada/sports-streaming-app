@@ -12,22 +12,32 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Purchases, { type PurchasesPackage } from "react-native-purchases";
+import Purchases, {
+  STORE_REPLACEMENT_MODE,
+  type PurchasesPackage,
+  type StoreProductChangeInfo,
+} from "react-native-purchases";
 import { supabase } from "../lib/supabase";
-import { waitForPaidPlan } from "../lib/plan";
-import { RC_SUPPORTED } from "../lib/revenuecat";
+import { waitForPaidPlan, type Plan } from "../lib/plan";
+import { RC_SUPPORTED, rcLogIn } from "../lib/revenuecat";
 import { SITE_URL } from "../config";
 
 // 商品ID → プラン表示情報。RevenueCat の package.product.identifier で判定する
 // （パッケージ名ではなく商品IDで見分けるので、RevenueCat側のパッケージ命名に依存しない）。
-const TIERS: Record<string, { name: string; features: string[]; order: number }> = {
+// plan は購入後に profiles.plan がなるべき値（webhook 反映の完了判定に使う）。
+const TIERS: Record<
+  string,
+  { name: string; plan: Plan; features: string[]; order: number }
+> = {
   broadcaster_monthly: {
     name: "配信者プラン",
+    plan: "broadcaster",
     order: 1,
     features: ["自社プレイヤーで無制限ライブ配信", "スコアボード・共有コード", "LINE共有"],
   },
   team_monthly: {
     name: "チームプラン",
+    plan: "team",
     order: 2,
     features: ["配信者プランの全機能", "YouTube 自動アーカイブ", "チーム管理・スケジュール"],
   },
@@ -85,13 +95,61 @@ export function PaywallScreen() {
     if (busy) return;
     setBusy("購入処理中…");
     try {
-      await Purchases.purchasePackage(pkg);
+      // 購入前に app_user_id = Supabase user.id を必ず保証する（起動時の logIn が
+      // ネットワーク不調で失敗していると匿名IDに購入が紐づき、webhook が
+      // no-user でスキップされて plan が反映されないため）。rcLogIn は冪等。
+      if (userId) await rcLogIn(userId);
+
+      // Android: 既に別プランのサブスクを保有している場合は「プラン変更」として
+      // 購入する（指定しないと旧サブスクが解約されず二重課金になる。Google Play には
+      // App Store のようなサブスクグループの自動置き換えがない）。
+      // iOS はサブスクリプショングループが自動処理するので不要。
+      let productChangeInfo: StoreProductChangeInfo | null = null;
+      if (Platform.OS === "android") {
+        try {
+          const info = await Purchases.getCustomerInfo();
+          const newBase = tierKey(pkg.product.identifier);
+          // activeSubscriptions は Play では "{subscriptionId}:{basePlanId}" 形式。
+          // ★ 全ストア横断のリストなので PLAY_STORE のものだけを対象にする
+          //   （同一アカウントで iOS 購入済みの場合、App Store のサブスクを
+          //    oldProductIdentifier に渡すと Play に旧購入が無く購入自体が失敗する）。
+          const oldSub = info.activeSubscriptions.find(
+            (s) =>
+              tierKey(s) !== newBase &&
+              info.subscriptionsByProductIdentifier?.[s]?.store === "PLAY_STORE",
+          );
+          if (oldSub) {
+            productChangeInfo = {
+              oldProductIdentifier: tierKey(oldSub),
+              // 即時切替＋残期間は日割りでクレジット（Play の標準的なアップグレード挙動）
+              replacementMode: STORE_REPLACEMENT_MODE.WITH_TIME_PRORATION,
+            };
+          }
+        } catch {
+          /* customerInfo 取得失敗時は通常購入にフォールバック（新規購入なら影響なし） */
+        }
+      }
+
+      await Purchases.purchasePackage(pkg, null, productChangeInfo);
       setBusy("反映中…");
-      if (userId) await waitForPaidPlan(userId);
+      // 購入した商品に対応するプランになるまで待つ（プラン変更購入では現在値が
+      // すでに non-free のため、期待値まで見ないと反映前に成功表示してしまう）。
+      const expected = TIERS[tierKey(pkg.product.identifier)]?.plan;
+      const plan = userId ? await waitForPaidPlan(userId, expected) : "free";
       setBusy(null);
-      Alert.alert("ありがとうございます", "プランが有効になりました。", [
-        { text: "OK", onPress: close },
-      ]);
+      if (expected ? plan === expected : plan !== "free") {
+        Alert.alert("ありがとうございます", "プランが有効になりました。", [
+          { text: "OK", onPress: close },
+        ]);
+      } else {
+        // 決済は成立したが profiles.plan への反映がまだ（webhook 遅延等）。
+        // 成功と断言せず、確認手段を案内する（障害の隠蔽防止）。
+        Alert.alert(
+          "購入を受け付けました",
+          "反映に少し時間がかかっています。しばらくしてからマイページでプランをご確認ください。反映されない場合は「購入を復元」をお試しください。",
+          [{ text: "OK", onPress: close }],
+        );
+      }
     } catch (e) {
       setBusy(null);
       const err = e as { userCancelled?: boolean; message?: string };
@@ -104,6 +162,8 @@ export function PaywallScreen() {
     if (busy) return;
     setBusy("復元中…");
     try {
+      // 復元も購入と同様、先に app_user_id を Supabase user.id に合わせる。
+      if (userId) await rcLogIn(userId);
       const info = await Purchases.restorePurchases();
       if (Object.keys(info.entitlements.active).length === 0) {
         setBusy(null);
@@ -111,9 +171,19 @@ export function PaywallScreen() {
         return;
       }
       setBusy("反映中…");
-      if (userId) await waitForPaidPlan(userId);
+      const plan = userId ? await waitForPaidPlan(userId) : "free";
       setBusy(null);
-      Alert.alert("復元完了", "プランを復元しました。", [{ text: "OK", onPress: close }]);
+      if (plan !== "free") {
+        Alert.alert("復元完了", "プランを復元しました。", [
+          { text: "OK", onPress: close },
+        ]);
+      } else {
+        Alert.alert(
+          "復元を受け付けました",
+          "反映に少し時間がかかっています。しばらくしてからマイページでプランをご確認ください。",
+          [{ text: "OK", onPress: close }],
+        );
+      }
     } catch (e) {
       setBusy(null);
       const err = e as { message?: string };

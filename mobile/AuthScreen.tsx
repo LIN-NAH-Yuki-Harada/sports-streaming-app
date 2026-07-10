@@ -143,7 +143,13 @@ export function AuthScreen() {
       if (isErrorWithCode(e) && e.code === statusCodes.SIGN_IN_CANCELLED) {
         // ユーザーがキャンセル。無言で戻す。
       } else {
-        setMessage("Googleログインでエラーが発生しました。");
+        // エラーコードを併記して外部設定の不一致を画面上で診断できるようにする
+        // （例 DEVELOPER_ERROR = Google Cloud の Android OAuth クライアントの
+        //  SHA-1/package 不一致。Play 署名鍵の SHA-1 未登録が典型）。
+        const code = isErrorWithCode(e) ? e.code : null;
+        setMessage(
+          "Googleログインでエラーが発生しました。" + (code ? `（${code}）` : ""),
+        );
       }
     } finally {
       setBusy(false);
