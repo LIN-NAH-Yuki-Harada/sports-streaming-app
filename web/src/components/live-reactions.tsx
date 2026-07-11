@@ -47,9 +47,11 @@ export function LiveReactions({ shareCode }: { shareCode: string }) {
     const item: FloatingItem = {
       id,
       kind,
-      left: 38 + Math.random() * 24, // 下中央ボタン付近（38〜62%）にばらつかせる
-      drift: Math.random() * 80 - 40, // -40〜40px
-      size: 22 + Math.random() * 14, // 22〜36px
+      // 右端ボタン付近（78〜90%）にばらつかせる。中央のプレー映像に
+      // かからないよう、スタンプは右端に沿って上昇させる（2026-07-11 実戦FB）。
+      left: 78 + Math.random() * 12,
+      drift: Math.random() * 32 - 16, // -16〜16px（右端から大きく離れない）
+      size: 18 + Math.random() * 10, // 18〜28px（プレーを隠さない控えめサイズ）
       duration: 2200 + Math.random() * 700, // 2.2〜2.9s
     };
     setItems((prev) => {
@@ -117,7 +119,7 @@ export function LiveReactions({ shareCode }: { shareCode: string }) {
             className="absolute select-none"
             style={{
               left: `${it.left}%`,
-              bottom: "64px",
+              bottom: "148px",
               fontSize: `${it.size}px`,
               ["--ls-drift" as string]: `${it.drift}px`,
               animation: `lsReactFloat ${it.duration}ms ease-out forwards`,
@@ -128,19 +130,20 @@ export function LiveReactions({ shareCode }: { shareCode: string }) {
         ))}
       </div>
 
-      {/* 応援ボタン（下中央・左下=経過時間/右下=視聴コントロールと干渉しない位置） */}
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[4] flex items-center gap-2">
+      {/* 応援ボタン（右端に縦積み・右下コントロール群の上）。
+          下中央だと縦画面でプレー映像に重なるため右端へ（2026-07-11 実戦FB）。 */}
+      <div className="absolute bottom-16 right-3 z-[4] flex flex-col items-center gap-2">
         <button
           onClick={() => send("heart")}
           aria-label="ハートで応援"
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-lg backdrop-blur-sm transition active:scale-90 hover:bg-black/75"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-base backdrop-blur-sm transition active:scale-90 hover:bg-black/75"
         >
           ❤️
         </button>
         <button
           onClick={() => send("clap")}
           aria-label="いいねで応援"
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-lg backdrop-blur-sm transition active:scale-90 hover:bg-black/75"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-base backdrop-blur-sm transition active:scale-90 hover:bg-black/75"
         >
           👍
         </button>
