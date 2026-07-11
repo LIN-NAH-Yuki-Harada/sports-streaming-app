@@ -32,7 +32,7 @@ import {
 // ★ 退会（アカウント削除）は Apple 5.1.1(v) 対応でアプリ内から完結（/api/account/delete）。
 // ログアウトもアプリ内で完結（supabase.auth.signOut）。
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 const IS_IOS = Platform.OS === "ios";
 
 export function MyPageScreen() {
@@ -154,9 +154,15 @@ export function MyPageScreen() {
   }, []);
 
   const handleDelete = useCallback(() => {
+    // アプリ内課金（App Store / Google Play）の自動更新サブスクは、アプリや
+    // サーバーからは解約できない（ストア側でのみ解約可能）。退会だけして課金が
+    // 続く事故を防ぐため、ストアでの解約手順を明記する。
+    const iapNote = IS_IOS
+      ? "アプリ内課金のプランをご利用中の場合、iOS の「設定 > Apple ID > サブスクリプション」からの解約も必要です。"
+      : "アプリ内課金のプランをご利用中の場合、Google Play の「お支払いと定期購入 > 定期購入」からの解約も必要です。";
     Alert.alert(
       "アカウントを削除（退会）",
-      "アカウントと配信データが完全に削除され、元に戻せません。有料プランは自動的に解約されます。削除しますか？",
+      `アカウントと配信データが完全に削除され、元に戻せません。Webサイトで登録した有料プランは自動的に解約されます。\n\n${iapNote}\n\n削除しますか？`,
       [
         { text: "キャンセル", style: "cancel" },
         { text: "削除する", style: "destructive", onPress: doDelete },

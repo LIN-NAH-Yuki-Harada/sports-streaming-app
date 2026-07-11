@@ -2,9 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Animated,
   AppState,
-  Easing,
+  BackHandler,
   Platform,
   Pressable,
   SafeAreaView,
@@ -78,6 +77,7 @@ import {
 } from "../lib/plan";
 import { type MyTeam, fetchMyTeams } from "../lib/teams";
 import { fetchMyProfile } from "../lib/mypage-data";
+import { LiveReactions } from "../components/LiveReactions";
 import { useNavigation } from "@react-navigation/native";
 import NetInfo from "@react-native-community/netinfo";
 
@@ -1253,102 +1253,10 @@ export function BroadcastScreen() {
   );
 }
 
-// 視聴者からのライブ応援スタンプ（❤️/👍）を配信者画面に浮かべる。
-// Web 視聴ページ（live-reactions.tsx）と同一の reactions-${shareCode} チャンネルを
-// 購読し、受信のたびにふわっと上昇するアニメを表示する（配信者が応援を体感できる）。
-type FloatingReaction = {
-  id: number;
-  emoji: string;
-  left: number; // 出現位置（左から%）
-  drift: number; // 上昇しながらの横ドリフト(px)
-  size: number;
-  anim: Animated.Value;
-};
-
-function BroadcastReactions({ shareCode }: { shareCode: string }) {
-  const [items, setItems] = useState<FloatingReaction[]>([]);
-  const idRef = useRef(0);
-
-  const spawn = useCallback((emoji: string) => {
-    const id = idRef.current++;
-    const anim = new Animated.Value(0);
-    const item: FloatingReaction = {
-      id,
-      emoji,
-      left: 6 + Math.random() * 62, // 6〜68%
-      drift: Math.random() * 60 - 30, // -30〜30px
-      size: 26 + Math.random() * 14, // 26〜40px
-      anim,
-    };
-    // 同時表示は最大30個でキャップ（連打/大量受信時のパフォーマンス保護）
-    setItems((prev) => (prev.length >= 30 ? prev.slice(1) : prev).concat(item));
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 2400,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start(() => {
-      setItems((prev) => prev.filter((x) => x.id !== id));
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!shareCode) return;
-    const channel = supabase.channel(`reactions-${shareCode}`, {
-      config: { broadcast: { self: false } },
-    });
-    channel
-      .on("broadcast", { event: "react" }, ({ payload }) => {
-        const kind = (payload as { kind?: string })?.kind;
-        if (kind === "heart") spawn("❤️");
-        else if (kind === "clap") spawn("👍");
-      })
-      .subscribe();
-    return () => {
-      channel.unsubscribe().catch(() => {});
-      supabase.removeChannel(channel);
-    };
-  }, [shareCode, spawn]);
-
-  return (
-    <View style={styles.reactionLayer} pointerEvents="none">
-      {items.map((it) => {
-        const translateY = it.anim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0, -240],
-        });
-        const translateX = it.anim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0, it.drift],
-        });
-        const opacity = it.anim.interpolate({
-          inputRange: [0, 0.15, 0.8, 1],
-          outputRange: [0, 1, 1, 0],
-        });
-        const scale = it.anim.interpolate({
-          inputRange: [0, 0.15, 1],
-          outputRange: [0.6, 1, 1],
-        });
-        return (
-          <Animated.Text
-            key={it.id}
-            style={[
-              styles.reactionEmoji,
-              {
-                left: `${it.left}%`,
-                fontSize: it.size,
-                opacity,
-                transform: [{ translateY }, { translateX }, { scale }],
-              },
-            ]}
-          >
-            {it.emoji}
-          </Animated.Text>
-        );
-      })}
-    </View>
-  );
-}
+// 視聴者からのライブ応援スタンプ（❤️/👍）の受信表示は、視聴画面と共通の
+// LiveReactions コンポーネント（components/LiveReactions.tsx・右端上昇）に統一した。
+// ※ 以前はここに中央寄り(6〜68%)の独自実装があったが、「プレー映像にかぶる」
+//   実戦FB（2026-07-11）を受けて右端固定に変更。
 
 type ScoreControlsProps = {
   shareCode: string | null;
@@ -1444,6 +1352,17 @@ function ScoreControls(props: ScoreControlsProps) {
       { text: "停止する", style: "destructive", onPress: onStop },
     ]);
   }, [onStop]);
+
+  // Android のバック操作（ボタン/ジェスチャー）で配信が黙って中断しないよう、
+  // 配信中（＝このオーバーレイ表示中）は停止確認ダイアログに差し替える。
+  // iOS にはバックキーが無いため no-op。
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      confirmStop();
+      return true; // 既定のアプリ終了/戻る遷移を抑止
+    });
+    return () => sub.remove();
+  }, [confirmStop]);
 
   // 縦持ち時だけ操作UI（特にアウェイ側）が画面外に切れないよう詰める。横持ちは現状維持。
   const { width: winW, height: winH } = useWindowDimensions();
@@ -1644,8 +1563,8 @@ function ScoreControls(props: ScoreControlsProps) {
         </View>
       </SafeAreaView>
 
-      {/* 視聴者からの応援スタンプ（pointerEvents none で操作を邪魔しない） */}
-      {shareCode ? <BroadcastReactions shareCode={shareCode} /> : null}
+      {/* 視聴者からの応援スタンプ（受信表示のみ・右端上昇・操作を邪魔しない） */}
+      {shareCode ? <LiveReactions shareCode={shareCode} /> : null}
     </>
   );
 }
@@ -1747,8 +1666,6 @@ const styles = StyleSheet.create({
   connecting: { color: "#fff", marginTop: 8 },
 
   // 視聴者からの応援スタンプ層（下から上へ浮かぶ・操作非干渉）
-  reactionLayer: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0 },
-  reactionEmoji: { position: "absolute", bottom: 150 },
 
   topOverlay: {
     position: "absolute",
