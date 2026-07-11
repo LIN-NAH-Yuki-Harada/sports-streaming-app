@@ -1,0 +1,28 @@
+# EAS Build のアップロード対象から、モバイルアプリのビルドに不要なものを除外する。
+# （EAS は git リポジトリのルートごとアーカイブするため、これが無いと web/ や
+#   docs/ の事業資料まで含んだ 250MB 超のアップロードになり、回線都合で失敗しやすい。
+#   2026-07-11 に EPIPE で2連続失敗した対策。）
+# 注意: .gitignore と同様の書式。mobile/ のビルドに必要なファイルは除外しないこと。
+
+# Web アプリ（モバイルビルドとは無関係・node_modules 含め 1GB 超）
+web/
+
+# 事業資料・マーケ素材・スクリーンショット類
+docs/
+marketing/
+image(screenshot）/
+note-articles/
+Book1.xlsx
+*.pdf
+*.pptx
+*.xlsx
+*.docx
+
+# インフラ・社内メモ・エージェント設定
+infra/
+.company/
+.claude/
+memory/
+
+# OS ゴミ
+.DS_Store
