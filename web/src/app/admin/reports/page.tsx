@@ -66,7 +66,9 @@ export default async function AdminReports() {
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-bold text-sm">{r.reason}</span>
                   <span className="text-[10px] text-gray-400">
-                    {new Date(r.created_at).toLocaleString("ja-JP")}
+                    {new Date(r.created_at).toLocaleString("ja-JP", {
+                      timeZone: "Asia/Tokyo",
+                    })}
                     {aging && <span className="ml-1 text-[#e63946] font-bold">⚠ 24h超</span>}
                     <span className="ml-2 px-1.5 py-0.5 rounded bg-white/10">{r.status}</span>
                   </span>
