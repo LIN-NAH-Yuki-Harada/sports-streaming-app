@@ -8,7 +8,12 @@ Type=oneshot
 WorkingDirectory=/opt/archive-worker
 EnvironmentFile=/opt/archive-worker/.env
 ExecStart=/usr/bin/node /opt/archive-worker/worker.js
-# 大容量アップロードに備え最大1時間。Nice/IOで優先度を下げライブ(MediaMTX)を優先。
-TimeoutStartSec=3600
-Nice=10
+# 長尺(45分級)の高品質エンコード＋ライブ並走時の速度低下に備え最大3時間。
+# ★ worker.js の STALE_UPLOADING_MS(4h) は必ずこの値より長く保つこと（結合）。
+TimeoutStartSec=10800
+# ライブ(MediaMTX)絶対優先: SCHED_IDLE は「他が使っていないCPUだけ使う」を
+# カーネルレベルで保証（cgroup v2 では Nice はサービス間競合に効かないため置換。
+# MediaMTX は中継のみでCPU軽量なので、実際はワーカーもほぼフルスピードで走れる）。
+CPUSchedulingPolicy=idle
+# ディスクIO優先度（virtio+mq-deadline では実質no-opだが害なし・BFQ環境では有効）
 IOSchedulingClass=idle

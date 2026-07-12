@@ -23,6 +23,30 @@ const MAX_RETRY = 5;
 // 終了からこの時間を過ぎても録画が無ければ録画OFF時代/取りこぼしと判断して即 failed。
 const RECORDING_WAIT_MS = 30 * 60 * 1000;
 
+// ===== 画質/運用チューニング（2026-07-12 v2・env で上書き可）=====
+// 中間エンコード（焼き込み/連結）の CRF。17 は視覚的にほぼ無劣化域＝
+// 「本気の圧縮は最終 canonicalize の1回だけ」にして世代劣化を解消する。
+const CRF_INTERMEDIATE = process.env.CRF_INTERMEDIATE || "17";
+// 最終 canonicalize の CRF（旧23→20。YouTubeに渡す原盤の質を引き上げ）。
+const CRF_FINAL = process.env.CRF_FINAL || "20";
+// この秒数未満の配信はアーカイブしない（誤スタートのゴミ動画がYouTubeに残る対策）。
+// env 誤設定（例 "300"）で実試合を捨てないよう上限60にクランプする。
+const MIN_ARCHIVE_SEC = Math.min(
+  Number(process.env.MIN_ARCHIVE_SEC || 30) || 30,
+  60,
+);
+// "1" で最終出力を 1920x1080 にアップスケール（YouTube の割当ビットレートが上がる）。
+// 処理時間 +10〜15分/試合のため既定 OFF。数試合検証後に .env で点灯する。
+const UPSCALE_1080 = process.env.UPSCALE_1080 === "1";
+// ffmpeg の -threads（libx264 のエンコードスレッドのみ制限・filter系は対象外＝効果は
+// 部分的）。CPU 保護の主防御は systemd の CPUSchedulingPolicy=idle 側。既定は未指定。
+const FFMPEG_THREADS = process.env.FFMPEG_THREADS || "";
+// stale uploading のリクレーム閾値。**必ず service の TimeoutStartSec(10800s=3h) より
+// 長くする**（Timeout kill 前の正常走行中ジョブをリクレームしないため。4h=余裕込み）。
+const STALE_UPLOADING_MS = 4 * 60 * 60 * 1000;
+// SIGKILL 時は finally が走らず中間ファイルが残るため、古い作業dirを起動時に掃除する。
+const ORPHAN_WORKDIR_MS = 24 * 60 * 60 * 1000;
+
 if (
   !SUPABASE_URL ||
   !SUPABASE_SERVICE_ROLE_KEY ||
@@ -130,6 +154,26 @@ function classify(err) {
   ) {
     return { type: "token-revoked", msg };
   }
+  // YouTube API 日次クォータ超過（videos.insert=1600unit・標準10,000unit/日≒6本/日）。
+  // 403 で届くため auth-refresh より先に判定する。クォータは翌日16時JSTに復活する
+  // ので retry を消費せず pending 維持で翌日自動再開させる（従来は25分で永久failed化）。
+  const reason =
+    (e.errors && e.errors[0] && e.errors[0].reason) ||
+    (e.response &&
+      e.response.data &&
+      e.response.data.error &&
+      e.response.data.error.errors &&
+      e.response.data.error.errors[0] &&
+      e.response.data.error.errors[0].reason) ||
+    "";
+  if (
+    reason === "quotaExceeded" ||
+    reason === "uploadLimitExceeded" ||
+    msg.includes("quotaExceeded") ||
+    msg.includes("uploadLimitExceeded")
+  ) {
+    return { type: "quota", msg };
+  }
   if (status === 401 || status === 403) return { type: "auth-refresh", msg };
   if (status === 429 || (status >= 500 && status < 600))
     return { type: "retry", msg };
@@ -169,6 +213,15 @@ function spawnP(cmd, args) {
     );
     pr.on("error", reject);
   });
+}
+
+// ffmpeg 実行ヘルパー。FFMPEG_THREADS 設定時のみ、出力パス（最終引数）の直前に
+// -threads を挿入する（全呼び出しで出力パスが末尾に来る前提＝本ファイル内の4箇所で確認済）。
+function ffmpegP(args) {
+  if (FFMPEG_THREADS) {
+    args = [...args.slice(0, -1), "-threads", FFMPEG_THREADS, args[args.length - 1]];
+  }
+  return spawnP("ffmpeg", args);
 }
 
 async function ffprobeDurationSec(p) {
@@ -331,7 +384,7 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
     "-map", "0:a?",
     "-c:v", "libx264",
     "-preset", "veryfast",
-    "-crf", "23",
+    "-crf", CRF_INTERMEDIATE,
     "-pix_fmt", "yuv420p",
     // 固定フレームレート(CFR 30)に正規化。配信側アダプティブが可変fpsにすると
     // 再生不可/尺崩れになるため、ここで30fps一定に焼き直す。音声も再エンコード＋
@@ -348,16 +401,16 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
     `seg${idx}: burning scoreboard SVG (${segs.length} score segments, ${w}x${h}, dur ${Math.round(durationMs / 1000)}s)`,
   );
   try {
-    await spawnP("ffmpeg", args);
+    await ffmpegP(args);
     return { path: outPath, scored: true };
   } catch (e) {
     // 焼き込み失敗（短い断片のPNG生成失敗等）でも、生のまま返さず必ず canonical に正規化する。
     // 生(元params)のまま連結に渡すと、焼き込み済(libx264)セグメントとparam不一致で連結が
     // 境界で打ち切られる（seg1を落として2秒になる事象）。オーバーレイ無しで同一paramsに揃える。
     log(`seg${idx}: burn failed -> normalize without overlay: ${String(e).slice(0, 120)}`);
-    await spawnP("ffmpeg", [
+    await ffmpegP([
       "-y", "-i", recPath,
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", CRF_INTERMEDIATE,
       "-pix_fmt", "yuv420p", "-r", "30",
       "-af", "aresample=async=1:first_pts=0",
       "-c:a", "aac", "-ar", "48000", "-ac", "2",
@@ -434,7 +487,7 @@ async function concatSegments(paths, workDir) {
   });
   const cat = paths.map((_, i) => `[v${i}][a${i}]`).join("");
   fc += `${cat}concat=n=${paths.length}:v=1:a=1[v][a]`;
-  await spawnP("ffmpeg", [
+  await ffmpegP([
     "-y",
     ...inputs,
     "-filter_complex", fc,
@@ -442,7 +495,8 @@ async function concatSegments(paths, workDir) {
     "-map", "[a]",
     "-c:v", "libx264",
     "-preset", "veryfast",
-    "-crf", "23",
+    // 連結は中間工程＝ほぼ無劣化で通し、圧縮は最終 canonicalize に一任する。
+    "-crf", CRF_INTERMEDIATE,
     "-pix_fmt", "yuv420p",
     "-r", "30",
     "-c:a", "aac",
@@ -460,18 +514,31 @@ async function concatSegments(paths, workDir) {
 // 音声が無い録画でも落ちないよう、音声トラックがある時だけ音声処理を付ける。
 async function canonicalize(inputPath, outPath) {
   const hasAudio = await ffprobeHasAudio(inputPath);
+  // UPSCALE_1080: 入力（burn/concat 出力または raw）が正確に 1280x720 と実測できた
+  // ときだけ 1920x1080 へアップスケール（YouTube の 1080p ティアは 720p より割当
+  // ビットレートが高く、再圧縮後の見た目が改善する既知のテクニック）。固定寸法＋
+  // setsar=1 なので level 4.1 の幅制限・SAR・偶数化の辺縁ケースは発生しない。
+  // probe 失敗（フォールバック値でも w/h は 1280x720 になるが、その場合は実測
+  // 720p と区別できないだけで拡大しても無害）や 720p 以外は既存の偶数化 vf を維持。
+  let vf = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+  if (UPSCALE_1080) {
+    const { w, h } = await ffprobeWH(inputPath);
+    if (w === 1280 && h === 720) {
+      vf = "scale=1920:1080:flags=lanczos,setsar=1";
+    }
+  }
   const args = [
     "-y",
     "-fflags", "+genpts", // 非単調/欠落PTSを再生成（RTMP再接続録画対策）
     "-i", inputPath,
     "-map", "0:v:0",
-    // 奇数寸法を偶数化（yuv420p要件・"width not divisible by 2"でのffmpeg失敗を防ぐ防御）。
-    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+    // 既定 vf: 奇数寸法を偶数化（yuv420p要件・"width not divisible by 2"失敗防止）。
+    "-vf", vf,
     "-vsync", "cfr", // 出力を固定フレームレート化（可変fpsをYouTube処理可能に）
     "-r", "30",
     "-c:v", "libx264",
     "-preset", "veryfast",
-    "-crf", "23",
+    "-crf", CRF_FINAL,
     "-profile:v", "high",
     "-level", "4.1",
     "-pix_fmt", "yuv420p",
@@ -486,7 +553,7 @@ async function canonicalize(inputPath, outPath) {
     );
   }
   args.push("-max_muxing_queue_size", "1024", "-movflags", "+faststart", outPath);
-  await spawnP("ffmpeg", args);
+  await ffmpegP(args);
   return outPath;
 }
 
@@ -494,7 +561,75 @@ async function setStatus(id, fields) {
   await admin.from("broadcasts").update(fields).eq("id", id);
 }
 
+// SIGKILL（Timeout等）で finally が走らなかった過去実行の残骸を掃除する。
+// 中間ファイルは1件5〜10GBになり得るため、放置すると /var/tmp を食い潰して
+// MediaMTX の録画書き込み（同一FS）まで巻き込む。更新が古い spotch_* のみ削除。
+function sweepOrphanWorkDirs() {
+  const base = process.env.WORK_DIR || "/var/tmp";
+  let names;
+  try {
+    names = fs.readdirSync(base).filter((n) => n.startsWith("spotch_"));
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - ORPHAN_WORKDIR_MS;
+  for (const n of names) {
+    const p = path.join(base, n);
+    try {
+      if (fs.statSync(p).mtimeMs < cutoff) {
+        fs.rmSync(p, { recursive: true, force: true });
+        log("swept orphan workdir:", n);
+      }
+    } catch {
+      /* 消せない残骸は次回に回す */
+    }
+  }
+}
+
+// SIGKILL で catch が走らず "uploading" のまま残った行を復旧する。
+// 閾値 STALE_UPLOADING_MS(4h) は service の TimeoutStartSec(3h) より必ず長いこと
+// （oneshot は単一インスタンスなので、4h 前に claim した実行は既に kill 済みと保証できる）。
+// retry を必ず消費させる：増分なしだと「3hかけて kill → リクレーム → また3h」の
+// 永久ループでライブ配信の CPU を恒常的に奪い続ける。
+async function reclaimStaleUploading() {
+  const cutoffIso = new Date(Date.now() - STALE_UPLOADING_MS).toISOString();
+  const { data: stale } = await admin
+    .from("broadcasts")
+    .select("id, share_code, youtube_retry_count")
+    .eq("youtube_upload_status", "uploading")
+    .lt("youtube_upload_started_at", cutoffIso);
+  for (const s of stale || []) {
+    const retry = s.youtube_retry_count || 0;
+    const exhausted = retry >= MAX_RETRY - 1;
+    await admin
+      .from("broadcasts")
+      .update({
+        youtube_upload_status: exhausted ? "failed" : "pending",
+        youtube_retry_count: retry + 1,
+        youtube_upload_error:
+          "reclaimed after stale uploading（タイムアウト等で中断。重複動画の可能性があれば YouTube Studio を確認）",
+      })
+      .eq("id", s.id)
+      .eq("youtube_upload_status", "uploading"); // CAS: 同時実行への保険
+    log(
+      `reclaimed stale uploading: ${s.share_code} -> ${exhausted ? "failed" : "pending"} (retry ${retry + 1})`,
+    );
+  }
+}
+
 async function main() {
+  // 0. 保守: 残骸workDir掃除 + stale uploadingの復旧（どちらも失敗しても本処理は続行）
+  try {
+    sweepOrphanWorkDirs();
+  } catch (e) {
+    log("orphan sweep failed (ignored):", String(e).slice(0, 120));
+  }
+  try {
+    await reclaimStaleUploading();
+  } catch (e) {
+    log("stale reclaim failed (ignored):", String(e).slice(0, 120));
+  }
+
   // 1. 対象 = 終了した自前配信(stream_playback_url 有)で未処理(null/pending)・retry 未超過
   const { data: rows, error } = await admin
     .from("broadcasts")
@@ -572,6 +707,9 @@ async function main() {
   //      のことがあり、混ざると連結が「stream 不在 / 尺打ち切り」で全失敗する。
   //      全部除外される極端ケースは「映像がある最長の1本」だけ残す（空にしない）。
   //      映像のある断片がゼロなら、アーカイブ不能として明確に failed にする。
+  // 「映像ありの全断片（除外分も含む）の合計尺」を極短判定(3-3)用に持ち出す。
+  // kept だけの合計だと、細切れ断片（例 4秒×8本=実映像32秒）を誤って極短扱いしてしまう。
+  let videoTotalSec = 0;
   {
     const MIN_SEG_SEC = 5;
     const withMeta = [];
@@ -582,6 +720,9 @@ async function main() {
         hasVideo: await ffprobeHasVideo(r.p),
       });
     }
+    videoTotalSec = withMeta
+      .filter((x) => x.hasVideo)
+      .reduce((s, x) => s + (x.d > 0 ? x.d : 0), 0);
     let kept = withMeta
       .filter((x) => x.d >= MIN_SEG_SEC && x.hasVideo)
       .map((x) => x.r);
@@ -610,6 +751,45 @@ async function main() {
       log(`dropped ${recs.length - kept.length} unusable segment(s): ${reasons}`);
     }
     recs = kept;
+  }
+
+  // 3-3. 極短配信（誤スタート等）はアーカイブしない。ゴミ動画が配信者のYouTube
+  //      チャンネルに積み上がる問題（2026-07-11 実発生・0〜1分動画が5本）への対策。
+  //      誤cancel（＝実試合を取り逃す）が最悪なので、正方向の三重チェックが
+  //      すべて真のときだけ cancel する（null/NaN はいずれも「cancelしない」に倒れる）:
+  //        ①映像断片の合計尺が有限かつ MIN_ARCHIVE_SEC 未満
+  //        ②配信の実時間(ended_at−started_at)も有限かつ MIN_ARCHIVE_SEC+15秒 未満
+  //          （ffprobe が全滅して d=0 でも、実時間が長い配信は誤cancelしない保険）
+  //        ③ended_at が10分以上前（MediaMTX のファイナライズ中＝moov未確定の録画を
+  //          「短い」と誤measureする窓を排除。RECORDING_WAIT_MS と同思想）
+  //      ※録画ファイルは削除しない（fail-closed 原則。ディスク上の数十MBは許容）。
+  {
+    const startedMs = b.started_at ? Date.parse(b.started_at) : NaN;
+    const endedMs = b.ended_at ? Date.parse(b.ended_at) : NaN;
+    const wallSec = (endedMs - startedMs) / 1000; // NaN なら以降の比較は必ず false
+    const finalized =
+      Number.isFinite(endedMs) && Date.now() - endedMs > 10 * 60 * 1000;
+    const tooShort =
+      Number.isFinite(videoTotalSec) &&
+      videoTotalSec > 0 &&
+      videoTotalSec < MIN_ARCHIVE_SEC &&
+      Number.isFinite(wallSec) &&
+      wallSec < MIN_ARCHIVE_SEC + 15 &&
+      finalized;
+    if (tooShort) {
+      await admin
+        .from("broadcasts")
+        .update({
+          youtube_upload_status: "cancelled",
+          youtube_upload_error: `too short (<${MIN_ARCHIVE_SEC}s) — not archived`,
+        })
+        .eq("id", b.id)
+        .or("youtube_upload_status.is.null,youtube_upload_status.eq.pending");
+      log(
+        `cancelled (too short): ${b.share_code} video=${Math.round(videoTotalSec)}s wall=${Math.round(wallSec)}s`,
+      );
+      return;
+    }
   }
 
   // 4. 楽観排他で uploading
@@ -735,6 +915,16 @@ async function main() {
     }
     const c = classify(err);
     log("upload failed", b.share_code, c.type, c.msg);
+    if (c.type === "quota") {
+      // YouTube 日次クォータ超過は「明日になれば必ず直る」ので retry を消費せず
+      // pending 維持（翌16時JSTのクォータ復活後に自動再開。永久failed化を防ぐ）。
+      await setStatus(b.id, {
+        youtube_upload_status: "pending",
+        youtube_upload_error:
+          "YouTube APIの1日のアップロード上限に達しました。翌日16時以降に自動で再開します。",
+      });
+      return;
+    }
     const retryable = c.type === "retry" || c.type === "auth-refresh";
     if (retryable && retry < MAX_RETRY - 1) {
       await setStatus(b.id, {
