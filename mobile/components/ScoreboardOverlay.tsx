@@ -18,6 +18,11 @@ export function ScoreboardOverlay({ b }: { b: WatchBroadcast }) {
   const { width, height } = useWindowDimensions();
   // 短辺 × 係数を 11〜15px に収める（Web の clamp(11px, 2.4vh, 15px) と同等の考え方）。
   const fs = Math.max(11, Math.min(15, Math.round(Math.min(width, height) * 0.034)));
+  // 横画面ではノッチが側面に移るため上インセットは本来ほぼ0。ただし回転時に
+  // 縦持ちの値(〜59pt)が残るケースがあり、高さの浅い横画面では「スコアが画面の
+  // 15%も下に落ちる」見た目になる（2026-07-12 実戦FB）。横画面は上限20ptに抑える。
+  const isLandscape = width > height;
+  const topInset = isLandscape ? Math.min(insets.top, 20) : insets.top;
 
   const elapsed = useElapsedSeconds(b.started_at, b.status === "live");
   const showSets = b.home_sets > 0 || b.away_sets > 0;
@@ -26,7 +31,7 @@ export function ScoreboardOverlay({ b }: { b: WatchBroadcast }) {
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       {/* 左上: スコアボード */}
-      <View style={[styles.topLeft, { top: insets.top + 10, left: 12 }]}>
+      <View style={[styles.topLeft, { top: topInset + 10, left: 12 }]}>
         <View style={styles.scoreRow}>
           <View style={styles.segTeam}>
             <Text style={[styles.team, { fontSize: fs }]} numberOfLines={1}>

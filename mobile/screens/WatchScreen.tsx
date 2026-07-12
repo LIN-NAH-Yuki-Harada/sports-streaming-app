@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useKeepAwake } from "expo-keep-awake";
@@ -40,6 +41,16 @@ import type { RootStackParamList } from "../navigation-types";
 // そのまま重ねると「映像より先に点が入る」ネタバレになる。スコア表示だけ映像遅延に
 // 合わせて遅らせる（Web 版 watch/[code]/page.tsx の OVERLAY_DELAY_MS と同値）。
 const OVERLAY_DELAY_MS = 7000;
+
+// 右上バッジ類の上オフセット。横画面ではノッチが側面に移るため上インセットは
+// 本来ほぼ0だが、回転時に縦持ちの値(〜59pt)が残るケースがあり、高さの浅い横画面で
+// バッジが画面の15%も下に落ちて見える（2026-07-12 実戦FB）。横画面は上限20ptに抑える
+// （ScoreboardOverlay と同じ扱い）。
+function useTopInset(): number {
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  return width > height ? Math.min(insets.top, 20) : insets.top;
+}
 
 // broadcast を delayMs ぶん遅らせて返す（Web 版 useDelayedBroadcast の移植）。
 function useDelayedBroadcast(
@@ -432,6 +443,7 @@ function HlsStage({
   onReload: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const topInset = useTopInset();
   const [modVisible, setModVisible] = useState(false);
   // スコアは映像の HLS 遅延に合わせて遅らせる（ネタバレ防止）。
   const delayed = useDelayedBroadcast(broadcast, OVERLAY_DELAY_MS);
@@ -556,7 +568,7 @@ function HlsStage({
 
       {/* 右上: LIVE + 試合名（視聴者数は LiveKit 由来のため HLS 視聴では非表示） */}
       <View
-        style={[styles.topRight, { top: insets.top + 10, right: 12 }]}
+        style={[styles.topRight, { top: topInset + 10, right: 12 }]}
         pointerEvents="none"
       >
         <View style={styles.liveRow}>
@@ -629,6 +641,7 @@ function Stage({
   onReload: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const topInset = useTopInset();
   // 通報・ブロックメニュー（UGC ポリシー: コンテンツの消費地点に通報手段を置く）。
   const [modVisible, setModVisible] = useState(false);
   const connState = useConnectionState();
@@ -696,7 +709,7 @@ function Stage({
 
       {/* 右上: LIVE + 視聴者数 + 試合名（縦に積んで重なり回避） */}
       <View
-        style={[styles.topRight, { top: insets.top + 10, right: 12 }]}
+        style={[styles.topRight, { top: topInset + 10, right: 12 }]}
         pointerEvents="none"
       >
         <View style={styles.liveRow}>
