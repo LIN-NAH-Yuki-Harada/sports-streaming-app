@@ -86,7 +86,11 @@ export default async function AdminUsers() {
               </span>
             )}
             <span className="text-[10px] text-gray-600 ml-auto">
-              {r.created_at?.slice(0, 10) ?? "—"}
+              {r.created_at
+                ? new Date(r.created_at).toLocaleDateString("ja-JP", {
+                    timeZone: "Asia/Tokyo",
+                  })
+                : "—"}
             </span>
           </div>
         ))}

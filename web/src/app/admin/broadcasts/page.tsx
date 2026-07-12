@@ -23,9 +23,22 @@ type Row = {
   live_error: string | null;
 };
 
+// DBの時刻はUTC。サーバーレンダリング（Vercel=UTC）でも必ず日本時間で表示する
+// （以前は生文字列のsliceでUTCのまま=9時間前に見えていた）。
 function fmt(ts: string | null): string {
   if (!ts) return "—";
-  return ts.slice(0, 16).replace("T", " ");
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d
+    .toLocaleString("ja-JP", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    .replace(/\//g, "-");
 }
 
 // 経過分（live のゴースト検知用）。
