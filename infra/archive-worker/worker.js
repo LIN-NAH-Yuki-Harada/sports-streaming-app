@@ -217,6 +217,24 @@ async function ffprobeHasAudio(p) {
   }
 }
 
+// 映像トラックの有無を返す。4G再接続では「音声だけで映像が無い」断片ができることが
+// あり（2026-07-12 実発生・16秒audio-only断片）、これが混ざると連結の [i:v:0] が
+// "matches no streams" で全失敗＝アーカイブ0本になる。断片選別で除外するための判定。
+async function ffprobeHasVideo(p) {
+  try {
+    const out = await spawnP("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v",
+      "-show_entries", "stream=index",
+      "-of", "csv=p=0",
+      p,
+    ]);
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // 1セグメントにスコアボードを焼き込んだファイルパスを返す。イベント無し/失敗時は元(raw)。
 // workDir = このセグメント専用の一時ディレクトリ（中間生成物の置き場・呼び出し側で削除）。
 // idx = 同一配信内のセグメント番号（一時ファイル名の衝突回避用）。
@@ -368,9 +386,27 @@ async function concatSegments(paths, workDir) {
     meta.push({
       p,
       hasAudio: await ffprobeHasAudio(p),
+      hasVideo: await ffprobeHasVideo(p),
       dur: await ffprobeDurationSec(p),
     });
   }
+  // ★ 二重防御: 映像の無い入力は連結から除外する（[i:v:0] が "matches no streams"
+  //   で全失敗するため）。呼び出し側(3-2)で除外済みのはずだが、焼き込みのフォール
+  //   バック等で audio-only の中間ファイルが紛れる経路に備える。
+  const noVideo = meta.filter((m) => !m.hasVideo);
+  if (noVideo.length > 0) {
+    log(`concat: dropping ${noVideo.length} input(s) without video stream`);
+  }
+  const usable = meta.filter((m) => m.hasVideo);
+  if (usable.length === 0) {
+    throw new Error("concat: no input has a video stream");
+  }
+  if (usable.length === 1) {
+    return usable[0].p; // 1本だけ残ったら連結不要
+  }
+  meta.length = 0;
+  meta.push(...usable);
+  paths = usable.map((m) => m.p);
 
   const inputs = [];
   meta.forEach((m) => inputs.push("-i", m.p)); // 入力 0..N-1 = 実セグメント
@@ -530,21 +566,48 @@ async function main() {
     return;
   }
 
-  // 3-2. 極小セグメント(数秒)を除外。4G再接続でできる断片はキーフレーム前から始まり壊れている
-  //      ことがあり、連結を破壊する（filter_complexで stream 不在 / demuxerで尺打ち切り）。
-  //      5秒未満は捨てる。全部短い極端ケースは最長1本だけ残す（空にしない）。
+  // 3-2. 使えないセグメントを除外。4G再接続でできる断片は
+  //      (a) 極小（キーフレーム前から始まり壊れている・5秒未満）
+  //      (b) 映像トラックなし（音声だけ・2026-07-12に16秒audio-only断片が実発生）
+  //      のことがあり、混ざると連結が「stream 不在 / 尺打ち切り」で全失敗する。
+  //      全部除外される極端ケースは「映像がある最長の1本」だけ残す（空にしない）。
+  //      映像のある断片がゼロなら、アーカイブ不能として明確に failed にする。
   {
     const MIN_SEG_SEC = 5;
-    const withDur = [];
+    const withMeta = [];
     for (const r of recs) {
-      withDur.push({ r, d: await ffprobeDurationSec(r.p).catch(() => 0) });
+      withMeta.push({
+        r,
+        d: await ffprobeDurationSec(r.p).catch(() => 0),
+        hasVideo: await ffprobeHasVideo(r.p),
+      });
     }
-    let kept = withDur.filter((x) => x.d >= MIN_SEG_SEC).map((x) => x.r);
-    if (kept.length === 0 && withDur.length > 0) {
-      kept = [withDur.sort((a, b) => b.d - a.d)[0].r];
+    let kept = withMeta
+      .filter((x) => x.d >= MIN_SEG_SEC && x.hasVideo)
+      .map((x) => x.r);
+    if (kept.length === 0) {
+      const longestWithVideo = withMeta
+        .filter((x) => x.hasVideo)
+        .sort((a, b) => b.d - a.d)[0];
+      if (longestWithVideo) kept = [longestWithVideo.r];
+    }
+    if (kept.length === 0) {
+      // 映像のある録画が1本も無い＝アーカイブしようがない。リトライループに
+      // 落とさず明確に失敗させる（元録画ファイルは消さないので調査は可能）。
+      await setStatus(b.id, {
+        youtube_upload_status: "failed",
+        youtube_upload_error: "no video stream in any recording segment",
+        youtube_retry_count: retry,
+      });
+      log("failed (no video in recordings):", b.share_code);
+      return;
     }
     if (kept.length !== recs.length) {
-      log(`dropped ${recs.length - kept.length} tiny segment(s) (<${MIN_SEG_SEC}s)`);
+      const droppedMeta = withMeta.filter((x) => !kept.includes(x.r));
+      const reasons = droppedMeta
+        .map((x) => `${Math.round(x.d)}s${x.hasVideo ? "" : "/no-video"}`)
+        .join(", ");
+      log(`dropped ${recs.length - kept.length} unusable segment(s): ${reasons}`);
     }
     recs = kept;
   }
@@ -572,8 +635,13 @@ async function main() {
     `${recs.length} segment(s)`,
     `${totalMB.toFixed(0)}MB`,
   );
-  // 中間生成物（PNG/焼き込みセグメント/concat結果）は os.tmpdir 配下に作って確実に消す。
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), `spotch_${b.id}_`));
+  // 中間生成物（PNG/焼き込みセグメント/concat結果）の作業ディレクトリ。
+  // ★ os.tmpdir()(=/tmp) は使わない：Ubuntu 24.04+ の /tmp は tmpfs(RAMディスク・
+  //   容量=メモリの半分程度)で、45分級の連結/正規化出力(1.5GB超)が書き込み中に溢れて
+  //   72〜85%地点で ffmpeg が死ぬ（2026-07-12 実発生・exit 228）。ディスク実体の
+  //   /var/tmp を既定にする（WORK_DIR で上書き可）。処理後は finally で確実に消す。
+  const workBase = process.env.WORK_DIR || "/var/tmp";
+  const workDir = fs.mkdtempSync(path.join(workBase, `spotch_${b.id}_`));
   try {
     const oauth = await getOAuthClient(
       prof.youtube_refresh_token,
