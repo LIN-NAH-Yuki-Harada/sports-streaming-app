@@ -11,7 +11,7 @@ export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   // エラーメッセージが要求する新版に置き換えるだけで OK。
   // Stripe Backend API は全 version を後方互換でサポートするため、
   // 文字列追従だけで挙動変化なし。詳細は memory feedback_stripe_apiversion_drift.md
-  apiVersion: "2026-05-27.dahlia",
+  apiVersion: "2026-06-24.dahlia",
   typescript: true,
 });
 
