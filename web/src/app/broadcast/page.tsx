@@ -1335,17 +1335,6 @@ function BroadcastPageInner() {
             {/* 視聴者向けお知らせテロップの入力（📢 ボタンで開閉） */}
             {showNoticePanel && (
               <div className="mb-1.5 pb-1.5 border-b border-white/10">
-                <div className="flex flex-wrap justify-center gap-1 mb-1.5">
-                  {["延長タイブレーク中", "休憩中", "まもなく再開します"].map((preset) => (
-                    <button
-                      key={preset}
-                      onClick={() => applyNotice(preset)}
-                      className="px-2 h-7 rounded bg-white/10 hover:bg-white/20 text-[10px] transition active:scale-95"
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
                 <div className="flex items-center justify-center gap-1">
                   <input
                     type="text"

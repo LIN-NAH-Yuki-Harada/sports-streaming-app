@@ -552,17 +552,6 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             style={{ top: "calc(env(safe-area-inset-top, 0px) + 44px)" }}
           >
             <p className="text-[10px] text-gray-400 mb-1.5">視聴者へのお知らせ（配信者のみ表示）</p>
-            <div className="flex flex-wrap gap-1 mb-1.5">
-              {["延長タイブレーク中", "休憩中", "まもなく再開します"].map((preset) => (
-                <button
-                  key={preset}
-                  onClick={() => applyNotice(preset)}
-                  className="px-2 h-7 rounded bg-white/10 hover:bg-white/20 text-[10px] transition active:scale-95"
-                >
-                  {preset}
-                </button>
-              ))}
-            </div>
             <div className="flex items-center gap-1">
               <input
                 type="text"
