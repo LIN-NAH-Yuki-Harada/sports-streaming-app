@@ -202,3 +202,17 @@ create table public.promo_codes (
 
 alter table public.promo_codes enable row level security;
 -- 一般ユーザー・anon にはアクセス権を与えない（Service Role のみが検証・更新できる）
+
+-- 6. 運用アラート送信記録（/api/cron/alerts の重複通知防止）
+-- 詳細は supabase-migration-alert-log.sql を参照
+create table public.alert_log (
+  id uuid default gen_random_uuid() primary key,
+  kind text not null,   -- 'live_error' | 'archive_failed'
+  ref_id text not null, -- 対象 broadcasts.id
+  detail text,          -- 通知時点のエラーメッセージ
+  created_at timestamptz not null default now(),
+  unique (kind, ref_id)
+);
+
+alter table public.alert_log enable row level security;
+-- ポリシーなし = service_role（cron）のみが読み書きできる
