@@ -487,11 +487,13 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
                   <span className="text-lg font-black">¥300</span>
                   <span className="text-[10px] text-gray-500">/月</span>
                 </div>
+                {/* pricing ページの配信者プラン表記と同期（リモコンは未実装・アーカイブはチームプラン限定のため誤表記に注意） */}
                 <ul className="mt-1.5 space-y-0.5 text-[10px] text-gray-500">
-                  <li>✓ スコアボード・オーバーレイ</li>
-                  <li>✓ リモコンでスコア操作</li>
+                  <li>✓ 無制限ライブ配信</li>
+                  <li>✓ スコアボード・オーバーレイ（手動入力）</li>
                   <li>✓ 限定公開の共有コード発行</li>
-                  <li>✓ アーカイブ自動保存</li>
+                  <li>✓ LINE ワンタップ共有</li>
+                  <li className="text-gray-600">※ アーカイブ保存はチームプラン限定</li>
                 </ul>
               </div>
             </div>
