@@ -7,6 +7,10 @@ const SITE_URL =
 // iOS アプリ（App Store 公開中・2026-07-09 リリース）
 const APP_STORE_URL = "https://apps.apple.com/jp/app/live-spotch/id6785001863";
 
+// Android アプリ（Google Play 公開中）
+const PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=com.linnah.livespotch";
+
 const FAQ_ITEMS = [
   {
     q: "子どもの顔が映るのが心配です。大丈夫ですか？",
@@ -34,7 +38,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "アプリのダウンロードは必要ですか？",
-    a: "不要です。Webブラウザからそのまま使えます。iPhoneをお使いの方には、より安定して配信できるiOSアプリもApp Storeで公開中です（Android版は準備中）。視聴する側はアプリ不要で、リンクを開くだけで観戦できます。",
+    a: "不要です。Webブラウザからそのまま使えます。より安定して配信したい方には、iOS / Android アプリを App Store / Google Play で公開中です。視聴する側はアプリ不要で、リンクを開くだけで観戦できます。",
   },
   {
     q: "解約はかんたんにできますか？",
@@ -106,10 +110,10 @@ const SOFTWARE_APP_JSONLD = {
   "@type": "SoftwareApplication",
   name: "LIVE SPOtCH",
   applicationCategory: "SportsApplication",
-  operatingSystem: "Web, iOS",
-  installUrl: APP_STORE_URL,
+  operatingSystem: "Web, iOS, Android",
+  installUrl: [APP_STORE_URL, PLAY_STORE_URL],
   description:
-    "保護者のスマホ1台でスポーツ少年団・部活・地域大会の試合をライブ配信。スコアボード・限定公開に対応したUGC型スポーツライブ配信プラットフォーム。iOSアプリはApp Storeで配信中。",
+    "保護者のスマホ1台でスポーツ少年団・部活・地域大会の試合をライブ配信。スコアボード・限定公開に対応したUGC型スポーツライブ配信プラットフォーム。アプリはApp Store / Google Playで配信中。",
   url: `${SITE_URL}/`,
   image: `${SITE_URL}/opengraph-image.jpg`,
   offers: [
@@ -210,16 +214,16 @@ export default function LandingPage() {
         </nav>
       </header>
 
-      {/* NEW リリースバナー: iOS アプリ App Store 配信開始 */}
+      {/* NEW リリースバナー: Android アプリ Google Play 配信開始（iOSと両対応に） */}
       <a
-        href={APP_STORE_URL}
+        href={PLAY_STORE_URL}
         target="_blank"
         rel="noopener noreferrer"
         className="block bg-gradient-to-r from-[#e63946]/90 via-[#d62836] to-[#e63946]/90 text-white text-center text-[11px] sm:text-xs py-2 px-4 hover:from-[#e63946] hover:to-[#e63946] transition group"
       >
         <span className="inline-flex items-center gap-2 font-semibold">
           <span className="bg-white text-[#e63946] text-[9px] font-black px-1.5 py-0.5 rounded">NEW</span>
-          <span>📱 iOSアプリ、App Storeで配信開始！配信がもっと安定・かんたんに</span>
+          <span>📱 Android版アプリが登場！App Store / Google Play で配信中</span>
           <span className="hidden sm:inline opacity-70 group-hover:opacity-100 transition">→ ダウンロード</span>
         </span>
       </a>
@@ -281,8 +285,9 @@ export default function LandingPage() {
                 </span>
               </div>
 
-              {/* iOS アプリ（App Store 公開中）。バッジは Apple 公式SVG（self-host） */}
-              <div className="mt-4 flex items-center gap-3">
+              {/* iOS / Android アプリ（App Store / Google Play 公開中）。バッジは各社公式アセット（self-host・無改変） */}
+              {/* Google Play バッジ PNG は余白込みアセット（可視部は高さの約77%）のため、可視高さが App Store バッジと揃うよう h を大きめに指定 */}
+              <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
                 <a
                   href={APP_STORE_URL}
                   target="_blank"
@@ -299,10 +304,26 @@ export default function LandingPage() {
                     className="h-[44px] w-auto"
                   />
                 </a>
+                <a
+                  href={PLAY_STORE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block hover:opacity-80 transition"
+                  aria-label="Google Play で LIVE SPOtCH をダウンロード"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/google-play-badge-ja.png"
+                    alt="Google Play で手に入れよう"
+                    width={147}
+                    height={57}
+                    className="h-[57px] w-auto"
+                  />
+                </a>
                 <span className="text-[11px] text-gray-600 leading-relaxed">
-                  iOSアプリ配信開始
+                  iOS / Android
                   <br />
-                  Android版は準備中
+                  アプリ配信中
                 </span>
               </div>
             </div>
@@ -614,46 +635,79 @@ export default function LandingPage() {
               まずは10分間、無料で試す
             </a>
             <p className="mt-4 text-[10px] sm:text-xs text-gray-300">
-              Webブラウザで今すぐ使えます / iPhoneならアプリでもっと安定
+              Webブラウザで今すぐ使えます / アプリならもっと安定（iOS / Android）
             </p>
-            <a
-              href={APP_STORE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block mt-4 hover:opacity-80 transition"
-              aria-label="App Store で LIVE SPOtCH をダウンロード"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/appstore-badge-ja.svg"
-                alt="App Store でダウンロード"
-                width={136}
-                height={50}
-                className="h-[40px] w-auto mx-auto"
-              />
-            </a>
+            {/* Google Play バッジは余白込みPNGのため、可視高さが揃うよう h を大きめに指定 */}
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
+              <a
+                href={APP_STORE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block hover:opacity-80 transition"
+                aria-label="App Store で LIVE SPOtCH をダウンロード"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/appstore-badge-ja.svg"
+                  alt="App Store でダウンロード"
+                  width={136}
+                  height={50}
+                  className="h-[40px] w-auto"
+                />
+              </a>
+              <a
+                href={PLAY_STORE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block hover:opacity-80 transition"
+                aria-label="Google Play で LIVE SPOtCH をダウンロード"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/google-play-badge-ja.png"
+                  alt="Google Play で手に入れよう"
+                  width={134}
+                  height={52}
+                  className="h-[52px] w-auto"
+                />
+              </a>
+            </div>
           </div>
         </div>
       </section>
 
       {/* フッター */}
       <footer className="border-t border-white/5 py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-600">
-          <p>© 2026 LIVE SPOtCH / LIN-NAH株式会社</p>
-          <div className="flex flex-wrap gap-4 sm:gap-6 justify-center">
-            <a
-              href={APP_STORE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-gray-400 transition"
-            >
-              iOSアプリ（App Store）
-            </a>
-            <a href="/terms" className="hover:text-gray-400 transition">利用規約</a>
-            <a href="/privacy" className="hover:text-gray-400 transition">プライバシーポリシー</a>
-            <a href="/tokusho" className="hover:text-gray-400 transition">特定商取引法に基づく表示</a>
-            <a href="/contact" className="hover:text-gray-400 transition">お問い合わせ</a>
+        <div className="mx-auto max-w-6xl">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-600">
+            <p>© 2026 LIVE SPOtCH / LIN-NAH株式会社</p>
+            <div className="flex flex-wrap gap-4 sm:gap-6 justify-center">
+              <a
+                href={APP_STORE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-gray-400 transition"
+              >
+                iOSアプリ（App Store）
+              </a>
+              <a
+                href={PLAY_STORE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-gray-400 transition"
+              >
+                Androidアプリ（Google Play）
+              </a>
+              <a href="/terms" className="hover:text-gray-400 transition">利用規約</a>
+              <a href="/privacy" className="hover:text-gray-400 transition">プライバシーポリシー</a>
+              <a href="/tokusho" className="hover:text-gray-400 transition">特定商取引法に基づく表示</a>
+              <a href="/contact" className="hover:text-gray-400 transition">お問い合わせ</a>
+            </div>
           </div>
+          {/* ストアバッジ利用に伴う帰属表記（Google Play ブランドガイドライン準拠） */}
+          <p className="mt-4 text-[10px] text-gray-700 text-center sm:text-right leading-relaxed">
+            Google Play および Google Play のロゴは Google LLC の商標です。App Store は Apple Inc. のサービスマークです。
+          </p>
         </div>
       </footer>
 
