@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase";
 import {
   createBroadcast,
   updateBroadcastScore,
+  updateBroadcastNotice,
   endBroadcast,
   cleanupStaleBroadcasts,
   type Broadcast,
@@ -195,6 +196,10 @@ function BroadcastPageInner() {
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
   // 野球カウント（甲子園風 B/S/O＋走者・アプリ版と同仕様）
+  // 視聴者向けお知らせテロップ（「延長タイブレーク中」等・"" = 非表示）
+  const [notice, setNotice] = useState("");
+  const [noticeDraft, setNoticeDraft] = useState("");
+  const [showNoticePanel, setShowNoticePanel] = useState(false);
   const [balls, setBalls] = useState(0);
   const [strikes, setStrikes] = useState(0);
   const [outs, setOuts] = useState(0);
@@ -514,6 +519,22 @@ function BroadcastPageInner() {
       );
     }
     toast.info("1つ戻しました");
+  }
+
+  // 視聴者向けお知らせテロップの反映（DB 直接 UPDATE → Realtime で視聴ページに届く）。
+  // text=null で非表示に戻す。
+  async function applyNotice(text: string | null) {
+    if (!broadcastRef.current) return;
+    const trimmed = text?.trim() || null;
+    const ok = await updateBroadcastNotice(broadcastRef.current.id, trimmed);
+    if (ok) {
+      setNotice(trimmed ?? "");
+      setNoticeDraft("");
+      setShowNoticePanel(false);
+      toast.info(trimmed ? "視聴者にお知らせを表示しました" : "お知らせを消しました");
+    } else {
+      toast.error("お知らせの更新に失敗しました");
+    }
   }
 
   // スコア変更ハンドラー
@@ -1311,6 +1332,47 @@ function BroadcastPageInner() {
 
           {/* スコア操作パネル — 縦画面では2段構成 */}
           <div className="absolute bottom-[calc(12px+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-sm rounded-lg px-2 sm:px-3 py-2 max-w-[95vw]">
+            {/* 視聴者向けお知らせテロップの入力（📢 ボタンで開閉） */}
+            {showNoticePanel && (
+              <div className="mb-1.5 pb-1.5 border-b border-white/10">
+                <div className="flex flex-wrap justify-center gap-1 mb-1.5">
+                  {["延長タイブレーク中", "休憩中", "まもなく再開します"].map((preset) => (
+                    <button
+                      key={preset}
+                      onClick={() => applyNotice(preset)}
+                      className="px-2 h-7 rounded bg-white/10 hover:bg-white/20 text-[10px] transition active:scale-95"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center justify-center gap-1">
+                  <input
+                    type="text"
+                    value={noticeDraft}
+                    onChange={(e) => setNoticeDraft(e.target.value)}
+                    maxLength={30}
+                    placeholder="自由入力（30文字まで）"
+                    className="w-44 h-8 rounded bg-white/10 px-2 text-[11px] placeholder:text-gray-500 outline-none focus:bg-white/15"
+                  />
+                  <button
+                    onClick={() => applyNotice(noticeDraft)}
+                    disabled={!noticeDraft.trim()}
+                    className="h-8 px-2 rounded bg-[#e63946] hover:bg-[#d62836] disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-bold transition active:scale-95"
+                  >
+                    表示
+                  </button>
+                  {notice && (
+                    <button
+                      onClick={() => applyNotice(null)}
+                      className="h-8 px-2 rounded bg-white/10 hover:bg-white/20 text-[10px] text-gray-300 transition active:scale-95"
+                    >
+                      消す
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             {/* 野球: B/S/O カウント＋走者ダイヤ（甲子園風・タップで+1／3S自動アウト・3アウト自動交代） */}
             {sport === "野球" && (
               <div className="flex items-center justify-center gap-3 mb-1.5 pb-1.5 border-b border-white/10">
@@ -1439,8 +1501,32 @@ function BroadcastPageInner() {
               >
                 次へ 0-0
               </button>
+              <span className="text-gray-600 text-xs mx-0.5">|</span>
+              <button
+                onClick={() => setShowNoticePanel((v) => !v)}
+                className={`h-8 px-2 rounded flex items-center justify-center text-sm transition active:scale-90 ${
+                  notice
+                    ? "bg-[#e63946]/30 text-[#ffb3bb]"
+                    : "bg-white/10 hover:bg-white/20 text-gray-300"
+                }`}
+                aria-label="視聴者へのお知らせを設定"
+                title="視聴者へのお知らせ"
+              >
+                📢
+              </button>
             </div>
           </div>
+
+          {/* 上部中央: 表示中のお知らせテロップ（視聴者に見えている内容の確認用） */}
+          {notice && (
+            <div
+              className="absolute left-1/2 -translate-x-1/2 z-[2] max-w-[60%] bg-black/70 backdrop-blur-sm border border-[#e63946]/60 rounded-md px-3 py-1.5 text-[11px] text-white text-center leading-snug"
+              style={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+            >
+              <span className="mr-1">📢</span>
+              {notice}
+            </div>
+          )}
 
           {/* 右上: 全画面ボタン + 大会名 + LIVE + お試し表示 */}
           <div

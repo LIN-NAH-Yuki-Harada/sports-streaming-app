@@ -52,6 +52,8 @@ export type Broadcast = {
   strikes?: number | null;
   outs?: number | null;
   runners?: { first?: boolean; second?: boolean; third?: boolean } | null;
+  // 配信者からのお知らせテロップ（「延長タイブレーク中」等・null/未設定で非表示）
+  notice?: string | null;
   tournament: string | null;
   venue: string | null;
   period: string;
@@ -103,7 +105,7 @@ export const BROADCAST_PUBLIC_COLUMNS =
   "tournament, venue, home_score, away_score, home_sets, away_sets, period, point_label, " +
   "balls, strikes, outs, runners, " +
   "status, started_at, ended_at, scoreboard_burned_in, youtube_video_id, youtube_upload_status, " +
-  "live_youtube_broadcast_id, live_status";
+  "live_youtube_broadcast_id, live_status, notice";
 
 // ===== プロフィール =====
 
@@ -519,6 +521,26 @@ export async function updateBroadcastScore(
 
   if (error) {
     console.error("スコア更新エラー:", error.message);
+    return false;
+  }
+  return true;
+}
+
+// 配信者からのお知らせテロップを更新（null で非表示に戻す）。
+// 書き込みは既存 RLS（配信者本人のみ更新可）+ 列レベル GRANT UPDATE (notice) で保護。
+// 視聴ページへは broadcasts の Realtime UPDATE でそのまま届く。
+export async function updateBroadcastNotice(
+  broadcastId: string,
+  notice: string | null
+): Promise<boolean> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("broadcasts")
+    .update({ notice })
+    .eq("id", broadcastId);
+
+  if (error) {
+    console.error("お知らせ更新エラー:", error.message);
     return false;
   }
   return true;
