@@ -3,7 +3,12 @@
 import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getBroadcastByCode, getStreamPlaybackUrl, type Broadcast } from "@/lib/database";
+import {
+  getBroadcastByCode,
+  getStreamPlaybackUrl,
+  updateBroadcastNotice,
+  type Broadcast,
+} from "@/lib/database";
 import { createClient } from "@/lib/supabase";
 import { LiveKitViewer } from "@/components/livekit-video";
 import { HlsPlayer } from "@/components/hls-player";
@@ -66,6 +71,20 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   // （タップ不要・スコアは映像に焼き込み済み）。null なら従来 LiveKit 経路。
   const [hlsUrl, setHlsUrl] = useState<string | null>(null);
   const [videoPaused, setVideoPaused] = useState(false);
+  // 配信者本人（ログイン済み）だけに出すお知らせ編集 UI 用。
+  // アプリから配信中の人が別端末のブラウザで自分の視聴ページを開いて操作する経路。
+  const [viewerUserId, setViewerUserId] = useState<string | null>(null);
+  const [showNoticePanel, setShowNoticePanel] = useState(false);
+  const [noticeDraft, setNoticeDraft] = useState("");
+
+  // ログイン中ユーザーを一度だけ取得（配信者本人ならお知らせ編集 UI を出す。未ログインなら null のまま）
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth
+      .getUser()
+      .then(({ data }) => setViewerUserId(data.user?.id ?? null))
+      .catch(() => setViewerUserId(null));
+  }, []);
   // 焼き込み OFF の配信は、スコアが映像に乗っていないので視聴側 CSS オーバーレイで表示する。
   // その場合 iPhone は「動画ネイティブ全画面」だと HTML オーバーレイが消えるため、
   // フェイク全画面（CSS）に切り替える（allowVideoFallback=false）。
@@ -125,6 +144,22 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       detach();
     };
   }, [isWatching, viewerToken, stageRef]);
+
+  const isOwner =
+    !!broadcast && !!viewerUserId && broadcast.broadcaster_id === viewerUserId;
+
+  // 配信者本人によるお知らせテロップ更新（RLS で本人以外は書き込み不可）。
+  // text=null で非表示。反映は Realtime でも届くが、体感を良くするため楽観更新もする。
+  async function applyNotice(text: string | null) {
+    if (!broadcast) return;
+    const trimmed = text?.trim() || null;
+    const ok = await updateBroadcastNotice(broadcast.id, trimmed);
+    if (ok) {
+      setBroadcast((prev) => (prev ? { ...prev, notice: trimmed } : prev));
+      setNoticeDraft("");
+      setShowNoticePanel(false);
+    }
+  }
 
   function handleResumeVideo() {
     const video = stageRef.current?.querySelector("video") as
@@ -500,11 +535,72 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
           </div>
         )}
 
+        {/* 上部中央: 配信者からのお知らせテロップ（Realtime で即時反映・null で非表示）。
+            焼き込みあり/なし・LiveKit/HLS のどの経路でも CSS オーバーレイとして重ねる。 */}
+        {isLive && broadcast.notice && (
+          <div
+            className="absolute left-1/2 -translate-x-1/2 z-[2] max-w-[60%] bg-black/70 backdrop-blur-sm border border-[#e63946]/60 rounded-md px-3 py-1.5 text-[11px] sm:text-xs text-white text-center leading-snug"
+            style={{ top: "calc(env(safe-area-inset-top, 0px) + 8px)" }}
+          >
+            <span className="mr-1">📢</span>
+            {broadcast.notice}
+          </div>
+        )}
+
+        {/* 配信者本人だけのお知らせ編集パネル（アプリ配信中に別端末のブラウザから操作する経路） */}
+        {isLive && isOwner && showNoticePanel && (
+          <div
+            className="absolute right-2 z-[4] w-60 bg-black/85 backdrop-blur-sm rounded-lg p-2.5 border border-white/10"
+            style={{ top: "calc(env(safe-area-inset-top, 0px) + 44px)" }}
+          >
+            <p className="text-[10px] text-gray-400 mb-1.5">視聴者へのお知らせ（配信者のみ表示）</p>
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={noticeDraft}
+                onChange={(e) => setNoticeDraft(e.target.value)}
+                maxLength={30}
+                placeholder="自由入力（30文字まで）"
+                className="flex-1 min-w-0 h-8 rounded bg-white/10 px-2 text-[11px] placeholder:text-gray-500 outline-none focus:bg-white/15"
+              />
+              <button
+                onClick={() => applyNotice(noticeDraft)}
+                disabled={!noticeDraft.trim()}
+                className="h-8 px-2 rounded bg-[#e63946] hover:bg-[#d62836] disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-bold transition active:scale-95"
+              >
+                表示
+              </button>
+            </div>
+            {broadcast.notice && (
+              <button
+                onClick={() => applyNotice(null)}
+                className="mt-1.5 w-full h-7 rounded bg-white/10 hover:bg-white/20 text-[10px] text-gray-300 transition active:scale-95"
+              >
+                お知らせを消す
+              </button>
+            )}
+          </div>
+        )}
+
         {/* 右上: LIVE / 終了 バッジ（スコアボードと大会名は映像に焼き込み済みなので CSS 側は不要） */}
         <div
           className="absolute right-2 flex items-center gap-1.5 z-[2]"
           style={{ top: "calc(env(safe-area-inset-top, 0px) + 8px)" }}
         >
+          {isLive && isOwner && (
+            <button
+              onClick={() => setShowNoticePanel((v) => !v)}
+              aria-label="視聴者へのお知らせを設定"
+              title="視聴者へのお知らせ"
+              className={`h-6 px-1.5 rounded text-[11px] transition ${
+                broadcast.notice
+                  ? "bg-[#e63946]/40"
+                  : "bg-black/60 hover:bg-black/80"
+              }`}
+            >
+              📢
+            </button>
+          )}
           {isLive ? (
             <div className="flex items-center gap-1 bg-[#e63946] px-1.5 py-1 rounded text-[8px] sm:text-[9px] font-bold">
               <span className="relative flex h-1.5 w-1.5">

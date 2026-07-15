@@ -154,7 +154,10 @@ create table public.broadcasts (
   scoreboard_burned_in boolean not null default true,
   -- ゴースト対策の心拍。配信中に配信者クライアントが 60 秒ごとに更新し、
   -- cron が途絶（数分）を見て自動 ended 化する。詳細: supabase-migration-broadcasts-last-seen.sql
-  last_seen_at timestamptz
+  last_seen_at timestamptz,
+  -- 配信者からのお知らせテロップ（視聴ページに表示・null で非表示）
+  -- 詳細: supabase-migration-broadcast-notice.sql
+  notice text check (notice is null or char_length(notice) <= 100)
 );
 
 alter table public.broadcasts enable row level security;
