@@ -94,9 +94,10 @@ export async function startLiveStream(
 export async function fetchStreamTarget(
   broadcastId: string,
 ): Promise<{ rtmpUrl: string; playbackUrl: string } | null> {
-  // 弱電波でボタンが固まらないよう 15 秒でタイムアウト
+  // 弱4Gでも自前配信(provision)を取りに行く猶予を確保（短いとLiveKit旧経路に落ちる）。
+  // ボタンが固まらないよう 30 秒で打ち切り。
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 15_000);
+  const t = setTimeout(() => ctrl.abort(), 30_000);
   try {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;

@@ -5,4 +5,6 @@ export type RootStackParamList = {
   Tabs: undefined;
   // アプリ内ネイティブ視聴画面（全画面・LiveKit 直接視聴）。share_code で対象配信を開く。
   Watch: { shareCode: string };
+  // 課金プラン選択（アプリ内購入・全画面モーダル）。MyPage や配信ゲートから開く。
+  Paywall: undefined;
 };

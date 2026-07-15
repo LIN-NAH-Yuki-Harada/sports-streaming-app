@@ -47,6 +47,25 @@ export async function fetchPlan(userId: string): Promise<Plan> {
 }
 
 /**
+ * 購入直後、RevenueCat → webhook が profiles.plan を更新するまで数秒の遅延がある。
+ * 有料プラン（broadcaster/team）になるまで fetchPlan をポーリングして返す。
+ * timeoutMs を超えたら現在の plan（多くは free）を返す（UX を止めない）。
+ */
+export async function waitForPaidPlan(
+  userId: string,
+  timeoutMs = 12000,
+  intervalMs = 1500
+): Promise<Plan> {
+  const deadline = Date.now() + timeoutMs;
+  let plan = await fetchPlan(userId);
+  while (plan === "free" && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    plan = await fetchPlan(userId);
+  }
+  return plan;
+}
+
+/**
  * 指定ユーザーの累積トライアル消費秒を取得する。
  * Web と同じく profiles.trial_seconds_used を読む。
  * 値が null / 未設定 / 取得失敗の場合は 0 を返す。

@@ -8,7 +8,7 @@ export const SITE_URL = "https://live-spotch.com";
 // Web クライアントは YouTube 連携で承認済みのものを再利用（idToken の検証に必須）。
 export const GOOGLE_WEB_CLIENT_ID =
   "777091676817-uno0qf11hdhfjhfluc7stnlc40h22q56.apps.googleusercontent.com";
-// iOS クライアントは Google Cloud で新規作成（bundle id: com.linnah.spotch）。
+// iOS クライアントは Google Cloud で新規作成（bundle id: com.linnah.livespotch）。
 // 作成後にこの値と app.json の iosUrlScheme（逆ドメイン形式）を更新すること。
 export const GOOGLE_IOS_CLIENT_ID =
-  "777091676817-uan980uhrntr8lur8f4qg44f8jok20kf.apps.googleusercontent.com";
+  "777091676817-7cp9hqft9hp18fbevhvgag1kln0uk1mo.apps.googleusercontent.com";

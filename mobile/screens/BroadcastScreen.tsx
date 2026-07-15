@@ -352,15 +352,16 @@ export function BroadcastScreen() {
         return;
       }
 
+      // 開始直前に最新プランを取得（ペイウォール購入直後のplan反映を確実に拾う）。
+      const currentPlan = await fetchPlan(session.user.id);
+      if (currentPlan !== plan) setPlan(currentPlan);
+
       // 無料プランで体験時間（10分）を使い切っている場合は開始させない
-      if (plan === "free" && trialRemainingAtStart <= 0) {
-        // iOS は購入を促す表現を出さない（Apple 3.1.1・身軽モデル）。Webへ誘導する文言も置かない。
-        setMessage(
-          Platform.OS === "ios"
-            ? "無料体験（10分）の時間に達しました。引き続きのご利用は Web 版（live-spotch.com）でご確認ください。"
-            : "無料体験（10分）は終了しています。続けるには有料プランへの登録が必要です。",
-        );
+      if (currentPlan === "free" && trialRemainingAtStart <= 0) {
+        // iOS / Android ともにアプリ内課金（IAP）。配信は開始せずペイウォールを表示して購入を促す。
+        setMessage("無料体験（10分）が終了しています。プランの登録で続けてご利用いただけます。");
         setBusy(false);
+        navigation.navigate("Paywall");
         return;
       }
 
@@ -407,7 +408,13 @@ export function BroadcastScreen() {
       // まず自前配信サーバー(ネイティブRTMP→MediaMTX＋端末スコア焼き込み)を試す。サーバーフラグ
       // (NEXT_PUBLIC_STREAM_SELFHOST) がOFF/未設定なら null が返るので、従来の LiveKit 経路へ
       // 自動フォールバックする（=本番が壊れない・サーバー側フラグ1つで全体切替）。
-      const stream = created.id ? await fetchStreamTarget(created.id) : null;
+      // RTMP 自前配信は iOS 専用モジュール（modules/rtmp-publisher = apple only）。
+      // Android はサーバーフラグに関わらず必ず LiveKit にフォールバックする
+      // （Android で RTMP を選ぶとネイティブビューが無くクラッシュするため）。
+      const stream =
+        created.id && Platform.OS === "ios"
+          ? await fetchStreamTarget(created.id)
+          : null;
       if (stream) {
         transportRef.current = "rtmp";
         endedRef.current = false;
@@ -721,13 +728,13 @@ export function BroadcastScreen() {
   useEffect(() => {
     if (phase !== "live" || plan !== "free") return;
     if (trialRemainingAtStart - elapsed <= 0) {
+      // iOS / Android ともにアプリ内課金（IAP）。中立メッセージ＋アプリ内ペイウォール。
       finishLive(
-        Platform.OS === "ios"
-          ? "無料体験の時間（10分）が終了しました。引き続きのご利用は Web 版（live-spotch.com）でご確認ください。"
-          : "無料体験の時間（10分）が終了しました。続けるには有料プランへ。",
+        "無料体験の時間（10分）が終了しました。プランのアップグレードで続けてご利用いただけます。",
       );
+      navigation.navigate("Paywall");
     }
-  }, [phase, plan, trialRemainingAtStart, elapsed, finishLive]);
+  }, [phase, plan, trialRemainingAtStart, elapsed, finishLive, navigation]);
 
   // YouTube ID 読み戻し: live/start の応答が電波で届かなくても、サーバーがDBに書く
   // live_youtube_broadcast_id をポーリングして取得し、共有リンク/表示を確実に出す。
@@ -1062,6 +1069,9 @@ export function BroadcastScreen() {
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
+        // iOS: チーム名入力時にキーボードが入力欄に被らないよう、キーボード分の余白を自動確保し
+        // フォーカス中の入力欄をキーボードの上へスクロールして見えるようにする。
+        automaticallyAdjustKeyboardInsets={true}
       >
         <Text style={styles.title}>LIVE SPOtCH 配信</Text>
 
@@ -1680,8 +1690,10 @@ function RtmpLiveView(
         active={true}
         videoWidth={1280}
         videoHeight={720}
-        videoBitrate={6_000_000}
-        fps={60}
+        // 4G/5G(セルラー)前提。上限3.5Mbpsから帯域に応じてネイティブ側がアダプティブに調整。
+        // 6M/60fps固定は4Gに過大で、バースト化(定期フリーズ)・再接続(録画分割)・発熱の原因だった。
+        videoBitrate={3_500_000}
+        fps={30}
         cameraPosition="back"
         scoreboardText={scoreboardText}
         // 端末焼き込み(プレーンテキスト)はOFF。視聴側で綺麗な CSS オーバーレイ

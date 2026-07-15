@@ -10,7 +10,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.linnah.spotch",
+      "bundleIdentifier": "com.linnah.livespotch",
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "試合をライブ配信するためにカメラを使用します",
@@ -20,11 +20,10 @@
       "bitcode": false
     },
     "android": {
-      "package": "com.linnah.spotch",
+      "package": "com.linnah.livespotch",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#FE0000",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
@@ -59,7 +58,7 @@
       [
         "@react-native-google-signin/google-signin",
         {
-          "iosUrlScheme": "com.googleusercontent.apps.777091676817-uan980uhrntr8lur8f4qg44f8jok20kf"
+          "iosUrlScheme": "com.googleusercontent.apps.777091676817-7cp9hqft9hp18fbevhvgag1kln0uk1mo"
         }
       ],
       "./plugins/withGoogleSignInModularHeaders.js",
