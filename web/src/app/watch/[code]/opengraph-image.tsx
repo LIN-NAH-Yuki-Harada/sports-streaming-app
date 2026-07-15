@@ -6,12 +6,31 @@ export const alt = "LIVE SPOtCH の配信";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-// 現在スコアを常に最新で表示するためキャッシュさせない
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+// 60秒ISR（CDNキャッシュ）。以前は「常に最新スコア」のため force-dynamic + revalidate 0 に
+// していたが、LINE 等はプレビュー画像を自社サーバー側でキャッシュするため最初の共有時点で
+// 固定され、毎回生成しても鮮度は実質無意味。むしろ毎リクエストの
+// Google Fonts 2往復 + Supabase照会 + PNG生成（実測1.6〜1.8秒）がプレビュー表示の
+// 体感を悪化させるだけだったので、キャッシュを許可して初回以降を高速化する
+export const revalidate = 60;
 
-// 必要な文字だけを含むサブセット Noto Sans JP を Google Fonts から取得
+// ビルド時は0件（共有コードは実行時にしか分からない）で、全パスを初回アクセス時に
+// 生成してキャッシュする。空でも generateStaticParams が無いとルート自体が
+// 動的レンダリング扱いになり、上の revalidate=60 の ISR キャッシュが効かない
+// （next docs: generate-static-params「You must always return an array」）
+export async function generateStaticParams(): Promise<{ code: string }[]> {
+  return [];
+}
+
+// 必要な文字だけを含むサブセット Noto Sans JP を Google Fonts から取得。
+// プロセス生存中のみのモジュールレベルキャッシュ: テキストは配信ごとに異なるが、
+// 同一配信の60秒ごとの再生成は同一テキストになるので Google Fonts 往復を丸ごと省ける
+const fontCache = new Map<string, ArrayBuffer>();
+
 async function loadFont(text: string, weight: 400 | 700): Promise<ArrayBuffer> {
+  const cacheKey = `${weight}:${text}`;
+  const cached = fontCache.get(cacheKey);
+  if (cached) return cached;
+
   const url = `https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@${weight}&text=${encodeURIComponent(
     text
   )}`;
@@ -25,7 +44,9 @@ async function loadFont(text: string, weight: 400 | 700): Promise<ArrayBuffer> {
   const match = css.match(/src:\s*url\((.+?)\)\s*format/);
   if (!match) throw new Error("Failed to parse Google Fonts CSS");
   const fontRes = await fetch(match[1]);
-  return await fontRes.arrayBuffer();
+  const font = await fontRes.arrayBuffer();
+  fontCache.set(cacheKey, font);
+  return font;
 }
 
 async function fetchBroadcast(code: string): Promise<Broadcast | null> {
