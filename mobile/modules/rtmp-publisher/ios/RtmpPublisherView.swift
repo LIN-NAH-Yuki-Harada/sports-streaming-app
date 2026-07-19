@@ -280,12 +280,14 @@ class RtmpPublisherView: ExpoView {
       // 音声エンジン開始（AudioSession activate 後・stream 配線後）。映像とは独立した音声経路。
       audioSource?.start()
 
-      // アダプティブビットレート：上り帯域(4G/5G)に応じて自動調整する。
-      // 帯域不足時は videoBitrate を実効スループットまで下げ（必要ならフレームも間引き）、
-      // 回復したら段階的に上限(videoBitrate)へ戻す。＝弱い4Gでも送信がバースト化せず、
-      // 視聴側の定期フリーズ・録画分割・発熱を抑える（HaishinKit組み込み戦略）。
+      // アダプティブビットレート（★カスタム＝fpsは絶対に間引かない）。
+      // 標準 StreamVideoAdaptiveBitRateStrategy は弱電波で frameInterval を上げフレーム間引き→
+      // 可変fps化→送出映像に隙間→MediaMTX の HLS セグメント長が 2s→4s に変化し iOS 視聴が
+      // 停止（"segment duration changed from 2s to 4s - this will cause an error in iOS clients"
+      // を VPS ログで確認）。ConstantFPSBitRateStrategy は frameInterval を常に 0.0（=CFR・全
+      // フレーム）に保ち、ビットレートだけを床(512kbps)付きで上下→セグメント長が一定でライブが死なない。
       await stream.setBitRateStrategy(
-        StreamVideoAdaptiveBitRateStrategy(mamimumVideoBitrate: videoBitrate)
+        ConstantFPSBitRateStrategy(mamimumVideoBitrate: videoBitrate, minimumVideoBitrate: 512_000)
       )
 
       readyStateTask?.cancel()
@@ -464,5 +466,75 @@ final class AudioEngineSource: @unchecked Sendable {
   private func stopSilence() {
     silenceTimer?.cancel()
     silenceTimer = nil
+  }
+}
+
+// ビットレートのみを調整するアダプティブ戦略（frameInterval は絶対に触らない）。
+//
+// 標準 StreamVideoAdaptiveBitRateStrategy と違い、帯域不足時に videoSettings.frameInterval を
+// 上げてフレームを間引くことは一切しない。frameInterval を常に 0.0（= VideoCodec.useFrame が
+// 全フレームを処理 = CFR）に固定するため、送出フレームの PTS 間隔が規則的なままになり、下流
+// HLS muxer（MediaMTX）でセグメント長が変化して iOS 視聴が停止する事象を防ぐ（7/19 本番の
+// ライブ切断の根治。VPS ログの "segment duration changed from 2s to 4s" が原因）。帯域不足時は
+// videoSettings.bitRate のみを下げ、視聴に耐える下限（床）で止める。
+final actor ConstantFPSBitRateStrategy: StreamBitRateStrategy {
+  static let statusCountsThreshold: Int = 15
+
+  let mamimumVideoBitRate: Int  // 上限（ceiling）。プロトコル要件（綴りはライブラリ準拠）。
+  let mamimumAudioBitRate: Int = 0
+  let minimumVideoBitRate: Int  // 床（下限）。これ未満には絶対に下げない。
+
+  private var sufficientBWCounts: Int = 0
+
+  init(mamimumVideoBitrate: Int, minimumVideoBitrate: Int = 800 * 1000) {
+    self.mamimumVideoBitRate = mamimumVideoBitrate
+    self.minimumVideoBitRate = min(minimumVideoBitrate, mamimumVideoBitrate)
+  }
+
+  func adjustBitrate(_ event: NetworkMonitorEvent, stream: some StreamConvertible) async {
+    switch event {
+    case .status:
+      // 帯域健全。ceiling へ向けてゆっくり戻す（回復時も fps 一定＝PTS連続）。
+      var videoSettings = await stream.videoSettings
+      guard videoSettings.bitRate < mamimumVideoBitRate else {
+        sufficientBWCounts = 0
+        return
+      }
+      if Self.statusCountsThreshold <= sufficientBWCounts {
+        let incremental = max(mamimumVideoBitRate / 10, 1)
+        videoSettings.bitRate = min(videoSettings.bitRate + incremental, mamimumVideoBitRate)
+        videoSettings.frameInterval = 0.0  // 常に 0.0 に固定（CFR維持・絶対に上げない）
+        try? await stream.setVideoSettings(videoSettings)
+        sufficientBWCounts = 0
+      } else {
+        sufficientBWCounts += 1
+      }
+
+    case .publishInsufficientBWOccured(let report):
+      // 送出キューが詰まっている。bitRate だけ下げる（fps は絶対に落とさない）。
+      sufficientBWCounts = 0
+      var videoSettings = await stream.videoSettings
+      let audioSettings = await stream.audioSettings
+
+      let target: Int
+      if 0 < report.currentBytesOutPerSecond {
+        target = report.currentBytesOutPerSecond * 8 - audioSettings.bitRate
+      } else {
+        target = videoSettings.bitRate * 3 / 4
+      }
+      let clamped = max(minimumVideoBitRate, min(target, videoSettings.bitRate))
+      if clamped != videoSettings.bitRate {
+        videoSettings.bitRate = clamped
+        videoSettings.frameInterval = 0.0  // frameInterval10/05 を絶対に入れない
+        try? await stream.setVideoSettings(videoSettings)
+      }
+
+    case .reset:
+      var videoSettings = await stream.videoSettings
+      sufficientBWCounts = 0
+      videoSettings.bitRate = mamimumVideoBitRate
+      videoSettings.frameInterval = 0.0
+      try? await stream.setVideoSettings(videoSettings)
+    }
   }
 }
