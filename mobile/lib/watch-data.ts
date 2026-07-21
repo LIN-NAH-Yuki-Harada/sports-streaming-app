@@ -55,6 +55,27 @@ export async function getBroadcastByCode(
   return data as unknown as WatchBroadcast;
 }
 
+// 自前配信サーバー(MediaMTX)の HLS 視聴 URL を取得する。
+// Web の getStreamPlaybackUrl と同じく WATCH_COLUMNS には含めず別クエリで引く
+// （stream_playback_url 列が無い環境では error → null → 従来 LiveKit 経路へ
+// フォールバックする migration-safe 設計）。
+// 非 null = アプリ配信(RTMP→MediaMTX)なので HLS プレイヤーで再生する。
+export async function getStreamPlaybackUrl(
+  shareCode: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("stream_playback_url")
+    .eq("share_code", shareCode.toUpperCase())
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return (
+    (data as { stream_playback_url: string | null }).stream_playback_url ?? null
+  );
+}
+
 // 視聴用 LiveKit トークンを取得する（role=viewer・匿名可なので Authorization なし）。
 // 弱電波でも UI が固まらないよう 15 秒でタイムアウト。失敗時は null。
 export async function fetchViewerToken(
