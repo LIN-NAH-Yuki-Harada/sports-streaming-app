@@ -366,6 +366,22 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       ? broadcast.live_youtube_broadcast_id
       : null);
 
+  // 配信終了直後〜YouTube アーカイブ完成までの「準備中」状態。この間はアーカイブ動画IDが
+  // まだ無く、視聴者に「終了しました＋料金カード」を出すと『課金しないと見られない』と誤読
+  // される（2026-07-22 後援会 FB）。処理中(pending/recording/uploading)、または終了直後で
+  // まだ順番待ち(null かつ 終了から2時間以内)なら、料金カードを出さず準備中メッセージにする。
+  // ※ 終了から時間が経った null（＝アーカイブ対象外の可能性）は準備中にせず誤った期待を避ける。
+  const endedRecently =
+    broadcast.ended_at != null &&
+    Date.now() - new Date(broadcast.ended_at).getTime() < 2 * 60 * 60 * 1000;
+  const archivePreparing =
+    !isLive &&
+    !archiveYoutubeId &&
+    (broadcast.youtube_upload_status === "pending" ||
+      broadcast.youtube_upload_status === "recording" ||
+      broadcast.youtube_upload_status === "uploading" ||
+      (broadcast.youtube_upload_status === null && endedRecently));
+
   return (
     <div className="min-h-screen bg-black flex flex-col">
       {/* メイン映像エリア — 画面全体を使用 */}
@@ -468,6 +484,37 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               <AdSlot placement="archive_pre" sport={broadcast.sport} />
             </div>
           </div>
+        ) : archivePreparing ? (
+          // 配信終了直後〜YouTube アーカイブ完成まで（準備中）。
+          // 料金カードは出さない（「課金しないと見られない」誤読を防ぐ・2026-07-22 後援会 FB）。
+          <div className="text-center px-6 max-w-md">
+            <div className="w-14 h-14 mx-auto rounded-full bg-[#1a0608] border border-[#e63946]/40 flex items-center justify-center mb-4">
+              <svg className="w-6 h-6 text-[#e63946]" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+              </svg>
+            </div>
+            <p className="text-sm font-semibold text-white">この配信は終了しました</p>
+            <p className="mt-2 text-xs text-gray-400 leading-relaxed">
+              この試合の見逃し配信（アーカイブ）を準備しています。
+              <br />
+              YouTube へのアップロードが終わると、この画面からご覧いただけます。
+              <br />
+              数分〜十数分ほどで反映されます。少し時間をおいて、もう一度このページを開いてください。
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-5 w-full bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold py-3 rounded-md transition"
+            >
+              🔄 更新する
+            </button>
+            <Link
+              href="/"
+              className="block w-full mt-2 bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold py-3 rounded-md text-center transition"
+            >
+              ← ホームへ戻る
+            </Link>
+            <p className="mt-4 text-[10px] text-gray-500">※ 試合の視聴は無料です。</p>
+          </div>
         ) : (
           <div className="text-center px-6 max-w-md">
             <p className="text-sm text-gray-400">この配信は終了しました</p>
@@ -481,12 +528,17 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             {/* 明示的な「ホームへ戻る」ボタン（LP 宣伝の前に配置して戻り導線を分かりやすく） */}
             <Link
               href="/"
-              className="block w-full bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold py-3 rounded-md text-center transition mb-6"
+              className="block w-full bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold py-3 rounded-md text-center transition mb-3"
             >
               ← ホームへ戻る
             </Link>
 
-            {/* LIVE SPOtCH 宣伝 */}
+            {/* 視聴が無料であることを明示（「課金しないと見られない」誤読を防ぐ・2026-07-22 後援会 FB）。 */}
+            <p className="text-[11px] text-gray-500 mb-6">
+              ※ 試合の視聴は無料です。以下は「配信する方」へのご案内です。
+            </p>
+
+            {/* LIVE SPOtCH 宣伝（配信者募集） */}
             <div className="bg-[#111] border border-white/10 rounded-xl p-5 text-left">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-8 h-8 rounded-full bg-[#e63946] flex items-center justify-center">
