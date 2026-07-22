@@ -47,6 +47,21 @@ const STALE_UPLOADING_MS = 4 * 60 * 60 * 1000;
 // SIGKILL 時は finally が走らず中間ファイルが残るため、古い作業dirを起動時に掃除する。
 const ORPHAN_WORKDIR_MS = 24 * 60 * 60 * 1000;
 
+// ===== ライブ並走バックオフ（live-aware backoff・2026-07-22 / レビュー反映版）=====
+// 進行中ライブがある tick は、重い ffprobe/ffmpeg/YouTubeアップロードを次tick(5分後)へ
+// 見送り、MediaMTX の HLS 分割・視聴 egress・上り帯域・ディスクIO をライブに明け渡す。
+// 【rollout】未実測事項(ライブ中に stream_playback_url が set 済みか)が残るため既定 OFF。
+// VPS の .env で明示 "1" にして数日観測してから本採用する（＝opt-in / 攻めすぎ回避）。
+const LIVE_BACKOFF_ENABLED = process.env.LIVE_BACKOFF_ENABLED === "1";
+// starvation 回避の猶予。ended_at からこの時間以上待たされたら、ライブ並走でも強制処理する
+// (遅延の絶対上限を保証する安全弁)。既定 45分。
+const LIVE_BACKOFF_MAX_DEFER_MS =
+  Number(process.env.LIVE_BACKOFF_MAX_DEFER_MS) || 45 * 60 * 1000;
+// 「生きているライブ」と数える started_at の新しさ上限。心拍(last_seen)列が無いための近似。
+// web cron cleanup の 2h とは密結合させず独立に既定 3h（2h超の実試合でも保護を切らさない）。
+const LIVE_ACTIVE_MAX_AGE_MS =
+  Number(process.env.LIVE_ACTIVE_MAX_AGE_MS) || 3 * 60 * 60 * 1000;
+
 if (
   !SUPABASE_URL ||
   !SUPABASE_SERVICE_ROLE_KEY ||
@@ -617,6 +632,26 @@ async function reclaimStaleUploading() {
   }
 }
 
+// 進行中ライブのうち、この VPS(MediaMTX)に負荷をかけるものだけを数える。
+// status='live' かつ stream_playback_url IS NOT NULL(=MediaMTX経由。LiveKit経路は除外)
+// かつ started_at が LIVE_ACTIVE_MAX_AGE_MS 以内(ゴースト残骸を近似除外)。
+// 判定不能(DBエラー)は「ライブ無し」にフェイルオープン＝アーカイブを止めない側へ倒す。
+async function countActiveMediaMtxLive() {
+  const freshIso = new Date(Date.now() - LIVE_ACTIVE_MAX_AGE_MS).toISOString();
+  const { data, error } = await admin
+    .from("broadcasts")
+    .select("id")
+    .eq("status", "live")
+    .not("stream_playback_url", "is", null)
+    .gte("started_at", freshIso)
+    .limit(5);
+  if (error) {
+    log("active-live check failed (assuming none):", error.message.slice(0, 120));
+    return 0;
+  }
+  return (data || []).length;
+}
+
 async function main() {
   // 0. 保守: 残骸workDir掃除 + stale uploadingの復旧（どちらも失敗しても本処理は続行）
   try {
@@ -699,6 +734,29 @@ async function main() {
       `age=${ageMs === Infinity ? "?" : Math.round(ageMs / 60000) + "min"}`,
     );
     return;
+  }
+
+  // 3-1b. ライブ並走バックオフ。非適格(step2 cancel)・録画なし(step3 fail)という
+  //   「負荷ゼロで即キューから外れる」終端遷移はここより前で先に流す。守るのは直後(3-2)
+  //   から始まる重い ffprobe/ffmpeg/アップロードだけ。見送り時は行を一切 UPDATE しない
+  //   (pending/null のまま・retry 非消費)＝次tickへ持越し。
+  if (LIVE_BACKOFF_ENABLED) {
+    const endedMs = b.ended_at ? Date.parse(b.ended_at) : NaN;
+    // ended_at 不明は待ち時間不明＝Infinity 扱いで「猶予超過(処理する側)」に倒す。
+    const waitedMs = Number.isFinite(endedMs) ? Date.now() - endedMs : Infinity;
+    if (waitedMs <= LIVE_BACKOFF_MAX_DEFER_MS) {
+      const activeLive = await countActiveMediaMtxLive();
+      if (activeLive > 0) {
+        log(
+          `deferring (live-aware backoff): ${b.share_code} activeLive=${activeLive} waited=${Math.round(waitedMs / 60000)}min < grace ${Math.round(LIVE_BACKOFF_MAX_DEFER_MS / 60000)}min`,
+        );
+        return; // 行は無変更のまま次tickへ
+      }
+    } else {
+      log(
+        `starvation override: ${b.share_code} waited=${Math.round(waitedMs / 60000)}min >= grace -> processing despite any live`,
+      );
+    }
   }
 
   // 3-2. 使えないセグメントを除外。4G再接続でできる断片は
