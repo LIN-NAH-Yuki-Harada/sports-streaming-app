@@ -62,3 +62,37 @@ export async function rcLogOut(): Promise<void> {
     /* 既に匿名等で失敗しても無視 */
   }
 }
+
+/**
+ * 購入 / 復元の直前に必ず呼ぶ。RevenueCat を Supabase user.id で logIn させ、
+ * 現在の app_user_id が実 userId に一致（＝匿名 $RCAnonymousID でない）ことを保証する。
+ * これに失敗したまま購入すると購入が匿名IDに紐づき、webhook が profiles.plan を更新できず
+ * 「課金したのに反映されない」状態になる（起動時の fire-and-forget logIn 取りこぼし対策）。
+ *
+ * 判定は必ず「現在の app_user_id」＝ getAppUserID() を権威にする。logIn は app_user_id を
+ * ローカルで先に切替えてからバックエンド同期するため、弱回線で同期だけ reject/タイムアウトしても
+ * ローカルが userId に切替わっていれば購入は userId に正しく紐づく（＝誤ってブロックしない）。
+ * ※ customerInfo.originalAppUserId は匿名→logIn でエイリアスした端末では $RCAnonymousID が
+ *   残るため判定に使ってはいけない（使うと全ユーザーが購入不能になる）。
+ *
+ * @returns 現在の app_user_id が userId に一致していれば true（false のときは購入を止めること）
+ */
+export async function ensureRcIdentity(userId: string): Promise<boolean> {
+  if (!RC_SUPPORTED || !userId) return false;
+  configureRevenueCat();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // 弱回線/圏外で logIn のバックエンド同期がハングしても購入UIを固めないよう 8 秒で区切る。
+    await Promise.race([
+      Purchases.logIn(userId),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("rc-login-timeout")), 8000);
+      }),
+    ]);
+  } catch {
+    /* 同期失敗/タイムアウトは無視。判定は下の「現在の app_user_id」に委ねる。 */
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  return (await Purchases.getAppUserID().catch(() => null)) === userId;
+}

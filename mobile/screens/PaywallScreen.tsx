@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Purchases, { type PurchasesPackage } from "react-native-purchases";
 import { supabase } from "../lib/supabase";
 import { waitForPaidPlan } from "../lib/plan";
-import { RC_SUPPORTED } from "../lib/revenuecat";
+import { RC_SUPPORTED, ensureRcIdentity } from "../lib/revenuecat";
 import { SITE_URL } from "../config";
 
 // 商品ID → プラン表示情報。RevenueCat の package.product.identifier で判定する
@@ -83,15 +83,44 @@ export function PaywallScreen() {
 
   const purchase = async (pkg: PurchasesPackage) => {
     if (busy) return;
+    if (!userId) {
+      Alert.alert(
+        "購入を開始できません",
+        "ログイン情報を確認できませんでした。アプリを再起動してから、もう一度お試しください。",
+      );
+      return;
+    }
+    // 購入前に必ず RevenueCat を実 user.id でログイン状態にする。ここで匿名（$RCAnonymousID）を
+    // 排除しないと、購入が匿名IDに紐づき webhook がプランを反映できない（起動時 logIn 取りこぼし対策）。
+    setBusy("購入準備中…");
+    const identityOk = await ensureRcIdentity(userId);
+    if (!identityOk) {
+      setBusy(null);
+      Alert.alert(
+        "購入を開始できません",
+        "アカウントの確認に失敗しました。通信環境をご確認のうえ、アプリを再起動してから、もう一度お試しください。",
+      );
+      return;
+    }
     setBusy("購入処理中…");
     try {
       await Purchases.purchasePackage(pkg);
       setBusy("反映中…");
-      if (userId) await waitForPaidPlan(userId);
+      const plan = await waitForPaidPlan(userId);
       setBusy(null);
-      Alert.alert("ありがとうございます", "プランが有効になりました。", [
-        { text: "OK", onPress: close },
-      ]);
+      if (plan === "free") {
+        // 決済は完了したが webhook 反映待ち（混雑・Android の遅延決済・承認待ち購入など）。
+        // 未反映なのに「有効になりました」と言わない＝「課金したのに反映されない」の再発防止。
+        Alert.alert(
+          "ご購入を受け付けました",
+          "プランの反映まで数分かかる場合があります。自動で有効になりますので、そのままお待ちください。",
+          [{ text: "OK", onPress: close }],
+        );
+      } else {
+        Alert.alert("ありがとうございます", "プランが有効になりました。", [
+          { text: "OK", onPress: close },
+        ]);
+      }
     } catch (e) {
       setBusy(null);
       const err = e as { userCancelled?: boolean; message?: string };
@@ -102,6 +131,24 @@ export function PaywallScreen() {
 
   const restore = async () => {
     if (busy) return;
+    if (!userId) {
+      Alert.alert(
+        "復元できません",
+        "ログイン情報を確認できませんでした。アプリを再起動してから、もう一度お試しください。",
+      );
+      return;
+    }
+    // 復元も同じく実 user.id でログイン状態を保証してから行う（匿名に復元が紐づくのを防ぐ）。
+    setBusy("確認中…");
+    const identityOk = await ensureRcIdentity(userId);
+    if (!identityOk) {
+      setBusy(null);
+      Alert.alert(
+        "復元できません",
+        "アカウントの確認に失敗しました。通信環境をご確認のうえ、アプリを再起動してから、もう一度お試しください。",
+      );
+      return;
+    }
     setBusy("復元中…");
     try {
       const info = await Purchases.restorePurchases();
@@ -111,9 +158,17 @@ export function PaywallScreen() {
         return;
       }
       setBusy("反映中…");
-      if (userId) await waitForPaidPlan(userId);
+      const plan = await waitForPaidPlan(userId);
       setBusy(null);
-      Alert.alert("復元完了", "プランを復元しました。", [{ text: "OK", onPress: close }]);
+      if (plan === "free") {
+        Alert.alert(
+          "購入を復元しました",
+          "プランの反映まで数分かかる場合があります。自動で有効になりますので、そのままお待ちください。",
+          [{ text: "OK", onPress: close }],
+        );
+      } else {
+        Alert.alert("復元完了", "プランを復元しました。", [{ text: "OK", onPress: close }]);
+      }
     } catch (e) {
       setBusy(null);
       const err = e as { message?: string };
