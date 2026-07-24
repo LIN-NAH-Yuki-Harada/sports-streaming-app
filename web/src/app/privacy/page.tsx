@@ -54,7 +54,8 @@ export default function PrivacyPage() {
                 <li>Supabase（データベース・認証基盤）</li>
                 <li>LiveKit（映像配信基盤）</li>
                 <li>Vercel（ホスティング）</li>
-                <li>Stripe（決済処理）※導入予定</li>
+                <li>Stripe（決済処理）</li>
+                <li>Apple App Store / Google Play・RevenueCat（アプリ内課金の決済・購読管理）</li>
               </ul>
             </li>
           </ol>
