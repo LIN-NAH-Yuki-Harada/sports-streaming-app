@@ -80,6 +80,12 @@ export default function TokushoPage() {
               <span className="text-xs text-gray-500 mt-1 inline-block">
                 決済代行サービス Stripe を通じて処理されます。お客様のカード情報は当社では一切保持しません。
               </span>
+              <br />
+              アプリ内課金（App Store / Google Play）
+              <br />
+              <span className="text-xs text-gray-500 mt-1 inline-block">
+                モバイルアプリからのお申し込みは、Apple / Google の各ストア決済にて処理されます。
+              </span>
             </Row>
 
             <Row label="お支払い時期">
@@ -98,6 +104,9 @@ export default function TokushoPage() {
               </p>
               <p className="mt-3">
                 解約はマイページ内「プラン管理」からいつでも行うことが可能です。解約後も、課金済みの当月末日までは引き続きご利用いただけます。日割りでの返金には対応しておりません。
+              </p>
+              <p className="mt-3">
+                アプリ内課金（App Store / Google Play）でご登録の場合は、iPhone / iPad では「設定」→ Apple ID →「サブスクリプション」から、Android では「Google Play ストア」→「お支払いと定期購入」→「定期購入」から解約いただけます。
               </p>
               <p className="mt-3">
                 無料トライアル期間中に解約された場合、課金は発生しません。トライアル終了日までは引き続きご利用いただけます。
