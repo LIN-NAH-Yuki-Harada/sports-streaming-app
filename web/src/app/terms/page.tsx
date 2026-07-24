@@ -36,17 +36,17 @@ export default function TermsPage() {
             <li>ライブ映像配信</li>
             <li>スコアボード・オーバーレイ表示</li>
             <li>共有コードによる限定公開</li>
-            <li>アーカイブ保存・再生（準備中）</li>
+            <li>アーカイブ保存・再生（チームプラン）</li>
           </ul>
         </section>
 
         <section>
           <h2 className="text-base font-semibold text-white mb-3">第4条（料金・支払い）</h2>
           <ol className="list-decimal list-inside space-y-2 text-gray-400">
-            <li><strong className="text-gray-300">無料プラン</strong>: 視聴のみ。アーカイブ視聴機能は今後提供予定です。</li>
+            <li><strong className="text-gray-300">無料プラン</strong>: 視聴のみ。ライブ視聴に加え、チームプラン配信者のアーカイブ（YouTube限定公開）を視聴できます。</li>
             <li><strong className="text-gray-300">配信者プラン（月額300円）</strong>: ライブ配信、スコアボード・オーバーレイ、共有コード発行が利用可能です。初回10分間は無料でお試しいただけます。</li>
             <li><strong className="text-gray-300">チームプラン（月額500円）</strong>: 配信者プランの全機能に加え、アーカイブ保存、スケジュール管理、メンバー管理が利用可能です。</li>
-            <li>料金はクレジットカード等による月額課金制です。</li>
+            <li>料金はクレジットカード決済またはアプリ内課金（App Store / Google Play）による月額課金制です。</li>
             <li>プランの変更・解約はいつでも可能です。解約後も当月末まで利用できます。</li>
           </ol>
         </section>
