@@ -5,6 +5,7 @@ import {
   Animated,
   AppState,
   Easing,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   SafeAreaView,
@@ -1108,12 +1109,17 @@ export function BroadcastScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* iOS: チーム名入力時にキーボードが入力欄に被らないよう KeyboardAvoidingView で避ける。
+          旧実装の automaticallyAdjustKeyboardInsets は、キーボードを閉じた後も下端の
+          content inset が解除されず残る iOS 既知バグがあり、「下までスクロールすると
+          巨大な黒い余白」になるため使わない（1.1.3 で実機報告・1.1.4 で修正）。 */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.flex1}
+      >
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
-        // iOS: チーム名入力時にキーボードが入力欄に被らないよう、キーボード分の余白を自動確保し
-        // フォーカス中の入力欄をキーボードの上へスクロールして見えるようにする。
-        automaticallyAdjustKeyboardInsets={true}
       >
         <Text style={styles.title}>LIVE SPOtCH 配信</Text>
 
@@ -1291,6 +1297,7 @@ export function BroadcastScreen() {
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -1752,6 +1759,7 @@ function RtmpLiveView(
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
   container: { flex: 1, backgroundColor: "#0a0a0a" },
+  flex1: { flex: 1 },
   scroll: { padding: 24, flexGrow: 1, justifyContent: "center" },
   title: { color: "#fff", fontSize: 22, fontWeight: "800", textAlign: "center", marginBottom: 20 },
   form: { gap: 8 },
