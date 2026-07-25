@@ -153,6 +153,17 @@ export function MyPageScreen() {
     }
   }, []);
 
+  // ストアのサブスクリプション管理（解約）画面を直接開く。
+  // 解約の実行自体はApple/Googleの管轄でアプリからは代行不可のため、
+  // 「1タップで解約画面へ」が実現可能な最善（世界標準のパターン）。
+  const openStoreSubscriptions = useCallback(() => {
+    Linking.openURL(
+      IS_IOS
+        ? "https://apps.apple.com/account/subscriptions"
+        : "https://play.google.com/store/account/subscriptions",
+    ).catch(() => {});
+  }, []);
+
   const handleDelete = useCallback(() => {
     Alert.alert(
       "アカウントを削除（退会）",
@@ -163,10 +174,11 @@ export function MyPageScreen() {
       }\n\n削除しますか？`,
       [
         { text: "キャンセル", style: "cancel" },
+        { text: "解約画面を開く", onPress: openStoreSubscriptions },
         { text: "削除する", style: "destructive", onPress: doDelete },
       ],
     );
-  }, [doDelete]);
+  }, [doDelete, openStoreSubscriptions]);
 
   // プラン表示名（取得前は無料プラン表記をプレースホルダに）。
   // iOS は 3.1.1 対応で金額なしラベルを使う。
@@ -278,6 +290,11 @@ export function MyPageScreen() {
                   ? "プランの解約・確認は iOS の「設定 > Apple ID > サブスクリプション」から行えます。"
                   : "プランの解約・確認は Google Play ストアの「お支払いと定期購入 > 定期購入」から行えます。"}
               </Text>
+              <Pressable onPress={openStoreSubscriptions} hitSlop={8}>
+                <Text style={styles.manageLink}>
+                  サブスクリプションの確認・解約画面を開く →
+                </Text>
+              </Pressable>
               {/* iOS / Android ともにアプリ内課金（IAP）で購入・変更（RevenueCat 経由）。 */}
               <Pressable
                 style={styles.webButton}
@@ -481,6 +498,12 @@ const styles = StyleSheet.create({
   cardValue: { color: "#fff", fontSize: 16, fontWeight: "700", marginTop: 2 },
   cardSub: { color: "#999", fontSize: 12, lineHeight: 18, marginTop: 2 },
   cardNote: { color: "#666", fontSize: 11, lineHeight: 16, marginTop: 6 },
+  manageLink: {
+    color: "#7aa2ff",
+    fontSize: 12,
+    marginTop: 8,
+    textDecorationLine: "underline",
+  },
 
   statusPill: {
     borderRadius: 12,
