@@ -296,6 +296,29 @@ export function BroadcastScreen() {
     setPeriod(activePeriods[0]);
   }, [activePeriods, phase]);
 
+  // ゴースト対策の心拍: 配信中（RTMP / LiveKit 両経路）は 60 秒ごとに last_seen_at を更新。
+  // 異常終了（クラッシュ/電池切れ/圏外）で停止処理が飛ばなくても、サーバー側の掃除
+  // （web cron cleanup / VPS ghost sweep）が途絶を検知して自動で ended に補正できる。
+  // 失敗は次の心拍で再送するだけなので無視（Web版 broadcast/page.tsx と同仕様）。
+  useEffect(() => {
+    if (phase !== "live") return;
+    const beat = async () => {
+      const id = broadcastIdRef.current;
+      if (!id) return;
+      try {
+        await supabase
+          .from("broadcasts")
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq("id", id);
+      } catch {
+        // 失敗は無視（次の心拍で再送）
+      }
+    };
+    void beat();
+    const interval = setInterval(() => void beat(), 60_000);
+    return () => clearInterval(interval);
+  }, [phase]);
+
   // ライブ中、スコア/ピリオド/セットの変更を broadcasts 行へ反映（視聴ページに Realtime で届く）
   useEffect(() => {
     if (phase !== "live" || !shareCode) return;
@@ -996,6 +1019,19 @@ export function BroadcastScreen() {
         connect={true}
         audio={true}
         video={{ facingMode: "environment" }}
+        // 画質: Web版(5/10調整・composite-broadcaster-renderer)と同じ設定を明示。
+        // SDK既定の simulcast(複数レイヤー並列publish) は 4G 上り変動下で最高レイヤーが
+        // 落ちて「荒れる」ことが実証済みのため off、1レイヤー 2Mbps 固定で帯域を確保する。
+        options={{
+          publishDefaults: {
+            simulcast: false,
+            videoCodec: "h264",
+            videoEncoding: { maxBitrate: 2_000_000, maxFramerate: 30 },
+          },
+          videoCaptureDefaults: {
+            resolution: { width: 1280, height: 720, frameRate: 30 },
+          },
+        }}
         onConnected={() => {
           // 再接続（作り直し）成功 → 再接続モード終了・タイマー解除
           stopRecovering();

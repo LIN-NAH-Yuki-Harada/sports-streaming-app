@@ -32,7 +32,7 @@ import {
 // ★ 退会（アカウント削除）は Apple 5.1.1(v) 対応でアプリ内から完結（/api/account/delete）。
 // ログアウトもアプリ内で完結（supabase.auth.signOut）。
 
-const APP_VERSION = "1.1.3";
+const APP_VERSION = "1.1.4";
 const IS_IOS = Platform.OS === "ios";
 
 export function MyPageScreen() {
@@ -156,7 +156,11 @@ export function MyPageScreen() {
   const handleDelete = useCallback(() => {
     Alert.alert(
       "アカウントを削除（退会）",
-      "アカウントと配信データが完全に削除され、元に戻せません。有料プランは自動的に解約されます。削除しますか？",
+      `アカウントと配信データが完全に削除され、元に戻せません。Webサイトで登録した有料プランは自動的に解約されます。\n\n${
+        IS_IOS
+          ? "アプリ内課金のプランをご利用中の場合、iOS の「設定 > Apple ID > サブスクリプション」からの解約も必要です。"
+          : "アプリ内課金のプランをご利用中の場合、Google Play の「お支払いと定期購入 > 定期購入」からの解約も必要です。"
+      }\n\n削除しますか？`,
       [
         { text: "キャンセル", style: "cancel" },
         { text: "削除する", style: "destructive", onPress: doDelete },
@@ -327,6 +331,10 @@ export function MyPageScreen() {
               ) : null}
               <Text style={styles.cardNote}>
                 連携・解除・同時配信のON/OFFは Web 版（live-spotch.com）のマイページから設定できます。
+              </Text>
+              <Text style={styles.cardNote}>
+                ※ ご利用には YouTube 側で「ライブ配信の有効化」が必要です。初回の有効化は反映まで24時間かかるため、試合前日までに
+                YouTube Studio でご確認ください。
               </Text>
               {/* YouTube 連携は Web 版（live-spotch.com）で行う。iOS/Android とも
                   アプリ内に /mypage（価格・決済を含む）への導線は置かない。 */}
