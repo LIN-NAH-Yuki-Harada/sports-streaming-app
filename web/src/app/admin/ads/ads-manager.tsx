@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 
-const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
+const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "テニス", "ソフトテニス", "陸上", "その他"];
 const PLACEMENTS: { key: string; label: string }[] = [
   { key: "postroll", label: "配信終了画面" },
   { key: "archive_pre", label: "アーカイブ導線" },
