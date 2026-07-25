@@ -62,6 +62,22 @@ const LIVE_BACKOFF_MAX_DEFER_MS =
 const LIVE_ACTIVE_MAX_AGE_MS =
   Number(process.env.LIVE_ACTIVE_MAX_AGE_MS) || 3 * 60 * 60 * 1000;
 
+// ===== ゴースト掃除（MediaMTX 実体照合・ghost sweep・2026-07-25）=====
+// DB が status='live' なのに MediaMTX に映像が来ていない配信（アプリ異常終了・電池切れ・
+// 発熱シャットダウン等のゴースト）を検知して ended にする。判定は「サーバーに実際に
+// publish が居るか」（localhost の MediaMTX API・外部通信なし）なので実配信を誤爆しない。
+// 誤爆防止の三重保険:
+//   (1) 開始 GHOST_MIN_AGE_MS(既定10分) 未満は対象外（provision〜publish 開始の猶予）
+//   (2) 掃除は GHOST_SWEEP_INTERVAL_MS(既定20分) 毎にしか走らない（tick は5分毎でも間引く）
+//   (3) 「2回連続で不在」のときだけ ended（一瞬の切断→再接続を救う）＝確定まで実効40〜50分
+// MediaMTX API 到達不能・DB エラー時は何もしない（フェイルオープン＝終了させない側へ倒す）。
+const GHOST_SWEEP_ENABLED = process.env.GHOST_SWEEP_ENABLED === "1";
+const GHOST_SWEEP_INTERVAL_MS =
+  Number(process.env.GHOST_SWEEP_INTERVAL_MS) || 20 * 60 * 1000;
+const GHOST_MIN_AGE_MS = Number(process.env.GHOST_MIN_AGE_MS) || 10 * 60 * 1000;
+const MEDIAMTX_API_BASE = process.env.MEDIAMTX_API_BASE || "http://127.0.0.1:9997";
+const GHOST_SWEEP_STATE_PATH = "/var/tmp/archive-worker-ghost-sweep.json";
+
 if (
   !SUPABASE_URL ||
   !SUPABASE_SERVICE_ROLE_KEY ||
@@ -652,6 +668,134 @@ async function countActiveMediaMtxLive() {
   return (data || []).length;
 }
 
+// DB=live なのに MediaMTX に publisher が居ない配信を ended にする（ゴースト掃除）。
+// 実行間隔・猶予・2回連続確認はファイル冒頭の GHOST_* 設定を参照。
+async function sweepGhostBroadcasts() {
+  // 実行間隔ゲート（worker tick は5分毎だが、掃除自体は GHOST_SWEEP_INTERVAL_MS 毎）
+  let state = { lastRunMs: 0, suspects: {} };
+  try {
+    const raw = JSON.parse(fs.readFileSync(GHOST_SWEEP_STATE_PATH, "utf8"));
+    if (raw && typeof raw === "object") state = raw;
+  } catch {
+    /* 初回・破損時は初期値のまま */
+  }
+  if (!state.suspects || typeof state.suspects !== "object") state.suspects = {};
+  if (Date.now() - (Number(state.lastRunMs) || 0) < GHOST_SWEEP_INTERVAL_MS) return;
+
+  // MediaMTX に現在 publish されている（ready な）パス名一覧。localhost のみ・外部通信なし。
+  // ready は MediaMTX v1.17.0 で deprecated（後継 available/online）のため両方を見る。
+  // 「HTTP 200 だがスキーマが変質」も skip 側へ倒す（将来の MediaMTX 更新で全ライブを
+  // 一斉誤爆しないための構造ガード）。
+  let activePaths;
+  try {
+    const res = await fetch(`${MEDIAMTX_API_BASE}/v3/paths/list?itemsPerPage=100`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`http ${res.status}`);
+    const body = await res.json();
+    const items = Array.isArray(body.items) ? body.items : [];
+    if ((Number(body.pageCount) || 1) > 1) {
+      log("ghost sweep: paths > 1 page (unsupported, skip)");
+      return;
+    }
+    const flagged = items.filter(
+      (p) =>
+        p &&
+        (typeof p.ready === "boolean" ||
+          typeof p.available === "boolean" ||
+          typeof p.online === "boolean"),
+    );
+    if (items.length > 0 && flagged.length === 0) {
+      log("ghost sweep: api schema changed? no ready/available/online flags (skip)");
+      return; // スキーマ変質＝判定不能として何もしない
+    }
+    activePaths = new Set(
+      items
+        .filter((p) => p && (p.ready === true || p.available === true || p.online === true))
+        .map((p) => String(p.name)),
+    );
+  } catch (e) {
+    log("ghost sweep: mediamtx api unreachable (skip, no action):", String(e).slice(0, 100));
+    return; // フェイルオープン: 実体を確認できないときは絶対に終了させない
+  }
+
+  const minAgeIso = new Date(Date.now() - GHOST_MIN_AGE_MS).toISOString();
+  const { data, error } = await admin
+    .from("broadcasts")
+    .select("id, share_code, started_at")
+    .eq("status", "live")
+    .not("stream_playback_url", "is", null)
+    .lt("started_at", minAgeIso)
+    .limit(20);
+  if (error) {
+    log("ghost sweep: db read failed (skip):", error.message.slice(0, 100));
+    return;
+  }
+
+  const candidates = data || [];
+  const absent = candidates.filter((b) => !activePaths.has(`live/${b.share_code}`));
+  // 回路遮断: 候補が複数あり全滅、かつ MediaMTX 側に ready なパスが1本も無い場合は
+  // 「APIの意味が壊れている」可能性を優先して何もしない（実ライブ一斉誤爆の最終保険。
+  // 取り残しは web cron cleanup(2h) が拾う）。
+  if (candidates.length >= 2 && absent.length === candidates.length && activePaths.size === 0) {
+    log(`ghost sweep: all ${candidates.length} candidates absent & no active paths (circuit break, skip)`);
+    return;
+  }
+
+  const nextSuspects = {};
+  for (const b of candidates) {
+    if (activePaths.has(`live/${b.share_code}`)) continue; // 実配信 → 容疑解除
+    // 一度も MediaMTX に publish していない行（provision 後に LiveKit へフォールバック
+    // した実ライブ等）は録画実体を持たない → 対象外（strike も付けない）。
+    // 本物のゴースト＝一度は publish した配信は必ず録画ファイルを持つ。
+    const recs = findRecordings(b.share_code);
+    if (recs.length === 0) continue;
+    const strikes = (Number(state.suspects[b.id]) || 0) + 1;
+    if (strikes >= 2) {
+      // 2回連続不在 → ゴースト確定。status='live' の CAS 条件で実終了処理と競合しない。
+      // ended_at は掃除時刻でなく最終録画ファイルの mtime（≒実際の切断時刻）を使う。
+      // （掃除時刻だと壁時計とみなされ、極短配信の cancel 判定が壊れるため）
+      let endedAtIso = new Date().toISOString();
+      try {
+        const lastRec = recs[recs.length - 1];
+        const mtimeMs = fs.statSync(lastRec.p).mtimeMs;
+        if (Number.isFinite(mtimeMs) && mtimeMs > 0) {
+          endedAtIso = new Date(mtimeMs).toISOString();
+        }
+      } catch {
+        /* mtime 取得失敗時は現在時刻のまま */
+      }
+      const { error: upErr } = await admin
+        .from("broadcasts")
+        .update({ status: "ended", ended_at: endedAtIso })
+        .eq("id", b.id)
+        .eq("status", "live");
+      if (upErr) {
+        log(`ghost sweep: end failed ${b.share_code}:`, upErr.message.slice(0, 100));
+        nextSuspects[b.id] = strikes; // 次回リトライ
+      } else {
+        log(
+          `ghost sweep: ended ghost ${b.share_code} (no publisher x${strikes}, started ${b.started_at}, ended_at=${endedAtIso})`,
+        );
+      }
+    } else {
+      nextSuspects[b.id] = strikes;
+      log(
+        `ghost sweep: suspect ${b.share_code} (no publisher x${strikes}, recheck in ~${Math.round(GHOST_SWEEP_INTERVAL_MS / 60000)}min)`,
+      );
+    }
+  }
+
+  try {
+    fs.writeFileSync(
+      GHOST_SWEEP_STATE_PATH,
+      JSON.stringify({ lastRunMs: Date.now(), suspects: nextSuspects }),
+    );
+  } catch (e) {
+    log("ghost sweep: state save failed (ignored):", String(e).slice(0, 100));
+  }
+}
+
 async function main() {
   // 0. 保守: 残骸workDir掃除 + stale uploadingの復旧（どちらも失敗しても本処理は続行）
   try {
@@ -663,6 +807,13 @@ async function main() {
     await reclaimStaleUploading();
   } catch (e) {
     log("stale reclaim failed (ignored):", String(e).slice(0, 120));
+  }
+  if (GHOST_SWEEP_ENABLED) {
+    try {
+      await sweepGhostBroadcasts();
+    } catch (e) {
+      log("ghost sweep failed (ignored):", String(e).slice(0, 120));
+    }
   }
 
   // 1. 対象 = 終了した自前配信(stream_playback_url 有)で未処理(null/pending)・retry 未超過
@@ -712,6 +863,10 @@ async function main() {
 
   // 3. 録画ファイル（4G再接続で複数セグメントに分割されている場合がある → 全部取る）
   let recs = findRecordings(b.share_code);
+  // completed 時の後始末は「この時点で列挙できたファイルだけ」を個別削除する
+  // （ディレクトリ丸ごと削除だと、処理中に publisher が復帰して書き始めた
+  //  進行中録画まで消してしまうため）。
+  const enumeratedRecs = recs.slice();
   if (recs.length === 0) {
     const endedMs = b.ended_at ? Date.parse(b.ended_at) : 0;
     const ageMs = endedMs ? Date.now() - endedMs : Infinity;
@@ -850,6 +1005,32 @@ async function main() {
     }
   }
 
+  // 3-4. ended なのに MediaMTX に publisher が復帰している（ゴースト誤終了→再接続、
+  //      web cron が終了させたが実は配信継続中 等）なら、進行中の録画を変換しないよう
+  //      行無変更で次tickへ見送る。API 不達はフェイルオープン＝従来どおり続行。
+  if (GHOST_SWEEP_ENABLED) {
+    try {
+      const res = await fetch(`${MEDIAMTX_API_BASE}/v3/paths/list?itemsPerPage=100`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const body = await res.json();
+        const stillPublishing = (Array.isArray(body.items) ? body.items : []).some(
+          (p) =>
+            p &&
+            String(p.name) === `live/${b.share_code}` &&
+            (p.ready === true || p.available === true || p.online === true),
+        );
+        if (stillPublishing) {
+          log(`deferring (publisher active on mediamtx): ${b.share_code}`);
+          return; // 行無変更＝retry 非消費で持ち越し
+        }
+      }
+    } catch {
+      /* API 不達は従来挙動のまま続行（フェイルオープン） */
+    }
+  }
+
   // 4. 楽観排他で uploading
   const { data: claimed } = await admin
     .from("broadcasts")
@@ -956,10 +1137,20 @@ async function main() {
       /* noop */
     }
     try {
-      fs.rmSync(path.join(RECORDINGS_DIR, "live", b.share_code), {
-        recursive: true,
-        force: true,
-      });
+      // 処理開始時に列挙したファイルのみ個別削除（進行中の新規録画は残す）。
+      for (const r of enumeratedRecs) {
+        try {
+          fs.unlinkSync(r.p);
+        } catch {
+          /* 既に無い等は無視 */
+        }
+      }
+      // 空になった場合だけディレクトリを畳む（中身が残っていれば失敗して残る＝意図どおり）
+      try {
+        fs.rmdirSync(path.join(RECORDINGS_DIR, "live", b.share_code));
+      } catch {
+        /* not empty → keep */
+      }
     } catch (e) {
       log("local cleanup failed (ignored):", String(e));
     }
