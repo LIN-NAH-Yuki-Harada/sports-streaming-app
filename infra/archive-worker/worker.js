@@ -734,12 +734,27 @@ async function sweepGhostBroadcasts() {
 
   const candidates = data || [];
   const absent = candidates.filter((b) => !activePaths.has(`live/${b.share_code}`));
-  // 回路遮断: 候補が複数あり全滅、かつ MediaMTX 側に ready なパスが1本も無い場合は
-  // 「APIの意味が壊れている」可能性を優先して何もしない（実ライブ一斉誤爆の最終保険。
-  // 取り残しは web cron cleanup(2h) が拾う）。
+  // 回路遮断（精密版・7/25実測反映）: 候補複数が全滅＋activeパス0本は「APIの意味が壊れた」
+  // 疑いがある。ただし発熱日は1セッションから複数ゴーストが同時発生するのが実態
+  // （7/25実測: 3本同時）なので、無条件skipにせずディスクの録画 mtime を実体証拠に使う:
+  //   いずれかの候補の最新録画が5分以内に更新中 → 実はpublish中(API不整合)とみなし skip
+  //   全候補の録画が5分以上停止 → 本当に全滅している → 掃除を続行（連鎖ゴーストを掃除）
   if (candidates.length >= 2 && absent.length === candidates.length && activePaths.size === 0) {
-    log(`ghost sweep: all ${candidates.length} candidates absent & no active paths (circuit break, skip)`);
-    return;
+    const freshMs = 5 * 60 * 1000;
+    const anyFresh = candidates.some((b) => {
+      const recs = findRecordings(b.share_code);
+      if (recs.length === 0) return false;
+      try {
+        return Date.now() - fs.statSync(recs[recs.length - 1].p).mtimeMs < freshMs;
+      } catch {
+        return false;
+      }
+    });
+    if (anyFresh) {
+      log(`ghost sweep: all ${candidates.length} absent but fresh recording exists (api mismatch?, skip)`);
+      return;
+    }
+    log(`ghost sweep: all ${candidates.length} absent & recordings stale -> proceed (correlated ghosts)`);
   }
 
   const nextSuspects = {};
