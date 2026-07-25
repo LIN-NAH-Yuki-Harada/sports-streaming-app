@@ -157,7 +157,10 @@ create table public.broadcasts (
   last_seen_at timestamptz,
   -- 配信者からのお知らせテロップ（視聴ページに表示・null で非表示）
   -- 詳細: supabase-migration-broadcast-notice.sql
-  notice text check (notice is null or char_length(notice) <= 100)
+  notice text check (notice is null or char_length(notice) <= 100),
+  -- テニス系のゲーム内ポイント表示（{"home":"40","away":"Ad"} / {"home":"6","away":"5","tb":true} / null）
+  -- 詳細: supabase-migration-broadcasts-game-points.sql
+  game_points jsonb
 );
 
 alter table public.broadcasts enable row level security;
