@@ -305,6 +305,10 @@ export function BroadcastScreen() {
     const beat = async () => {
       const id = broadcastIdRef.current;
       if (!id) return;
+      // Android は背景でも JS タイマーが動き続けるため、背景中は心拍を打たない
+      // （凍った配信が「生きている」と誤認されてサーバー掃除を回避するのを防ぐ。
+      //   背景化は別途 BACKGROUND_GRACE_MS=3分 で finishLive される）。
+      if (AppState.currentState !== "active") return;
       try {
         await supabase
           .from("broadcasts")
@@ -1019,14 +1023,16 @@ export function BroadcastScreen() {
         connect={true}
         audio={true}
         video={{ facingMode: "environment" }}
-        // 画質: Web版(5/10調整・composite-broadcaster-renderer)と同じ設定を明示。
+        // 画質: 現行Web版の生配信経路(livekit-video.tsx・6/21 PR#191)と同じ設定を明示。
         // SDK既定の simulcast(複数レイヤー並列publish) は 4G 上り変動下で最高レイヤーが
-        // 落ちて「荒れる」ことが実証済みのため off、1レイヤー 2Mbps 固定で帯域を確保する。
+        // 落ちて「荒れる」ことが実証済みのため off。maxBitrate は上限値であり弱回線では
+        // 帯域推定が自動で絞るため 4Mbps でも弱回線は悪化しない(PR#191 で実証済み)。
+        // この publish が自社プレイヤー視聴と YouTube Egress の唯一の源泉のため上限は高めに。
         options={{
           publishDefaults: {
             simulcast: false,
             videoCodec: "h264",
-            videoEncoding: { maxBitrate: 2_000_000, maxFramerate: 30 },
+            videoEncoding: { maxBitrate: 4_000_000, maxFramerate: 30 },
           },
           videoCaptureDefaults: {
             resolution: { width: 1280, height: 720, frameRate: 30 },
