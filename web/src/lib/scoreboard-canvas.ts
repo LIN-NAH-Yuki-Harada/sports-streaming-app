@@ -147,7 +147,12 @@ export function drawScoreboard(
   // テニス系: ゲーム内ポイント（配信側エンジンが確定した表示用文字列をそのまま描く）
   if (state.gamePoints) {
     ctx.font = fontPoint;
-    const gpText = `${state.gamePoints.tb ? "TB " : ""}${state.gamePoints.home} - ${state.gamePoints.away}`;
+    const tbLabel = state.gamePoints.tb
+      ? state.sport === "ソフトテニス"
+        ? "ファイナル "
+        : "TB "
+      : "";
+    const gpText = `${tbLabel}${state.gamePoints.home} - ${state.gamePoints.away}`;
     const gpW = Math.round(ctx.measureText(gpText).width + pad * 2);
     const gpH = Math.round(40 * scale);
     drawRoundedRect(ctx, leftX, belowY, gpW, gpH, radius);

@@ -101,7 +101,11 @@ export function ViewerScoreboardOverlay({ broadcast }: { broadcast: Broadcast })
         {broadcast.game_points && (
           <div className="mt-[0.4em] inline-flex items-center gap-[0.45em] bg-black/80 backdrop-blur-sm rounded px-[0.7em] py-[0.3em] shadow-lg">
             <span className="text-[0.7em] text-white/60 font-bold">
-              {broadcast.game_points.tb ? "TB" : "ポイント"}
+              {broadcast.game_points.tb
+                ? broadcast.sport === "ソフトテニス"
+                  ? "ファイナル"
+                  : "TB"
+                : "ポイント"}
             </span>
             <span className="font-black tabular-nums">{broadcast.game_points.home}</span>
             <span className="text-[0.6em] text-white/60">-</span>

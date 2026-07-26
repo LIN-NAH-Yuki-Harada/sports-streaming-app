@@ -189,7 +189,8 @@ export function tennisAddPoint(
 
 /**
  * 1 ポイント取り消し（現在のゲーム内のみ・0 が下限）。
- * ゲーム/セット境界を跨ぐ取り消しは対象外（ゲーム数はスコアの−ボタンで直接調整する運用）。
+ * ゲーム/セット境界を跨ぐ取り消しは対象外＝確定済みゲームの訂正は配信画面の
+ * Undo（履歴スタック）で行う。ゲーム数の直接±UI は将来課題（v1.2 候補）。
  */
 export function tennisRemovePoint(s: TennisSnapshot, side: TennisSide): TennisSnapshot {
   if (s.matchWon) return s;

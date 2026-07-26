@@ -345,7 +345,9 @@ function BroadcastPageInner() {
   };
   const historyRef = useRef<ScoreSnapshot[]>([]);
   const [historyLength, setHistoryLength] = useState(0);
-  const MAX_HISTORY = 10;
+  // テニス系は±がポイント単位（デュース1ゲームで10手超も普通）のため、
+  // ゲームを跨いだ訂正が Undo で届くよう余裕を持たせる（全競技共通・実害なし）。
+  const MAX_HISTORY = 40;
 
   const vbRule = sport === "バレー" ? VOLLEYBALL_RULES[volleyballRule] : null;
   const bbRule = sport === "野球" ? BASEBALL_RULES[baseballRule] : null;
@@ -471,6 +473,8 @@ function BroadcastPageInner() {
     tournament: tournament || null,
     sport,
     pointLabel,
+    // 緊急焼き込み(?burn=1)時もテニスのポイントが映像に出るように
+    gamePoints: tnRule ? formatTennisPoints(tnRule, tennis) : null,
     elapsedSeconds: broadcastElapsed,
   };
 
@@ -622,6 +626,7 @@ function BroadcastPageInner() {
   // ゲーム/セット/マッチの確定はエンジン（lib/tennis.ts）が自動判定する。
   function tennisPoint(side: "home" | "away") {
     if (!tnRule) return;
+    if (tennis.matchWon) return; // 確定後の no-op で Undo 履歴を浪費しない
     pushHistory();
     const { next, events } = tennisAddPoint(tnRule, tennis, side);
     setTennis(next);
@@ -635,7 +640,8 @@ function BroadcastPageInner() {
     });
     setSetResults(sr);
     let idx = periodIndex;
-    if (events.setWon && tnRule.kind === "hard") {
+    // マッチ確定時は period を進めない（2-0完走で「3SET」表示になるオフバイワン防止）
+    if (events.setWon && !events.matchWon && tnRule.kind === "hard") {
       idx = Math.max(0, Math.min(periods.length - 1, next.hSets + next.aSets));
       setPeriodIndex(idx);
     }
@@ -646,6 +652,9 @@ function BroadcastPageInner() {
   }
   function tennisPointMinus(side: "home" | "away") {
     if (!tnRule) return;
+    // 0-0 や確定後は no-op（Undo 履歴のスロットを浪費しない）
+    if (tennis.matchWon) return;
+    if (side === "home" ? tennis.hPts === 0 : tennis.aPts === 0) return;
     pushHistory();
     const next = tennisRemovePoint(tennis, side);
     setTennis(next);
@@ -1035,26 +1044,30 @@ function BroadcastPageInner() {
           ).catch(() => {});
         }
 
-        // テニス系: 進行中セットのゲーム数を最終確定として記録し、ポイント表示は消す
-        // （バレーの set_results 確定と同じ思想。セット数の追加加算はしない＝途中終了の
-        //   過剰加算防止。ポイントは試合が終わったので null へ）。
+        // テニス系: 最終スコアを常に確定書き込みし、ポイント表示は消す。
+        // - マッチ完走済み(tennis.matchWon)なら set_results は確定済み＝追記しない
+        //   （ソフトテニスはゲーム数が残るため、旧実装だと最終スコアが二重記録された）
+        // - 進行中セットがあれば最終確定として追記（バレーと同じ思想・セット数は加算しない）
+        // - 常に書くのは、直前ポイントの saveScoreToDb(500msデバウンス) が終了処理の
+        //   broadcastRef クリアで破棄されても最終値が残るようにするため
         if (tnRule && endedBroadcastId) {
-          if (homeScore > 0 || awayScore > 0) {
-            const finalSetResults = [...setResults, { home: homeScore, away: awayScore }];
-            await updateBroadcastScore(
-              endedBroadcastId,
-              homeScore,
-              awayScore,
-              currentPeriod,
-              homeSets,
-              awaySets,
-              finalSetResults,
-            ).catch(() => {});
-          }
+          const inProgress = !tennis.matchWon && (homeScore > 0 || awayScore > 0);
+          const finalSetResults = inProgress
+            ? [...setResults, { home: homeScore, away: awayScore }]
+            : setResults;
+          await updateBroadcastScore(
+            endedBroadcastId,
+            homeScore,
+            awayScore,
+            currentPeriod,
+            homeSets,
+            awaySets,
+            finalSetResults,
+          ).catch(() => {});
           const supabaseEnd = createClient();
           await supabaseEnd
             .from("broadcasts")
-            .update({ game_points: null })
+            .update({ game_points: null, point_label: null })
             .eq("id", endedBroadcastId)
             .then(undefined, () => {});
         }
@@ -1589,14 +1602,20 @@ function BroadcastPageInner() {
                 <span>戻す</span>
               </button>
               <span className="text-gray-600 text-xs mx-0.5">|</span>
-              <button
-                onClick={() => changePeriod(periodIndex - 1)}
-                className="w-8 h-8 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm transition active:scale-90"
-                aria-label="前のピリオドへ"
-              >
-                ‹
-              </button>
+              {/* テニス系はエンジンがセット/ピリオドを自動送りするため、手動のピリオド操作と
+                  「次へ 0-0」は出さない（押すと tennis スナップショットと乖離して巻き戻るため） */}
+              {!tnRule && (
+                <button
+                  onClick={() => changePeriod(periodIndex - 1)}
+                  className="w-8 h-8 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm transition active:scale-90"
+                  aria-label="前のピリオドへ"
+                >
+                  ‹
+                </button>
+              )}
               <span className="text-[10px] font-medium min-w-[40px] text-center">{currentPeriod}</span>
+              {!tnRule && (
+                <>
               <button
                 onClick={() => changePeriod(periodIndex + 1)}
                 className="w-8 h-8 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm transition active:scale-90"
@@ -1631,6 +1650,8 @@ function BroadcastPageInner() {
               >
                 次へ 0-0
               </button>
+                </>
+              )}
               <span className="text-gray-600 text-xs mx-0.5">|</span>
               <button
                 onClick={() => setShowNoticePanel((v) => !v)}
