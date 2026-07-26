@@ -28,6 +28,11 @@ const SITE_URL =
 //   なので遅延させない（HLS分岐のみ delayedBroadcast を渡す）。
 const OVERLAY_DELAY_MS = 7000;
 
+// 配信終了画面のアプリ誘導（配信はネイティブアプリが最も安定するため・2026-07-26）
+const APP_STORE_URL = "https://apps.apple.com/jp/app/live-spotch/id6785001863";
+const PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=com.linnah.livespotch";
+
 // broadcast を delayMs ぶん遅らせて返す（スコア表示を映像に同期させるため）。
 function useDelayedBroadcast(
   broadcast: Broadcast | null,
@@ -553,14 +558,45 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               </div>
               <p className="text-xs text-gray-400 leading-relaxed">
                 お子さんの試合、あなたも配信しませんか？スマホ1台でTV中継風のスコアボード付きライブ配信ができます。
+                配信は専用アプリ（iOS / Android）が最も安定しておすすめです。
               </p>
+              {/* 主導線=アプリDL（Web配信ページ誘導から変更・2026-07-26 オーナー指示。
+                  配信はネイティブアプリの方が安定するため、終了画面の宣伝はアプリへ寄せる） */}
               <div className="mt-4 space-y-2">
-                <a
-                  href="/broadcast"
-                  className="block w-full bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold py-2.5 rounded-md text-center transition"
-                >
-                  配信をはじめる（初回10分間無料）
-                </a>
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  <a
+                    href={APP_STORE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block hover:opacity-80 transition"
+                    aria-label="App Store で LIVE SPOtCH をダウンロード"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src="/appstore-badge-ja.svg"
+                      alt="App Store でダウンロード"
+                      width={136}
+                      height={50}
+                      className="h-[40px] w-auto"
+                    />
+                  </a>
+                  <a
+                    href={PLAY_STORE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block hover:opacity-80 transition"
+                    aria-label="Google Play で LIVE SPOtCH をダウンロード"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src="/google-play-badge-ja.png"
+                      alt="Google Play で手に入れよう"
+                      width={147}
+                      height={57}
+                      className="h-[52px] w-auto"
+                    />
+                  </a>
+                </div>
                 <a
                   href="/"
                   className="block w-full border border-white/10 text-gray-300 text-xs font-semibold py-2.5 rounded-md text-center hover:bg-white/5 transition"
