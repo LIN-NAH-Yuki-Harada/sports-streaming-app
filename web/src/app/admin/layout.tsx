@@ -11,6 +11,7 @@ const NAV: { href: string; label: string }[] = [
   { href: "/admin/reports", label: "通報対応" },
   { href: "/admin/broadcasts", label: "配信" },
   { href: "/admin/users", label: "ユーザー" },
+  { href: "/admin/server", label: "サーバー" },
   { href: "/admin/ads", label: "広告(CM)" },
 ];
 
