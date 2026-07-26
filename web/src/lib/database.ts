@@ -54,6 +54,9 @@ export type Broadcast = {
   runners?: { first?: boolean; second?: boolean; third?: boolean } | null;
   // 配信者からのお知らせテロップ（「延長タイブレーク中」等・null/未設定で非表示）
   notice?: string | null;
+  // テニス系のゲーム内ポイント表示（配信者が書き込み・表示用文字列・null で非表示）
+  // 例: {"home":"40","away":"Ad"} / タイブレーク中 {"home":"6","away":"5","tb":true}
+  game_points?: { home: string; away: string; tb?: boolean } | null;
   tournament: string | null;
   venue: string | null;
   period: string;
@@ -100,10 +103,13 @@ export type Broadcast = {
 // youtube_upload_error は配信者向け内部ログのため列レベル GRANT で遮断しており、
 // クライアント側ではこのリストに従って明示列指定で SELECT する。
 // youtube_video_id / youtube_upload_status は視聴 UI の YouTube iframe 切替判定に使う。
+// ※ game_points は supabase-migration-broadcasts-game-points.sql の本番適用が前提
+//   （列が無い状態でこの SELECT が走ると 42703 で視聴が壊れるため、migration 適用後にマージする）。
+// ※ set_results はスケジュール等のセット別スコア表示に必要（従来の追記漏れを 2026-07 に修正）。
 export const BROADCAST_PUBLIC_COLUMNS =
   "id, share_code, broadcaster_id, team_id, sport, home_team, away_team, " +
-  "tournament, venue, home_score, away_score, home_sets, away_sets, period, point_label, " +
-  "balls, strikes, outs, runners, " +
+  "tournament, venue, home_score, away_score, home_sets, away_sets, set_results, period, point_label, " +
+  "balls, strikes, outs, runners, game_points, " +
   "status, started_at, ended_at, scoreboard_burned_in, youtube_video_id, youtube_upload_status, " +
   "live_youtube_broadcast_id, live_status, notice";
 

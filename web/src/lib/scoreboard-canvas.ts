@@ -9,6 +9,8 @@ export type ScoreboardState = {
   tournament: string | null;
   sport: string;
   pointLabel: string | null;
+  /** テニス系のゲーム内ポイント（表示用文字列・null で非描画）。tb=タイブレーク/ファイナル */
+  gamePoints?: { home: string; away: string; tb?: boolean } | null;
   /** 配信開始からの経過秒数（null/undefined なら描画しない） */
   elapsedSeconds?: number | null;
 };
@@ -128,17 +130,36 @@ export function drawScoreboard(
   ctx.fillStyle = COLORS.white;
   ctx.fillText(state.period, cursor + pad, topY + h / 2);
 
-  // ポイントラベル（バレー時のみ、スコアボードの下に小さく）
+  // ポイントラベル（セット/マッチポイント等、スコアボードの下に小さく）
+  let belowY = topY + h + Math.round(8 * scale);
   if (state.pointLabel) {
     ctx.font = fontPoint;
     const labelW = Math.round(ctx.measureText(state.pointLabel).width + pad * 2);
     const labelH = Math.round(40 * scale);
-    const labelY = topY + h + Math.round(8 * scale);
-    drawRoundedRect(ctx, leftX, labelY, labelW, labelH, radius);
+    drawRoundedRect(ctx, leftX, belowY, labelW, labelH, radius);
     ctx.fillStyle = "rgba(234, 179, 8, 0.92)";
     ctx.fill();
     ctx.fillStyle = "#1a1a1a";
-    ctx.fillText(state.pointLabel, leftX + pad, labelY + labelH / 2);
+    ctx.fillText(state.pointLabel, leftX + pad, belowY + labelH / 2);
+    belowY += labelH + Math.round(6 * scale);
+  }
+
+  // テニス系: ゲーム内ポイント（配信側エンジンが確定した表示用文字列をそのまま描く）
+  if (state.gamePoints) {
+    ctx.font = fontPoint;
+    const tbLabel = state.gamePoints.tb
+      ? state.sport === "ソフトテニス"
+        ? "ファイナル "
+        : "TB "
+      : "";
+    const gpText = `${tbLabel}${state.gamePoints.home} - ${state.gamePoints.away}`;
+    const gpW = Math.round(ctx.measureText(gpText).width + pad * 2);
+    const gpH = Math.round(40 * scale);
+    drawRoundedRect(ctx, leftX, belowY, gpW, gpH, radius);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
+    ctx.fill();
+    ctx.fillStyle = COLORS.white;
+    ctx.fillText(gpText, leftX + pad, belowY + gpH / 2);
   }
 
   // ===== 右上: 大会名ピル（映像に焼き込む） =====

@@ -24,8 +24,21 @@ import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
 import { isArchiveEnabled } from "@/lib/archive-flag";
 import { isLiveArchiveEnabled } from "@/lib/live-archive-flag";
+import {
+  SPORT_TENNIS,
+  SPORT_SOFT_TENNIS,
+  HARD_TENNIS_RULES,
+  SOFT_TENNIS_RULES,
+  initialTennisSnapshot,
+  tennisAddPoint,
+  tennisRemovePoint,
+  formatTennisPoints,
+  tennisPointLabel,
+  type TennisRule,
+  type TennisSnapshot,
+} from "@/lib/tennis";
 
-const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
+const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "テニス", "ソフトテニス", "陸上", "その他"];
 
 // 配信時間を「X時間Y分Z秒」形式に整形（配信終了サマリモーダル表示用）
 function formatBroadcastDuration(sec: number): string {
@@ -163,6 +176,8 @@ function BroadcastPageInner() {
   const [sport, setSport] = useState("サッカー");
   const [volleyballRule, setVolleyballRule] = useState("6人制");
   const [baseballRule, setBaseballRule] = useState("高校以上（9回）");
+  const [tennisRuleKey, setTennisRuleKey] = useState(HARD_TENNIS_RULES[0].key);
+  const [softTennisRuleKey, setSoftTennisRuleKey] = useState(SOFT_TENNIS_RULES[0].key);
   const [home, setHome] = useState("");
   const [away, setAway] = useState("");
   const [tournament, setTournament] = useState("");
@@ -195,6 +210,8 @@ function BroadcastPageInner() {
   const [homeSets, setHomeSets] = useState(0);
   const [awaySets, setAwaySets] = useState(0);
   const [setResults, setSetResults] = useState<{ home: number; away: number }[]>([]);
+  // テニス/ソフトテニスの進行スナップショット（ポイント→ゲーム→セットはエンジンが自動判定）
+  const [tennis, setTennis] = useState<TennisSnapshot>(initialTennisSnapshot());
   // 野球カウント（甲子園風 B/S/O＋走者・アプリ版と同仕様）
   // 視聴者向けお知らせテロップ（「延長タイブレーク中」等・"" = 非表示）
   const [notice, setNotice] = useState("");
@@ -323,18 +340,32 @@ function BroadcastPageInner() {
     awaySets: number;
     setResults: { home: number; away: number }[];
     periodIndex: number;
+    // テニス系のみ使用（他競技では直前値をそのまま保持）
+    tennis: TennisSnapshot;
   };
   const historyRef = useRef<ScoreSnapshot[]>([]);
   const [historyLength, setHistoryLength] = useState(0);
-  const MAX_HISTORY = 10;
+  // テニス系は±がポイント単位（デュース1ゲームで10手超も普通）のため、
+  // ゲームを跨いだ訂正が Undo で届くよう余裕を持たせる（全競技共通・実害なし）。
+  const MAX_HISTORY = 40;
 
   const vbRule = sport === "バレー" ? VOLLEYBALL_RULES[volleyballRule] : null;
   const bbRule = sport === "野球" ? BASEBALL_RULES[baseballRule] : null;
+  const tnRule: TennisRule | null =
+    sport === SPORT_TENNIS
+      ? HARD_TENNIS_RULES.find((r) => r.key === tennisRuleKey) || HARD_TENNIS_RULES[0]
+      : sport === SPORT_SOFT_TENNIS
+        ? SOFT_TENNIS_RULES.find((r) => r.key === softTennisRuleKey) || SOFT_TENNIS_RULES[0]
+        : null;
   const periods = sport === "バレー"
     ? (vbRule?.periods || ["1SET", "2SET", "3SET"])
     : sport === "野球"
       ? (bbRule?.periods || generateBaseballPeriods(9))
-      : (PERIODS[sport] || PERIODS["その他"]);
+      : tnRule
+        ? tnRule.kind === "hard"
+          ? Array.from({ length: tnRule.setsToWin * 2 - 1 }, (_, i) => `${i + 1}SET`)
+          : ["GAME"]
+        : (PERIODS[sport] || PERIODS["その他"]);
   const currentPeriod = periods[periodIndex] || periods[0];
 
   const canStart = home.trim() && away.trim();
@@ -364,7 +395,11 @@ function BroadcastPageInner() {
     return "セットポイント";
   }
 
-  const pointLabel = getPointLabel();
+  const pointLabel = tnRule ? tennisPointLabel(tnRule, tennis) : getPointLabel();
+  // テニス系: ボタン間に表示するゲーム内ポイント（マッチ確定後は最終ゲーム数のまま "—"）
+  const tennisDisplay = tnRule
+    ? formatTennisPoints(tnRule, tennis) ?? { home: "—", away: "—" }
+    : null;
 
   // スコアボード焼き込み（発熱対策・2026-06-08 既定 OFF 化）:
   // 既定を「焼き込みOFF（生配信）」にする。スマホは合成せずカメラ生映像を送るだけ＝
@@ -438,6 +473,8 @@ function BroadcastPageInner() {
     tournament: tournament || null,
     sport,
     pointLabel,
+    // 緊急焼き込み(?burn=1)時もテニスのポイントが映像に出るように
+    gamePoints: tnRule ? formatTennisPoints(tnRule, tennis) : null,
     elapsedSeconds: broadcastElapsed,
   };
 
@@ -487,6 +524,7 @@ function BroadcastPageInner() {
       awaySets,
       setResults: [...setResults],
       periodIndex,
+      tennis: { ...tennis, setResults: [...tennis.setResults] },
     });
     if (historyRef.current.length > MAX_HISTORY) {
       historyRef.current.shift();
@@ -505,6 +543,13 @@ function BroadcastPageInner() {
     setAwaySets(prev.awaySets);
     setSetResults(prev.setResults);
     setPeriodIndex(prev.periodIndex);
+    setTennis(prev.tennis);
+    if (tnRule) {
+      saveGamePointsToDb(
+        formatTennisPoints(tnRule, prev.tennis),
+        tennisPointLabel(tnRule, prev.tennis),
+      );
+    }
     // 即座にDBへ反映（デバウンスを待たない）
     if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
     if (broadcastRef.current) {
@@ -560,6 +605,60 @@ function BroadcastPageInner() {
     saveScoreToDb(homeScore, awayScore, newPeriod);
     // 野球はイニングが変わったらカウント（B/S/O・走者）をリセット
     if (sport === "野球") resetBaseballCount();
+  }
+
+  // ── テニス系: ゲーム内ポイント（表示用文字列）と point_label を直接 UPDATE ──
+  // （updateBroadcastScore は固定シグネチャのため、野球カウントと同じ別経路で書く）
+  const saveGamePointsToDb = useCallback(
+    (gp: { home: string; away: string; tb?: true } | null, label: string | null) => {
+      if (!broadcastRef.current) return;
+      const supabase = createClient();
+      supabase
+        .from("broadcasts")
+        .update({ game_points: gp, point_label: label })
+        .eq("id", broadcastRef.current.id)
+        .then(undefined, () => {});
+    },
+    [],
+  );
+
+  // ── テニス/ソフトテニス: ＋ボタンはゲームでなく「ポイント」を進める ──
+  // ゲーム/セット/マッチの確定はエンジン（lib/tennis.ts）が自動判定する。
+  function tennisPoint(side: "home" | "away") {
+    if (!tnRule) return;
+    if (tennis.matchWon) return; // 確定後の no-op で Undo 履歴を浪費しない
+    pushHistory();
+    const { next, events } = tennisAddPoint(tnRule, tennis, side);
+    setTennis(next);
+    setHomeScore(next.hGames);
+    setAwayScore(next.aGames);
+    setHomeSets(next.hSets);
+    setAwaySets(next.aSets);
+    const sr = next.setResults.map((s) => {
+      const [h, a] = s.split("-").map(Number);
+      return { home: h || 0, away: a || 0 };
+    });
+    setSetResults(sr);
+    let idx = periodIndex;
+    // マッチ確定時は period を進めない（2-0完走で「3SET」表示になるオフバイワン防止）
+    if (events.setWon && !events.matchWon && tnRule.kind === "hard") {
+      idx = Math.max(0, Math.min(periods.length - 1, next.hSets + next.aSets));
+      setPeriodIndex(idx);
+    }
+    saveScoreToDb(next.hGames, next.aGames, periods[idx] || periods[0], next.hSets, next.aSets, sr);
+    saveGamePointsToDb(formatTennisPoints(tnRule, next), tennisPointLabel(tnRule, next));
+    if (events.matchWon) toast.success("マッチ終了！おつかれさまでした");
+    else if (events.setWon) toast.info("セット獲得！");
+  }
+  function tennisPointMinus(side: "home" | "away") {
+    if (!tnRule) return;
+    // 0-0 や確定後は no-op（Undo 履歴のスロットを浪費しない）
+    if (tennis.matchWon) return;
+    if (side === "home" ? tennis.hPts === 0 : tennis.aPts === 0) return;
+    pushHistory();
+    const next = tennisRemovePoint(tennis, side);
+    setTennis(next);
+    saveGamePointsToDb(formatTennisPoints(tnRule, next), tennisPointLabel(tnRule, next));
   }
 
   // ── 野球カウント（B/S/O＋走者）。アプリ版 sports.ts と同ロジック ──
@@ -866,6 +965,7 @@ function BroadcastPageInner() {
     setHomeSets(0);
     setAwaySets(0);
     setSetResults([]);
+    setTennis(initialTennisSnapshot());
     setBalls(0);
     setStrikes(0);
     setOuts(0);
@@ -942,6 +1042,34 @@ function BroadcastPageInner() {
             fAwaySets,
             finalSetResults,
           ).catch(() => {});
+        }
+
+        // テニス系: 最終スコアを常に確定書き込みし、ポイント表示は消す。
+        // - マッチ完走済み(tennis.matchWon)なら set_results は確定済み＝追記しない
+        //   （ソフトテニスはゲーム数が残るため、旧実装だと最終スコアが二重記録された）
+        // - 進行中セットがあれば最終確定として追記（バレーと同じ思想・セット数は加算しない）
+        // - 常に書くのは、直前ポイントの saveScoreToDb(500msデバウンス) が終了処理の
+        //   broadcastRef クリアで破棄されても最終値が残るようにするため
+        if (tnRule && endedBroadcastId) {
+          const inProgress = !tennis.matchWon && (homeScore > 0 || awayScore > 0);
+          const finalSetResults = inProgress
+            ? [...setResults, { home: homeScore, away: awayScore }]
+            : setResults;
+          await updateBroadcastScore(
+            endedBroadcastId,
+            homeScore,
+            awayScore,
+            currentPeriod,
+            homeSets,
+            awaySets,
+            finalSetResults,
+          ).catch(() => {});
+          const supabaseEnd = createClient();
+          await supabaseEnd
+            .from("broadcasts")
+            .update({ game_points: null, point_label: null })
+            .eq("id", endedBroadcastId)
+            .then(undefined, () => {});
         }
 
         if (endedBroadcastId) {
@@ -1397,19 +1525,43 @@ function BroadcastPageInner() {
                 </div>
               </div>
             )}
-            {/* スコア行 */}
+            {/* テニス系: ゲーム数の現況（＋/−はポイントを進めるため、ゲーム数はここで見せる） */}
+            {tnRule && (
+              <div className="flex items-center justify-center gap-2 mb-1 text-[10px] text-gray-400">
+                <span>
+                  ゲーム <span className="text-white font-bold tabular-nums">{homeScore}</span>
+                  <span className="mx-0.5">-</span>
+                  <span className="text-white font-bold tabular-nums">{awayScore}</span>
+                </span>
+                {tnRule.kind === "hard" && (
+                  <span>
+                    セット <span className="text-white font-bold tabular-nums">{homeSets}</span>
+                    <span className="mx-0.5">-</span>
+                    <span className="text-white font-bold tabular-nums">{awaySets}</span>
+                  </span>
+                )}
+                {tennis.inTiebreak && (
+                  <span className="text-[#ffd166] font-bold">
+                    {tnRule.kind === "soft" ? "ファイナル" : "TB"}
+                  </span>
+                )}
+              </div>
+            )}
+            {/* スコア行（テニス系は＋/−がポイント操作・表示もポイント） */}
             <div className="flex items-center justify-center gap-2 sm:gap-3">
               <div className="flex items-center gap-1">
                 <span className="text-[9px] text-gray-400 max-w-[50px] truncate text-right">{home}</span>
                 <button
-                  onClick={() => changeHomeScore(-1)}
+                  onClick={() => (tnRule ? tennisPointMinus("home") : changeHomeScore(-1))}
                   className="w-10 h-10 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-base font-bold transition active:scale-90"
                 >
                   −
                 </button>
-                <span className="text-lg font-black tabular-nums w-6 text-center">{homeScore}</span>
+                <span className="text-lg font-black tabular-nums min-w-6 px-0.5 text-center">
+                  {tennisDisplay ? tennisDisplay.home : homeScore}
+                </span>
                 <button
-                  onClick={() => changeHomeScore(1)}
+                  onClick={() => (tnRule ? tennisPoint("home") : changeHomeScore(1))}
                   className="w-10 h-10 rounded bg-[#e63946] hover:bg-[#d62836] flex items-center justify-center text-base font-bold transition active:scale-90"
                 >
                   +
@@ -1420,14 +1572,16 @@ function BroadcastPageInner() {
 
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => changeAwayScore(-1)}
+                  onClick={() => (tnRule ? tennisPointMinus("away") : changeAwayScore(-1))}
                   className="w-10 h-10 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-base font-bold transition active:scale-90"
                 >
                   −
                 </button>
-                <span className="text-lg font-black tabular-nums w-6 text-center">{awayScore}</span>
+                <span className="text-lg font-black tabular-nums min-w-6 px-0.5 text-center">
+                  {tennisDisplay ? tennisDisplay.away : awayScore}
+                </span>
                 <button
-                  onClick={() => changeAwayScore(1)}
+                  onClick={() => (tnRule ? tennisPoint("away") : changeAwayScore(1))}
                   className="w-10 h-10 rounded bg-[#e63946] hover:bg-[#d62836] flex items-center justify-center text-base font-bold transition active:scale-90"
                 >
                   +
@@ -1448,14 +1602,20 @@ function BroadcastPageInner() {
                 <span>戻す</span>
               </button>
               <span className="text-gray-600 text-xs mx-0.5">|</span>
-              <button
-                onClick={() => changePeriod(periodIndex - 1)}
-                className="w-8 h-8 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm transition active:scale-90"
-                aria-label="前のピリオドへ"
-              >
-                ‹
-              </button>
+              {/* テニス系はエンジンがセット/ピリオドを自動送りするため、手動のピリオド操作と
+                  「次へ 0-0」は出さない（押すと tennis スナップショットと乖離して巻き戻るため） */}
+              {!tnRule && (
+                <button
+                  onClick={() => changePeriod(periodIndex - 1)}
+                  className="w-8 h-8 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm transition active:scale-90"
+                  aria-label="前のピリオドへ"
+                >
+                  ‹
+                </button>
+              )}
               <span className="text-[10px] font-medium min-w-[40px] text-center">{currentPeriod}</span>
+              {!tnRule && (
+                <>
               <button
                 onClick={() => changePeriod(periodIndex + 1)}
                 className="w-8 h-8 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm transition active:scale-90"
@@ -1490,6 +1650,8 @@ function BroadcastPageInner() {
               >
                 次へ 0-0
               </button>
+                </>
+              )}
               <span className="text-gray-600 text-xs mx-0.5">|</span>
               <button
                 onClick={() => setShowNoticePanel((v) => !v)}
@@ -1792,7 +1954,7 @@ function BroadcastPageInner() {
               <button
                 key={s}
                 type="button"
-                onClick={() => { setSport(s); setPeriodIndex(0); setHomeSets(0); setAwaySets(0); }}
+                onClick={() => { setSport(s); setPeriodIndex(0); setHomeSets(0); setAwaySets(0); setTennis(initialTennisSnapshot()); }}
                 className={`text-xs px-3 py-1.5 rounded-md border transition ${
                   sport === s
                     ? "border-[#e63946] text-[#e63946] bg-[#e63946]/10"
@@ -1830,6 +1992,43 @@ function BroadcastPageInner() {
             </div>
             <p className="mt-1.5 text-[9px] text-gray-600">
               {vbRule && `${vbRule.setsToWin * 2 - 1}セットマッチ / ${vbRule.setPoint}点制 / 最終セット${vbRule.finalSetPoint}点`}
+            </p>
+          </fieldset>
+        )}
+
+        {/* テニス/ソフトテニス ルール選択 */}
+        {tnRule && (
+          <fieldset>
+            <legend className="text-[11px] text-gray-400 font-medium mb-2">ルール</legend>
+            <div className="flex flex-wrap gap-2">
+              {(sport === SPORT_TENNIS ? HARD_TENNIS_RULES : SOFT_TENNIS_RULES).map((r) => {
+                const selected =
+                  sport === SPORT_TENNIS ? tennisRuleKey === r.key : softTennisRuleKey === r.key;
+                return (
+                  <button
+                    key={r.key}
+                    type="button"
+                    onClick={() => {
+                      if (sport === SPORT_TENNIS) setTennisRuleKey(r.key);
+                      else setSoftTennisRuleKey(r.key);
+                      setPeriodIndex(0);
+                      setHomeSets(0);
+                      setAwaySets(0);
+                      setTennis(initialTennisSnapshot());
+                    }}
+                    className={`text-xs px-3 py-1.5 rounded-md border transition ${
+                      selected
+                        ? "border-[#e63946] text-[#e63946] bg-[#e63946]/10"
+                        : "border-white/10 text-gray-400 hover:border-white/20"
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[9px] text-gray-600">
+              ＋ボタンでポイントが進み、ゲーム・セットは自動で確定します
             </p>
           </fieldset>
         )}

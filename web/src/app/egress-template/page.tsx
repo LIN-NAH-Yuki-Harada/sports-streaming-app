@@ -181,9 +181,11 @@ function EgressTemplateInner() {
         period: broadcast.period,
         tournament: broadcast.tournament,
         sport: broadcast.sport,
-        // バレーのセット/マッチポイントは配信者のルール設定が broadcast 行に
-        // 未保存のため省略（視聴側オーバーレイと同じ既知の差分）。
-        pointLabel: null,
+        // point_label は配信者側が DB に書く（アプリ=バレー等・Web=テニス系）ため
+        // データ駆動でそのまま表示する（2026-07 テニス対応で従来の null 固定を解消。
+        // これによりバレーのセット/マッチポイントも YouTube 合成に出るようになる）。
+        pointLabel: broadcast.point_label ?? null,
+        gamePoints: broadcast.game_points ?? null,
         elapsedSeconds,
       };
       drawScoreboard(ctx, state, EGRESS_W, EGRESS_H);
