@@ -78,6 +78,15 @@ const GHOST_MIN_AGE_MS = Number(process.env.GHOST_MIN_AGE_MS) || 10 * 60 * 1000;
 const MEDIAMTX_API_BASE = process.env.MEDIAMTX_API_BASE || "http://127.0.0.1:9997";
 const GHOST_SWEEP_STATE_PATH = "/var/tmp/archive-worker-ghost-sweep.json";
 
+// ===== サーバー稼働メトリクス（admin「サーバー」タブ用・2026-07-26）=====
+// tick(5分)毎に自分の健康状態を計測し Supabase の server_metrics へ push する
+// 「押し込み方式」。外部からの問い合わせ口を一切開けない（攻撃面ゼロ）。
+// ディスクI/O・NW帯域は /proc の累積カウンタを状態ファイルに保存し、前tickとの
+// 差分から平均レートを算出（単位は全て kbps=キロビット/秒。表示側で換算）。
+const METRICS_ENABLED = process.env.METRICS_ENABLED === "1";
+const METRICS_STATE_PATH = "/var/tmp/archive-worker-metrics.json";
+const METRICS_RETENTION_DAYS = 30;
+
 if (
   !SUPABASE_URL ||
   !SUPABASE_SERVICE_ROLE_KEY ||
@@ -811,6 +820,131 @@ async function sweepGhostBroadcasts() {
   }
 }
 
+// サーバー稼働メトリクスを1行計測して server_metrics へ push（失敗は全て無視＝本処理へ影響ゼロ）
+async function collectServerMetrics() {
+  // CPU: 1分ロードアベレージ/コア数・メモリ: os情報から
+  const cpuLoadPct =
+    Math.round((os.loadavg()[0] / Math.max(1, os.cpus().length)) * 1000) / 10;
+  const memUsedPct =
+    Math.round(((os.totalmem() - os.freemem()) / os.totalmem()) * 1000) / 10;
+
+  // ディスク使用率: df -B1 /
+  let diskUsedPct = null;
+  try {
+    const out = await new Promise((resolve) => {
+      const p = spawn("df", ["-B1", "/"]);
+      let s = "";
+      p.stdout.on("data", (d) => (s += d));
+      p.on("close", () => resolve(s));
+      p.on("error", () => resolve(""));
+    });
+    const cols = String(out).trim().split("\n").pop().split(/\s+/);
+    const size = Number(cols[1]);
+    const used = Number(cols[2]);
+    if (size > 0) diskUsedPct = Math.round((used / size) * 1000) / 10;
+  } catch {
+    /* noop */
+  }
+
+  // ディスクI/O・NW帯域: /proc 累積カウンタの前tickとの差分（kbps）
+  let diskReadKbps = null,
+    diskWriteKbps = null,
+    netRxKbps = null,
+    netTxKbps = null;
+  try {
+    const cur = { t: Date.now(), dr: 0, dw: 0, rx: 0, tx: 0 };
+    for (const l of fs.readFileSync("/proc/diskstats", "utf8").split("\n")) {
+      const f = l.trim().split(/\s+/);
+      if (f.length < 14) continue;
+      // 物理デバイスのみ（パーティション・loopを除外）
+      if (!/^(sd[a-z]|vd[a-z]|xvd[a-z]|nvme\d+n\d+)$/.test(f[2])) continue;
+      cur.dr += Number(f[5]) * 512; // 読了セクタ(512B)
+      cur.dw += Number(f[9]) * 512; // 書込セクタ(512B)
+    }
+    for (const l of fs.readFileSync("/proc/net/dev", "utf8").split("\n")) {
+      const m = l.match(/^\s*([^:\s]+):\s*(.+)$/);
+      if (!m || m[1] === "lo") continue;
+      const f = m[2].trim().split(/\s+/);
+      cur.rx += Number(f[0]);
+      cur.tx += Number(f[8]);
+    }
+    let prev = null;
+    try {
+      prev = JSON.parse(fs.readFileSync(METRICS_STATE_PATH, "utf8"));
+    } catch {
+      /* 初回 */
+    }
+    if (prev && prev.t && cur.t > prev.t && cur.t - prev.t < 30 * 60 * 1000) {
+      const dt = (cur.t - prev.t) / 1000;
+      const kbps = (bytes) =>
+        Math.max(0, Math.round(((bytes * 8) / 1000 / dt) * 10) / 10);
+      diskReadKbps = kbps(cur.dr - prev.dr);
+      diskWriteKbps = kbps(cur.dw - prev.dw);
+      netRxKbps = kbps(cur.rx - prev.rx);
+      netTxKbps = kbps(cur.tx - prev.tx);
+    }
+    fs.writeFileSync(METRICS_STATE_PATH, JSON.stringify(cur));
+  } catch {
+    /* noop */
+  }
+
+  // MediaMTX の配信中パス数（ghost sweep と同じ localhost API・不達は null）
+  let livePaths = null;
+  try {
+    const res = await fetch(`${MEDIAMTX_API_BASE}/v3/paths/list?itemsPerPage=100`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const body = await res.json();
+      livePaths = (Array.isArray(body.items) ? body.items : []).filter(
+        (p) => p && (p.ready === true || p.available === true || p.online === true),
+      ).length;
+    }
+  } catch {
+    /* noop */
+  }
+
+  // アーカイブ待ち件数（ended かつ 未処理）
+  let archiveQueue = null;
+  try {
+    const { count } = await admin
+      .from("broadcasts")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "ended")
+      .not("stream_playback_url", "is", null)
+      .or("youtube_upload_status.is.null,youtube_upload_status.eq.pending");
+    archiveQueue = count ?? null;
+  } catch {
+    /* noop */
+  }
+
+  const { error } = await admin.from("server_metrics").insert({
+    host: "vps-main",
+    cpu_load_pct: cpuLoadPct,
+    mem_used_pct: memUsedPct,
+    disk_used_pct: diskUsedPct,
+    disk_read_kbps: diskReadKbps,
+    disk_write_kbps: diskWriteKbps,
+    net_rx_kbps: netRxKbps,
+    net_tx_kbps: netTxKbps,
+    live_paths: livePaths,
+    archive_queue: archiveQueue,
+  });
+  if (error) {
+    log("metrics insert failed (ignored):", error.message.slice(0, 100));
+    return;
+  }
+  // 保持期間より古い行の掃除（indexed delete・通常は数行）
+  await admin
+    .from("server_metrics")
+    .delete()
+    .lt(
+      "created_at",
+      new Date(Date.now() - METRICS_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+    )
+    .then(undefined, () => {});
+}
+
 async function main() {
   // 0. 保守: 残骸workDir掃除 + stale uploadingの復旧（どちらも失敗しても本処理は続行）
   try {
@@ -828,6 +962,13 @@ async function main() {
       await sweepGhostBroadcasts();
     } catch (e) {
       log("ghost sweep failed (ignored):", String(e).slice(0, 120));
+    }
+  }
+  if (METRICS_ENABLED) {
+    try {
+      await collectServerMetrics();
+    } catch (e) {
+      log("metrics failed (ignored):", String(e).slice(0, 120));
     }
   }
 
