@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""LIVE SPOtCH 事業計画書 v2 — 2026/05/11 改訂版
+"""LIVE SPOtCH 事業計画書 v3 — 2026/05/29 改訂版
 
-変更点 (v1 → v2):
-- 表紙日付を 2026/05 に
-- 5/10 時点の本番稼働実績 (126 PR / LiveKit Ship 昇格 / 53分試合配信完走) を反映
-- 料金プラン v2 (4/30 確定) を反映: ¥300 = ライブ専用、¥500 = +YouTube連携+アーカイブ
-- BAND (NAVER) を競合比較に追加
-- 5月中完璧化 + 5月末借入着金 + 6月1日正式ローンチ の3点セットタイムラインを新スライドで明示
-- 資金計画 700万円の配分を v2 用に再構築 (TCP 化中継 server コスト追加 / 開発費 210万)
-- 開発進捗 92% → 100% 本番稼働中 + 残タスクを「Google OAuth 認定 + TCP 化 (B 案) + 細部仕上げ」に
-- ドメインを live-spotch.com に統一
+変更点 (v2 → v3):
+- 表紙日付を 2026/05/29 に・版を v3 に
+- スケジュールを新フローに更新: 5/29 本依頼書作成 → 6/1 税理士確認 → 6 月上旬 銀行ご提出 → 6 月中旬 着金・正式ローンチ + 広告開始
+- 5 月完璧化進捗を反映: OAuth 通過 (5/13) ✅・YouTube 埋め込み許可・モバイル遷移体感改善・依存ライブラリ最新化 (5/28-29) を完了として記載
+- PR マージ件数を 5/10 時点 126 件 → 5/29 時点 127 件 に更新
+- NEW: 詳細市場推計スライドを追加 (文科省・スポーツ庁・中体連・高体連・スポ少データ + TAM-SAM-SOM 視覚化)
+- NEW: ローンチ前の実課金トラクションスライドを追加 (5/21 確認: 外部有料 3 件・MRR ¥1,300/月)
+- まとめスライドを最新数値で更新
 """
 
 from pptx import Presentation
@@ -138,10 +137,10 @@ txt(s, Inches(1.4), Inches(3.1), Inches(10), Inches(0.5),
 rect(s, Inches(1.4), Inches(3.9), Inches(3), Pt(2), PRIMARY)
 mtxt(s, Inches(1.4), Inches(4.3), Inches(8), Inches(2.5), [
     ("ローカルスポーツ ライブ配信プラットフォーム", 16, RGBColor(0x99, 0x99, 0xAA)),
-    ("事業計画書 v2", 20, WHITE, True),
+    ("事業計画書 v3", 20, WHITE, True),
     ("", 8),
     ("LIN-NAH株式会社", 18, WHITE, True),
-    ("2026年5月（v2 改訂版）", 13, RGBColor(0x88, 0x88, 0x99)),
+    ("2026年5月29日（v3 改訂版・市場規模推計+実課金トラクション増強）", 13, RGBColor(0x88, 0x88, 0x99)),
     ("", 8),
     ("https://live-spotch.com", 12, PRIMARY),
 ])
@@ -301,9 +300,63 @@ txt(s, Inches(7.0), Inches(7.07), Inches(5.2), Inches(0.3),
 
 
 # ════════════════════════════════════════════════
-# 6. ビジネスモデル v2 (4/30 確定)
+# 6. NEW (v3): 詳細市場推計 — 公開統計データに基づく内訳
 # ════════════════════════════════════════════════
-s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "ビジネスモデル", "Pricing Plans v2 (2026/04/30 確定)"); pnum(s, 6)
+s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "詳細市場推計", "Detailed Market Sizing — 公開統計データに基づく推計"); pnum(s, 6)
+
+# 左: 公開データに基づくセグメント別人数
+rrect(s, Inches(0.9), Inches(1.8), Inches(6.0), Inches(4.9), CARD, BORDER)
+txt(s, Inches(1.2), Inches(1.95), Inches(5.4), Inches(0.3),
+    "セグメント別の競技人口（公開統計）", sz=15, color=DARK, bold=True)
+
+mkt_rows = [
+    ("小学校 児童", "約 620 万人", "うちスポ少登録 約 60 万人", "文部科学省 学校基本調査"),
+    ("中学校 運動部所属", "約 190 万人", "中学生の約 60% が運動部所属", "日本中学校体育連盟"),
+    ("高校 運動部所属", "約 110 万人", "高校生の約 38% が運動部所属", "全国高等学校体育連盟"),
+    ("スポーツ少年団 登録", "約 60 万人", "小学生中心の地域クラブ", "日本スポーツ少年団"),
+]
+for i, (seg, num, note, src) in enumerate(mkt_rows):
+    y = Inches(2.5 + i * 0.95)
+    rrect(s, Inches(1.2), y, Inches(5.4), Inches(0.8), WHITE, BORDER)
+    txt(s, Inches(1.4), y+Inches(0.05), Inches(2.6), Inches(0.3), seg, sz=12, color=DARK, bold=True)
+    txt(s, Inches(4.0), y+Inches(0.05), Inches(2.5), Inches(0.3), num, sz=14, color=PRIMARY, bold=True, align=PP_ALIGN.RIGHT)
+    txt(s, Inches(1.4), y+Inches(0.4), Inches(5.0), Inches(0.2), note, sz=10, color=SUB)
+    txt(s, Inches(1.4), y+Inches(0.58), Inches(5.0), Inches(0.2), f"出典: {src}", sz=9, color=GRAY400)
+
+rrect(s, Inches(1.2), Inches(6.4), Inches(5.4), Inches(0.3), P_LIGHT, PRIMARY)
+txt(s, Inches(1.4), Inches(6.42), Inches(5.0), Inches(0.25),
+    "コア競技人口 合計  約 360-380 万人", sz=12, color=PRIMARY, bold=True, align=PP_ALIGN.CENTER)
+
+# 右: TAM-SAM-SOM funnel
+rrect(s, Inches(7.2), Inches(1.8), Inches(5.4), Inches(4.9), CARD, BORDER)
+txt(s, Inches(7.5), Inches(1.95), Inches(4.8), Inches(0.3),
+    "TAM / SAM / SOM 推計", sz=15, color=DARK, bold=True)
+
+tams = [
+    ("TAM", "全潜在視聴・配信層", "1,140-1,520 万人", "競技人口 380万 × 平均 3-4 名 (両親・祖父母・近親者)", PRIMARY, P_LIGHT, 5.0),
+    ("SAM", "撮影可能保護者", "190-380 万人", "競技人口の保護者 1-2 名 (配信者候補)", BLUE, B_LIGHT, 3.8),
+    ("SOM", "Year 3 達成目標", "13,000 人 / 5,144 万円", "SAM の約 0.5% 以下 (慎重な算定)", GREEN, G_LIGHT, 2.6),
+]
+for i, (label, title, num, note, ac, bg_c, w) in enumerate(tams):
+    y = Inches(2.5 + i * 1.25)
+    x = Inches(7.5 + (5.4 - w) / 2)
+    rrect(s, x, y, Inches(w), Inches(1.05), bg_c, ac)
+    rect(s, x, y, Pt(4), Inches(1.05), ac)
+    txt(s, x+Inches(0.2), y+Inches(0.06), Inches(w-0.4), Inches(0.3), f"{label} — {title}", sz=12, color=ac, bold=True)
+    txt(s, x+Inches(0.2), y+Inches(0.35), Inches(w-0.4), Inches(0.35), num, sz=18, color=DARK, bold=True)
+    txt(s, x+Inches(0.2), y+Inches(0.75), Inches(w-0.4), Inches(0.25), note, sz=9, color=SUB)
+
+# フッター: 出典まとめ + 補足
+rrect(s, Inches(0.9), Inches(7.05), Inches(11.7), Inches(0.35), CARD2, BORDER)
+txt(s, Inches(1.1), Inches(7.07), Inches(11.3), Inches(0.3),
+    "※ 数値は文部科学省「学校基本調査 令和5年度」/ 中体連・高体連 登録者数 / 日本スポーツ少年団 登録状況 等の公開データに基づく当社推計",
+    sz=10, color=SUB)
+
+
+# ════════════════════════════════════════════════
+# 7. ビジネスモデル v2 (4/30 確定)  ※ v3 でスライド番号 6→7 に繰り下げ
+# ════════════════════════════════════════════════
+s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "ビジネスモデル", "Pricing Plans v2 (2026/04/30 確定)"); pnum(s, 7)
 
 plans = [
     ("無料プラン","¥0","視聴者向け",["ライブ視聴（無制限）","1ヶ月以内のアーカイブ視聴","試合スコアの閲覧"],SUB,CARD,BORDER, False),
@@ -334,7 +387,7 @@ txt(s, Inches(1.3), Inches(7.02), Inches(10.8), Inches(0.3),
 # ════════════════════════════════════════════════
 # 7. 3年間の収支計画
 # ════════════════════════════════════════════════
-s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "3年間の収支計画", "Financial Projection"); pnum(s, 7)
+s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "3年間の収支計画", "Financial Projection"); pnum(s, 8)
 
 rows = [["","Year 1（立ち上げ期）","Year 2（成長期）","Year 3（拡大期）"],
     ["登録ユーザー（期末）","8,000人","35,000人","100,000人"],
@@ -354,7 +407,7 @@ txt(s, Inches(1.3), Inches(5.68), Inches(10.8), Inches(0.45),
 # ════════════════════════════════════════════════
 # 8. 資金計画 v2 (700万配分更新)
 # ════════════════════════════════════════════════
-s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "資金計画", "700万円の使途内訳 (v2 改訂)"); pnum(s, 8)
+s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "資金計画", "700万円の使途内訳 (v2 改訂)"); pnum(s, 9)
 
 rrect(s, Inches(0.9), Inches(1.8), Inches(3.5), Inches(1.2), P_LIGHT, PRIMARY)
 mtxt(s, Inches(1.3), Inches(1.85), Inches(2.8), Inches(1), [
@@ -387,17 +440,17 @@ for i, (name,amt,desc,pct,color) in enumerate(items):
 # ════════════════════════════════════════════════
 # 9. NEW: 5月中完璧化 + 6/1 ローンチ計画
 # ════════════════════════════════════════════════
-s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "5月中完璧化 → 6月1日 正式ローンチ", "Phase 0: Pre-Launch Polish (3週間)"); pnum(s, 9)
+s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "完璧化進捗 → 6月中旬 正式ローンチ", "Phase 0: Pre-Launch Polish 完了状況 + 6月実行プラン"); pnum(s, 10)
 
-# 左: 5月中完璧化の3本柱
+# 左: 5月完璧化の3本柱 (進捗反映)
 rrect(s, Inches(0.9), Inches(1.8), Inches(6.0), Inches(5.4), CARD, BORDER)
 txt(s, Inches(1.3), Inches(1.95), Inches(5.4), Inches(0.3),
-    "5月中の完璧化 — 3本柱", sz=16, color=DARK, bold=True)
+    "5月完璧化 — 3本柱の進捗", sz=16, color=DARK, bold=True)
 
 pillars = [
-    ("A. Google OAuth 認定通過 ✅", "2026-05-13 正式通過済。3 scope (readonly/upload/youtube) すべて承認。「未確認のアプリ」警告画面消滅 + 100枠制限解除", GREEN),
-    ("B. 配信プロトコル TCP 化", "MediaRecorder + 中継 server (Cloudflare Workers / Fly.io) で RTMP 化 → 4G 体育館でも 1080p 高画質安定。月+$5-20", PRIMARY),
-    ("C. 残クリティカルバグ完全対応", "live_status='creating' 固まり対処 等。本番運用で見えた細部を 5月中に随時対応", BLUE),
+    ("A. Google OAuth 認定通過 ✅ 完了", "2026-05-13 正式通過済。3 scope (readonly/upload/youtube) すべて承認。「未確認のアプリ」警告画面消滅 + 100枠制限解除", GREEN),
+    ("C. 本番運用上の細部仕上げ ✅ 完了", "5/28-29 に YouTube 埋め込み許可・モバイル遷移体感改善・依存ライブラリ 13 種一括最新化・「アプリを開く」体感空白解消を実施。本番品質を引き上げ", GREEN),
+    ("B. 配信プロトコル TCP 化 → ローンチ後継続改善", "MediaRecorder + 中継 server で RTMP 化し 4G 環境下の高画質化。月+$5-20。ローンチ品質に必須ではないため継続改善項目に整理", BLUE),
 ]
 for i, (title, body, ac) in enumerate(pillars):
     y = Inches(2.5 + i * 1.5)
@@ -406,34 +459,72 @@ for i, (title, body, ac) in enumerate(pillars):
     txt(s, Inches(1.4), y+Inches(0.1), Inches(5.0), Inches(0.3), title, sz=13, color=ac, bold=True)
     txt(s, Inches(1.4), y+Inches(0.5), Inches(5.0), Inches(0.9), body, sz=11, color=TEXT)
 
-# 右: タイムライン
+# 右: タイムライン (v3 新スケジュール)
 rrect(s, Inches(7.2), Inches(1.8), Inches(5.4), Inches(5.4), P_LIGHT, PRIMARY)
 txt(s, Inches(7.5), Inches(1.95), Inches(4.8), Inches(0.3),
-    "ローンチタイムライン", sz=16, color=PRIMARY, bold=True)
+    "ローンチタイムライン (v3)", sz=16, color=PRIMARY, bold=True)
 
 milestones = [
-    ("5/10", "本番稼働中・126 PR マージ・Ship 昇格", DARK),
+    ("5/10", "本番稼働・ブロックシード大会 53 分配信完走", DARK),
     ("5/13", "✅ Google OAuth 検証通過 (3 scope 承認)", GREEN),
-    ("5/15", "LIN-NAH業績情報 + 見込み客リスト確定", SUB),
-    ("5/16", "提案書 v1.0 早期提出", PRIMARY),
-    ("5/22", "TCP 化 (B 案) 実装完了", BLUE),
-    ("5/29", "TCP実機検証 + 本番OAuth連携E2E", BLUE),
-    ("5/末", "★ 借入着金 + 完璧化完了", PRIMARY),
-    ("6/1", "★ 正式ローンチ + 見込み客打診開始", PRIMARY),
-    ("6/07", "KPI ゲート1: 有料5名", GREEN),
-    ("8/06", "KPI ゲート2: 有料20名", GREEN),
+    ("5/21", "✅ 無施策で外部有料 3 件・MRR ¥1,300/月 確認", GREEN),
+    ("5/28-29", "✅ 視聴・モバイル・依存 一括改善 (127 PR)", GREEN),
+    ("5/29", "本依頼書作成 (本日)", PRIMARY),
+    ("6/1", "★ 顧問税理士確認・最終化", PRIMARY),
+    ("6月上旬", "★ 公庫 + 埼玉りそな ご提出", PRIMARY),
+    ("6月中旬", "★ 着金 + 正式ローンチ + 広告開始", PRIMARY),
+    ("8月末", "KPI ゲート 1: 有料 5 名", GREEN),
+    ("10月初", "KPI ゲート 2: 有料 20 名", GREEN),
 ]
 for i, (date, body, color) in enumerate(milestones):
     y = Inches(2.5 + i * 0.5)
     is_star = body.startswith("★")
-    txt(s, Inches(7.5), y, Inches(0.7), Inches(0.35), date, sz=12, color=color, bold=is_star)
-    txt(s, Inches(8.3), y, Inches(4.0), Inches(0.35), body, sz=11, color=color, bold=is_star)
+    txt(s, Inches(7.5), y, Inches(0.9), Inches(0.35), date, sz=12, color=color, bold=is_star)
+    txt(s, Inches(8.5), y, Inches(4.0), Inches(0.35), body, sz=11, color=color, bold=is_star)
 
 
 # ════════════════════════════════════════════════
-# 10. 開発実績 (5/10時点)
+# 11. NEW (v3): ローンチ前の実課金トラクション
 # ════════════════════════════════════════════════
-s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "開発実績", "本番稼働中 — 直近32日で126件PRマージ"); pnum(s, 10)
+s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "ローンチ前の実課金トラクション", "Pre-Launch Paid Traction — 無施策で外部有料課金 3 件"); pnum(s, 11)
+
+# 上部: MRR + 強調メッセージ
+rrect(s, Inches(0.9), Inches(1.8), Inches(11.5), Inches(1.4), G_LIGHT, GREEN)
+rect(s, Inches(0.9), Inches(1.8), Pt(4), Inches(1.4), GREEN)
+txt(s, Inches(1.3), Inches(1.95), Inches(11), Inches(0.4),
+    "正式ローンチ前・広告ゼロ・営業ゼロの段階で、外部から有料課金 3 件が自然発生",
+    sz=15, color=GREEN, bold=True)
+mtxt(s, Inches(1.3), Inches(2.4), Inches(11), Inches(0.8), [
+    ("実課金 MRR", 11, SUB),
+    ("¥1,300 / 月  (チーム¥500 × 2 + 配信者¥300 × 1)", 22, DARK, True),
+])
+
+# 下部: 3件の内訳テーブル
+traction_rows = [
+    ["カテゴリ (匿名化)", "プラン", "課金開始日", "実利用"],
+    ["少年サッカーアカデミー (U8)", "チーム ¥500/月", "2026-05-18", "当日に配信 3 回"],
+    ["スポーツチーム", "チーム ¥500/月", "2026-05-15", "2 日で配信 4 回"],
+    ["個人保護者", "配信者 ¥300/月", "2026-05-08", "当日に配信 4 回"],
+]
+add_table(s, Inches(0.9), Inches(3.4), Inches(11.5), traction_rows, fsz=13)
+
+# 下部: 強調メッセージ
+rrect(s, Inches(0.9), Inches(5.7), Inches(11.5), Inches(1.3), P_LIGHT, PRIMARY)
+txt(s, Inches(1.3), Inches(5.85), Inches(11), Inches(0.3),
+    "「作ったが誰も使わない」リスクの低い、市場に求められた事業である実証", sz=14, color=PRIMARY, bold=True)
+points_traction = [
+    "3 件とも Stripe 本番決済での課金が継続中・全員が実際に試合配信に利用（計 11 配信）",
+    "うち 2 件は地域の子どもスポーツチーム — ターゲット層そのものが自発的に発見・課金",
+    "5/21 オーナー確認時点。個人情報保護のため氏名・チーム名は匿名化、Stripe・Supabase 記録にて実在確認可能",
+]
+for i, pt in enumerate(points_traction):
+    txt(s, Inches(1.5), Inches(6.2+i*0.32), Inches(10.8), Inches(0.3), f"  ✓  {pt}", sz=11, color=TEXT)
+
+
+# ════════════════════════════════════════════════
+# 12. 開発実績 (5/29時点)  ※ v3 で 10→12 に繰り下げ
+# ════════════════════════════════════════════════
+s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "開発実績", "本番稼働中 — 直近50日で127件PRマージ"); pnum(s, 12)
 
 # 進捗バー: 100%
 rrect(s, Inches(0.9), Inches(1.8), Inches(11.5), Inches(0.5), CARD2, BORDER)
@@ -442,16 +533,16 @@ txt(s, Inches(0.9), Inches(1.83), Inches(11.5), Inches(0.45), "本番稼働 100%
 
 # 左: PR内訳
 rrect(s, Inches(0.9), Inches(2.6), Inches(7.5), Inches(4.4), CARD, BORDER)
-txt(s, Inches(1.3), Inches(2.7), Inches(6.5), Inches(0.3), "✅ 直近32日 (4/9-5/10) PR 内訳", sz=14, color=GREEN, bold=True)
+txt(s, Inches(1.3), Inches(2.7), Inches(6.5), Inches(0.3), "✅ 直近50日 (4/9-5/29) PR 内訳", sz=14, color=GREEN, bold=True)
 pr_items = [
     ("インフラ・セキュリティ", "18 件"),
     ("配信品質改善 (A/V drift / カメラ / 音声)", "28 件"),
-    ("YouTube連携 (OAuth / Live同時配信)", "18 件"),
+    ("YouTube連携 (OAuth / Live同時配信 / 埋め込み許可)", "19 件"),
     ("決済・課金 (Stripe)", "8 件"),
-    ("UI/UX 改善", "30 件"),
+    ("UI/UX 改善 (モバイル遷移体感改善含む)", "31 件"),
     ("運用堅牢化 (ストレイ対策・視聴経路最適化)", "6 件"),
-    ("その他 (依存更新・ドキュメント)", "18 件"),
-    ("【合計】", "126 件"),
+    ("その他 (依存更新・ドキュメント)", "17 件"),
+    ("【合計】", "127 件"),
 ]
 for i, (name, count) in enumerate(pr_items):
     y = Inches(3.15 + i * 0.42)
@@ -461,11 +552,11 @@ for i, (name, count) in enumerate(pr_items):
 
 # 右: 残タスク
 rrect(s, Inches(8.7), Inches(2.6), Inches(3.7), Inches(2.5), O_LIGHT, ORANGE)
-txt(s, Inches(9.0), Inches(2.7), Inches(3.1), Inches(0.3), "5月中完璧化 残タスク", sz=14, color=ORANGE, bold=True)
+txt(s, Inches(9.0), Inches(2.7), Inches(3.1), Inches(0.3), "5月完璧化 進捗", sz=14, color=ORANGE, bold=True)
 remaining = [
     ("Google OAuth 認定通過", "✅ 5/13"),
-    ("配信プロトコル TCP 化 (B案)", "5/22"),
-    ("細部 UX 仕上げ", "通年"),
+    ("細部 UX 仕上げ", "✅ 5/28-29"),
+    ("配信 TCP 化 (B案)", "ローンチ後"),
 ]
 for i, (task, period) in enumerate(remaining):
     y = Inches(3.2+i*0.6)
@@ -477,19 +568,19 @@ rrect(s, Inches(8.7), Inches(5.4), Inches(3.7), Inches(1.6), CARD, BORDER)
 txt(s, Inches(9.0), Inches(5.5), Inches(3.1), Inches(0.25), "本番URL", sz=11, color=SUB)
 txt(s, Inches(9.0), Inches(5.8), Inches(3.1), Inches(0.25), "live-spotch.com", sz=14, color=PRIMARY, bold=True)
 txt(s, Inches(9.0), Inches(6.15), Inches(3.1), Inches(0.25), "本番稼働: 2026/4/19〜", sz=10, color=SUB)
-txt(s, Inches(9.0), Inches(6.45), Inches(3.1), Inches(0.3), "正式ローンチ: 2026/6/1", sz=12, color=DARK, bold=True)
+txt(s, Inches(9.0), Inches(6.45), Inches(3.1), Inches(0.3), "正式ローンチ: 2026/6 中旬", sz=12, color=DARK, bold=True)
 
 # 注釈
 rrect(s, Inches(0.9), Inches(7.05), Inches(11.5), Inches(0.35), P_LIGHT, PRIMARY)
 txt(s, Inches(1.3), Inches(7.07), Inches(10.8), Inches(0.3),
-    "5/10 ブロックシード大会 (バレーボール) で 53 分の本番試合配信を 18 名同時視聴で完走 + 同日中に 5 PR で課題対応",
+    "5/10 大会 53 分配信完走 / 5/13 OAuth 通過 / 5/21 外部有料 3 件確認 / 5/28-29 視聴・モバイル・依存 一括改善",
     sz=11, color=PRIMARY, bold=True, align=PP_ALIGN.CENTER)
 
 
 # ════════════════════════════════════════════════
 # 11. 知的財産・参入障壁
 # ════════════════════════════════════════════════
-s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "知的財産・参入障壁", "IP & Competitive Moat"); pnum(s, 11)
+s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "知的財産・参入障壁", "IP & Competitive Moat"); pnum(s, 13)
 
 items_ip = [
     ("商標登録", "「LIVE SPOtCH」の商標出願を予定。\nサービス名のブランド保護。", PRIMARY, P_LIGHT),
@@ -509,7 +600,7 @@ for i, (title, body, ac, bg_c) in enumerate(items_ip):
 # ════════════════════════════════════════════════
 # 12. 開発コスト戦略
 # ════════════════════════════════════════════════
-s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "開発コスト戦略", "AI活用による大幅なコスト削減"); pnum(s, 12)
+s = prs.slides.add_slide(prs.slide_layouts[6]); hdr(s, "開発コスト戦略", "AI活用による大幅なコスト削減"); pnum(s, 14)
 
 rrect(s, Inches(0.9), Inches(1.8), Inches(5.2), Inches(2.2), CARD, BORDER)
 rect(s, Inches(0.9), Inches(1.8), Inches(5.2), Pt(4), RED_DARK)
@@ -533,8 +624,8 @@ txt(s, Inches(1.3), Inches(4.4), Inches(10), Inches(0.3),
 points = [
     "Claude 等の最新 AI 開発支援ツールにより、設計・実装・テスト・PR レビューまで自社で対応",
     "従来の外注開発に対し、90% 以上のコスト削減を実現",
-    "5/10 までに 126 PR マージ、本番運用中（決済・チーム管理・YouTube連携すべて稼働中）",
-    "5/10 試合実機で見えた課題を当日中に 5 PR で hotfix → 本番運用と並行した即応開発体制",
+    "5/29 時点で計 127 PR マージ、本番運用中（決済・チーム管理・YouTube連携すべて稼働中）",
+    "5/10 試合実機で見えた課題を当日中に 5 PR で hotfix・5/28-29 にも視聴/モバイル一括改善 — 本番運用と並行した即応開発体制",
     "既存 LIN-NAH 事業で培ったデザイン・映像制作のノウハウもプロダクトに活用",
 ]
 for i, pt in enumerate(points):
@@ -553,13 +644,14 @@ txt(s, Inches(1.4), Inches(1.7), Inches(10), Inches(0.5),
 rect(s, Inches(1.4), Inches(2.5), Inches(3), Pt(2), PRIMARY)
 
 points_final = [
-    "国内に直接競合がないブルーオーシャン市場（1,000-1,500万人対象）",
-    "5/10 時点で 126 PR マージ、本番稼働 100%（live-spotch.com）",
-    "部活動コミュニティの口コミで加速度的に拡散（バイラルモデル）",
+    "国内に直接競合がないブルーオーシャン市場（TAM 1,140-1,520 万人 / 公開統計に基づく推計）",
+    "本番稼働 100% (live-spotch.com) — 5/29 時点で計 127 PR マージ、5/13 Google OAuth 認定通過",
+    "ローンチ前・無施策で外部有料 3 件・MRR ¥1,300/月 を確認（市場ニーズの実証）",
+    "部活動・少年団コミュニティの口コミで加速度的に拡散（バイラルモデル）",
     "UGCモデルで撮影コストゼロの全国展開が可能",
     "YouTube Live 同時配信 + アーカイブで使いやすさと拡散力を最大化",
     "Year 2 で単月黒字化、返済後も十分なキャッシュフロー確保",
-    "5月末借入 → 6月1日正式ローンチ → 有料20名突破 (8月) を 3点セットで",
+    "6/1 税理士確認 → 6 月上旬 銀行ご提出 → 6 月中旬 着金・正式ローンチ + 広告開始",
 ]
 for i, pt in enumerate(points_final):
     txt(s, Inches(1.4), Inches(3.0+i*0.48), Inches(10), Inches(0.4),
@@ -578,4 +670,15 @@ txt(s, Inches(8.7), Inches(6.95), Inches(4.0), Inches(0.3),
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LIVE_SPOtCH_事業計画書.pptx")
 prs.save(out)
 print(f"保存完了: {out}")
-print(f"スライド数: {len(prs.slides)}")
+print(f"")
+print(f"=== 事業計画書 v3 / 2026-05-29 改訂 ===")
+print(f"スライド数: {len(prs.slides)}  (v2: 13 → v3: 15)")
+print(f"NEW スライド:")
+print(f"  - #6  詳細市場推計 (公開統計データ + TAM/SAM/SOM)")
+print(f"  - #11 ローンチ前の実課金トラクション (MRR ¥1,300/月)")
+print(f"更新スライド:")
+print(f"  - #1  表紙: v3・2026/05/29 改訂版")
+print(f"  - #10 ローンチタイムライン (新スケジュール: 6/1 税理士 → 6 上旬 銀行 → 6 中旬 ローンチ)")
+print(f"  - #12 開発実績 (5/29 時点 127 PR・5/13 OAuth 通過反映)")
+print(f"  - #14 開発コスト戦略 (PR 数最新化)")
+print(f"  - #15 まとめ (実課金実証・市場推計・新スケジュール反映)")
