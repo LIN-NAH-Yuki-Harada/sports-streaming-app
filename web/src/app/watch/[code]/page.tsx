@@ -135,7 +135,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     useStageFullscreen<HTMLDivElement>({
       allowVideoFallback: scoreboardBurnedIn,
       // Android 視聴者は端末を横にしたら自動で没入横画面に（iOS は既存挙動を維持）。
-      autoLandscapeFullscreen: isWatching,
+      // ★ 2026-08-04: LiveKit 経路（isWatching）だけ true で、**HLS経路＝iPhone配信を
+      //   見ているときに効いていなかった**。配信者の端末によって挙動が変わるのはおかしい。
+      autoLandscapeFullscreen:
+        isWatching || (broadcast?.status === "live" && !!hlsUrl),
     });
 
   // ステージ内の <video> 要素の一時停止状態を追従。
@@ -716,7 +719,12 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
                 : // 通常の常設テロップ（配信者が消すまで出続ける）
                   "max-w-[60%] bg-black/70 backdrop-blur-sm border border-[#e63946]/60 px-3 py-1.5 text-[11px] sm:text-xs"
             }`}
-            style={{ top: "calc(env(safe-area-inset-top, 0px) + 8px)" }}
+            style={{
+              top: "calc(env(safe-area-inset-top, 0px) + 8px)",
+              // ★ 2026-08-04: 表示専用なのにタップを吸っていた。テロップが出ている間だけ
+              //   その位置の再生/一時停止操作が効かなくなるため透過させる。
+              pointerEvents: "none",
+            }}
             role="status"
             aria-live="polite"
           >
