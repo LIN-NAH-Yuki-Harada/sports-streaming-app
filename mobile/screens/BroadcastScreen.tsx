@@ -186,7 +186,12 @@ export function BroadcastScreen() {
   const [volleyballRuleName, setVolleyballRuleName] = useState(DEFAULT_VOLLEYBALL_RULE);
   const [baseballRuleName, setBaseballRuleName] = useState(DEFAULT_BASEBALL_RULE);
   // テニス系のルール（硬式=セットマッチ種別 / ソフト=ゲームマッチ種別）
-  const [tennisRuleKey, setTennisRuleKey] = useState(HARD_TENNIS_RULES[0].key);
+  // 硬式の既定は「3セットマッチ」。配列先頭は 1セットマッチだが、既定のまま3セットの
+  // 試合を配信すると第1セット終了でマッチ確定してしまうため、実戦で多い方を既定にする。
+  // （tennis.ts の配列順は Web 版と完全同一に保つ必要があるので、既定だけここで変える）
+  const [tennisRuleKey, setTennisRuleKey] = useState(
+    () => HARD_TENNIS_RULES.find((r) => r.key === "tennis-3set")?.key ?? HARD_TENNIS_RULES[0].key,
+  );
   const [softTennisRuleKey, setSoftTennisRuleKey] = useState(SOFT_TENNIS_RULES[0].key);
   // テニス系の進行スナップショット（ポイント→ゲーム→セット→マッチをエンジンが確定する）
   const [tennis, setTennis] = useState<TennisSnapshot>(initialTennisSnapshot());
@@ -446,6 +451,31 @@ export function BroadcastScreen() {
     setBusy(true);
     setMessage(null);
     let createdCode: string | null = null;
+
+    // 配信の行を作った**後**に失敗したときの後始末。
+    //
+    // ★ 2026-08-04 修正（1.1.5 で入れてしまった後退）:
+    //   1.1.5 で「開始前に共有したコードをそのまま使う」方式にしたが、行を作った後に
+    //   失敗する経路で `pendingShareCode` を採り直していなかった。share_code は unique
+    //   制約なので、2回目の「配信開始」が同じコードで必ず一意制約違反になり、
+    //   「視聴リンクが変わりました」と出て**また始まらない**（3回目でようやく成功）。
+    //   体育館の弱電波で1回目がコケるのは普通に起きるため、試合直前に2連続で失敗していた。
+    //   → 行を終了させたら**必ず次回用のコードを採り直す**。
+    //
+    //   なお開始前共有で配ったリンクはこの時点で使えなくなる（行が ended になるため
+    //   受け取った家族には「この配信は終了しました」が出る）。黙って変えると気づけないので
+    //   共有済みのときだけ明示的に伝える。
+    const failAfterCreate = async (msg: string) => {
+      if (createdCode) await endBroadcast(createdCode).catch(() => {});
+      setPendingShareCode(generateShareCode());
+      setMessage(
+        preShared
+          ? `${msg}\n※ 視聴リンクが新しくなりました。もう一度共有してから配信を開始してください。`
+          : msg,
+      );
+      setPreShared(false);
+    };
+
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const session = sessionData.session;
@@ -577,12 +607,11 @@ export function BroadcastScreen() {
           signal: ctrl.signal,
         });
       } catch {
-        setMessage(
+        await failAfterCreate(
           timedOut
             ? "サーバーの応答がありません。電波の良い場所で再度お試しください。"
             : "通信に失敗しました。電波状況をご確認ください。",
         );
-        await endBroadcast(createdCode).catch(() => {});
         setBusy(false);
         return;
       } finally {
@@ -599,12 +628,11 @@ export function BroadcastScreen() {
       }
       if (!res.ok || !json?.token) {
         const maintenance = res.status === 402 || res.status === 503 || json === null;
-        setMessage(
+        await failAfterCreate(
           maintenance
             ? "ただいまサーバーに接続できません（メンテナンス中の可能性）。少し時間をおいて再度お試しください。"
             : "トークン取得エラー: " + (json?.error ?? "HTTP " + res.status),
         );
-        await endBroadcast(createdCode).catch(() => {});
         setBusy(false);
         return;
       }
@@ -620,9 +648,10 @@ export function BroadcastScreen() {
       setShareCode(code);
       setPhase("live");
     } catch (e) {
-      setMessage("開始エラー: " + (e instanceof Error ? e.message : String(e)));
       await AudioSession.stopAudioSession().catch(() => {});
-      if (createdCode) await endBroadcast(createdCode).catch(() => {});
+      await failAfterCreate(
+        "開始エラー: " + (e instanceof Error ? e.message : String(e)),
+      );
     } finally {
       setBusy(false);
     }
@@ -638,6 +667,7 @@ export function BroadcastScreen() {
     youtubeEligible,
     youtubeLiveOn,
     pendingShareCode,
+    preShared,
   ]);
 
   // 配信終了（停止ボタン / 接続エラー / 切断 のいずれからも呼ばれる。二重実行は endedRef でガード）
@@ -959,7 +989,24 @@ export function BroadcastScreen() {
         );
         setPeriod(activePeriods[idx] || activePeriods[0]);
       }
-      if (events.matchWon) Alert.alert("マッチ終了！", "おつかれさまでした");
+      // ★ 2026-08-04: マッチ確定を**解除できる導線**を必ず用意する。
+      //   エンジンは matchWon が立つと ＋/−/表示のすべてを止める（Web版と同一仕様）。
+      //   ところがアプリには解除手段が無く、①ソフトテニスの団体戦（同じコートで第2・第3
+      //   対戦が続く）②硬式で既定の1セットマッチのまま3セットの試合を配信 ③相手側の＋を
+      //   1回押し間違えた、のいずれでも**以後スコアを一切動かせなくなる**。
+      //   復旧は配信を止めて再開しかなく、そうすると視聴リンクが変わって家族が見られない。
+      //   → 確定した瞬間に「まだ続ける」を選べるようにする。エンジンには手を入れず、
+      //     画面側で matchWon を落とすだけ（tennis.ts は Web 版と完全同一を保つ）。
+      if (events.matchWon) {
+        Alert.alert(
+          "試合終了の判定です",
+          "このまま終了しますか？ 団体戦などで続ける場合は「まだ続ける」を選んでください。",
+          [
+            { text: "まだ続ける", onPress: () => setTennis((t) => ({ ...t, matchWon: null })) },
+            { text: "試合終了にする", style: "cancel" },
+          ],
+        );
+      }
     },
     [tnRule, tennis, activePeriods],
   );
@@ -968,7 +1015,12 @@ export function BroadcastScreen() {
   const tennisPointMinus = useCallback(
     (side: "home" | "away") => {
       if (!tnRule) return;
-      if (tennis.matchWon) return;
+      // マッチ確定後に − を押したら「まだ続ける」とみなして確定を解除する。
+      // 上のアラートを閉じてしまった人のための二つ目の逃げ道（詰みを作らない）。
+      if (tennis.matchWon) {
+        setTennis((t) => ({ ...t, matchWon: null }));
+        return;
+      }
       if (side === "home" ? tennis.hPts === 0 : tennis.aPts === 0) return;
       setTennis(tennisRemovePoint(tennis, side));
     },
