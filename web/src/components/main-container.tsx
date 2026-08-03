@@ -10,6 +10,10 @@ type Variant = "full" | "wide" | "normal" | "text";
 function getVariant(pathname: string): Variant {
   if (pathname === "/") return "full"; // LP はフル幅
   if (pathname.startsWith("/egress-template")) return "full"; // Egress 合成テンプレ（全画面・余白なし）
+  // ★ 2026-08-04: 視聴ページは**動画が主役**なのに normal（PCで max-w-4xl）に落ちていて、
+  //   大画面でも狭い列の中でしか映像が見られなかった。ページ側が自前で全画面レイアウトを
+  //   組んでいる（min-h-screen / flex-col）ので full にする。
+  if (pathname.startsWith("/watch")) return "full"; // 視聴ページ（映像を画面いっぱいに）
   if (TEXT_PATHS.some((p) => pathname.startsWith(p))) return "text";
   if (pathname === "/discover") return "wide";
   if (WIDE_PREFIXES.some((p) => pathname.startsWith(p))) return "wide";
