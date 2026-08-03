@@ -180,6 +180,8 @@ export async function updateScore(
     away_sets: number;
     set_results: unknown;
     point_label: string | null;
+    // テニス系のゲーム内ポイント（表示用文字列。ゲーム間/非テニスは null）
+    game_points: { home: string; away: string; tb?: true } | null;
     // 野球カウント（甲子園風 B/S/O＋走者）
     balls: number;
     strikes: number;

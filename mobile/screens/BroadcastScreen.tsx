@@ -59,7 +59,19 @@ import {
   addStrike,
   recordOut,
   toggleRunner,
+  tennisPeriods,
 } from "../lib/sports";
+import {
+  HARD_TENNIS_RULES,
+  SOFT_TENNIS_RULES,
+  initialTennisSnapshot,
+  tennisAddPoint,
+  tennisRemovePoint,
+  formatTennisPoints,
+  tennisPointLabel,
+  type TennisRule,
+  type TennisSnapshot,
+} from "../lib/tennis";
 import {
   createBroadcast,
   updateScore,
@@ -134,7 +146,10 @@ function formatScoreboardLine(a: {
   if (a.sportKey === "baseball" && a.baseball) {
     line += `  B${a.baseball.balls} S${a.baseball.strikes} O${a.baseball.outs}`;
   }
-  if (a.setBased && a.pointLabel) line += `  ${a.pointLabel}`;
+  // pointLabel は「セット制の競技」か「テニス系」でしか非 null にならないため、ここで
+  // 競技を再判定する必要はない。setBased で絞ると、セット層の無いソフトテニスの
+  // 「ファイナルゲーム」表示が焼き込みから落ちる。
+  if (a.pointLabel) line += `  ${a.pointLabel}`;
   return line;
 }
 
@@ -165,6 +180,11 @@ export function BroadcastScreen() {
   // 競技のルール種別（バレー: 小学生6人制/6人制/9人制、野球: カテゴリ別イニング）
   const [volleyballRuleName, setVolleyballRuleName] = useState(DEFAULT_VOLLEYBALL_RULE);
   const [baseballRuleName, setBaseballRuleName] = useState(DEFAULT_BASEBALL_RULE);
+  // テニス系のルール（硬式=セットマッチ種別 / ソフト=ゲームマッチ種別）
+  const [tennisRuleKey, setTennisRuleKey] = useState(HARD_TENNIS_RULES[0].key);
+  const [softTennisRuleKey, setSoftTennisRuleKey] = useState(SOFT_TENNIS_RULES[0].key);
+  // テニス系の進行スナップショット（ポイント→ゲーム→セット→マッチをエンジンが確定する）
+  const [tennis, setTennis] = useState<TennisSnapshot>(initialTennisSnapshot());
 
   // ライブ中のスコア／ピリオド（バレーは home/awayScore = 現在セットの得点）
   const [homeScore, setHomeScore] = useState(0);
@@ -216,6 +236,29 @@ export function BroadcastScreen() {
   // セット制（バレー/バド/卓球）の有効ルール。表示と終了時のセット勝利判定に使う。
   const activeSetRule = setBased ? setSportRule(sportKey, volleyballRuleName) : null;
 
+  // テニス系の有効ルール（非テニスでは null）。進行はエンジン（lib/tennis.ts）が担うため
+  // setBased（手動でセットを進める競技）には含めない。参照は定数配列の要素なので安定。
+  const tnRule: TennisRule | null =
+    sportKey === "tennis"
+      ? HARD_TENNIS_RULES.find((r) => r.key === tennisRuleKey) ?? HARD_TENNIS_RULES[0]
+      : sportKey === "soft_tennis"
+        ? SOFT_TENNIS_RULES.find((r) => r.key === softTennisRuleKey) ?? SOFT_TENNIS_RULES[0]
+        : null;
+  // DB へ書く生の値（マッチ確定後は null）。
+  // ★ useMemo 必須: formatTennisPoints は毎回**新しいオブジェクト**を返すため、そのまま
+  //   同期 effect の依存配列に入れると毎レンダー differ 判定されて DB 更新が走り続ける。
+  const tennisPoints = useMemo(
+    () => (tnRule ? formatTennisPoints(tnRule, tennis) : null),
+    [tnRule, tennis],
+  );
+  // 配信者に見せる表示（マッチ確定後は「—」）。こちらは描画専用で依存配列には入れない。
+  const tennisDisplay = tnRule ? tennisPoints ?? { home: "—", away: "—" } : null;
+
+  // 「セット数を出すか」。硬式テニスはセットがあるので出す（ソフトテニスはゲーム先取制で
+  // セット層が無いので出さない）。setBased と分けているのは、setBased が同時に
+  // 「次のセットへ」ボタンの出し分けでもあり、テニスはセット確定が自動だから。
+  const showSets = setBased || tnRule?.kind === "hard";
+
   // finishLive から「最新の得点状態」を参照するための ref（毎レンダー更新・依存配列を膨らませない）。
   // 終了時に、未確定の最終セット得点を set_results へ記録するのに使う。
   const liveScoreRef = useRef({
@@ -241,12 +284,19 @@ export function BroadcastScreen() {
 
   // 競技＋ルール種別に応じた有効ピリオド配列（野球はカテゴリでイニング数が変わる）
   const activePeriods = useMemo(
-    () => (sportKey === "baseball" ? baseballPeriods(baseballRuleName) : periodsFor(sportKey)),
-    [sportKey, baseballRuleName],
+    () =>
+      sportKey === "baseball"
+        ? baseballPeriods(baseballRuleName)
+        : tnRule
+          ? tennisPeriods(tnRule)
+          : periodsFor(sportKey),
+    [sportKey, baseballRuleName, tnRule],
   );
 
   // セット/マッチ(ゲーム)ポイント表示（バレー/バドミントン/卓球・ライブ中のみ意味を持つ）
   const pointLabel = (() => {
+    // テニス系はエンジンが「セットポイント/マッチポイント/タイブレーク」を判定する。
+    if (tnRule) return tennisPointLabel(tnRule, tennis);
     if (!setBased || !activeSetRule) return null;
     return setSportPointLabel(sportKey, activeSetRule, homeSets, awaySets, homeScore, awayScore);
   })();
@@ -335,7 +385,8 @@ export function BroadcastScreen() {
       away_score: awayScore,
       period,
     };
-    if (setBased) {
+    // テニス系もセット/ゲーム集計を同じ列に載せる（home_sets/away_sets/set_results）。
+    if (setBased || tnRule) {
       patch.home_sets = homeSets;
       patch.away_sets = awaySets;
       patch.set_results = setResults;
@@ -343,9 +394,15 @@ export function BroadcastScreen() {
     updateScore(shareCode, patch);
     // セット/マッチ(ゲーム)ポイントは別更新に分離（万一 point_label 列が無くても
     // 得点更新を巻き添えで失敗させない＝過去のリグレッション再発防止）。
-    // バレーだけでなくバドミントン/卓球も対象。
-    if (setBased) {
+    // バレーだけでなくバドミントン/卓球・テニス系も対象。
+    if (setBased || tnRule) {
       updateScore(shareCode, { point_label: pointLabel });
+    }
+    // テニス系のゲーム内ポイント。同じ理由で更に別更新にする（game_points 列は
+    // 2026-07-26 追加のため、未適用環境でも他の更新を巻き添えにしない）。
+    // 表示用に「—」で埋めた tennisDisplay ではなく、生の値（マッチ確定後は null）を書く。
+    if (tnRule) {
+      updateScore(shareCode, { game_points: tennisPoints });
     }
   }, [
     phase,
@@ -359,6 +416,8 @@ export function BroadcastScreen() {
     setBased,
     sportKey,
     pointLabel,
+    tnRule,
+    tennisPoints,
   ]);
 
   // 配信中の経過時間タイマー（1秒ごと）
@@ -409,6 +468,9 @@ export function BroadcastScreen() {
       setAwaySets(0);
       setSetResults([]);
       setBaseball(emptyBaseballCount());
+      // テニス系の進行（ポイント/ゲーム/セット/マッチ確定）も配信ごとに初期化する。
+      // これが無いと前の試合の matchWon が残り、＋ボタンが無反応になる。
+      setTennis(initialTennisSnapshot());
       setPeriod(initialPeriod);
 
       const created = await createBroadcast({
@@ -809,6 +871,51 @@ export function BroadcastScreen() {
     setPeriod(periodLabelForSet(sportKey, gameNumber));
   }, [homeSets, awaySets, setResults, homeScore, awayScore, sportKey]);
 
+  // テニス/ソフトテニス: ＋は「ゲーム」ではなく「ポイント」を進める。
+  // ゲーム/セット/マッチの確定はエンジン（lib/tennis.ts）が自動判定するので、
+  // ここは返ってきたスナップショットを既存の列（得点=ゲーム数 / セット数 / set_results）へ
+  // 写すだけ。DB 反映は既存のスコア同期 effect が拾う。
+  const tennisPoint = useCallback(
+    (side: "home" | "away") => {
+      if (!tnRule) return;
+      if (tennis.matchWon) return; // 確定後は no-op
+      const { next, events } = tennisAddPoint(tnRule, tennis, side);
+      setTennis(next);
+      setHomeScore(next.hGames);
+      setAwayScore(next.aGames);
+      setHomeSets(next.hSets);
+      setAwaySets(next.aSets);
+      setSetResults(
+        next.setResults.map((s) => {
+          const [h, a] = s.split("-").map(Number);
+          return { home: h || 0, away: a || 0 };
+        }),
+      );
+      // セット確定で period を進める。マッチ確定時は進めない
+      //（2-0 で完走したときに「3SET」と出るオフバイワンを防ぐ・Web 版と同じ）。
+      if (events.setWon && !events.matchWon && tnRule.kind === "hard") {
+        const idx = Math.max(
+          0,
+          Math.min(activePeriods.length - 1, next.hSets + next.aSets),
+        );
+        setPeriod(activePeriods[idx] || activePeriods[0]);
+      }
+      if (events.matchWon) Alert.alert("マッチ終了！", "おつかれさまでした");
+    },
+    [tnRule, tennis, activePeriods],
+  );
+
+  // ポイントの取り消し（現在のゲーム内のみ）。ゲーム/セット境界は跨がない。
+  const tennisPointMinus = useCallback(
+    (side: "home" | "away") => {
+      if (!tnRule) return;
+      if (tennis.matchWon) return;
+      if (side === "home" ? tennis.hPts === 0 : tennis.aPts === 0) return;
+      setTennis(tennisRemovePoint(tennis, side));
+    },
+    [tnRule, tennis],
+  );
+
   // 野球カウント操作（B/S/O＋走者）。3アウト時はイニング(period)を自動で前進。
   const advanceInning = useCallback(() => {
     setPeriod((p) => nextPeriodIn(activePeriods, p));
@@ -849,7 +956,9 @@ export function BroadcastScreen() {
         homeScore,
         awayScore,
         period,
-        setBased,
+        // 焼き込み（iOS の RTMP 配信）にもセット数を載せる。テニスの 3 セットマッチで
+        // セットが映像に出ないのを避けるため setBased ではなく showSets を渡す。
+        setBased: showSets,
         homeSets,
         awaySets,
         pointLabel,
@@ -862,7 +971,7 @@ export function BroadcastScreen() {
       homeScore,
       awayScore,
       period,
-      setBased,
+      showSets,
       homeSets,
       awaySets,
       pointLabel,
@@ -992,14 +1101,27 @@ export function BroadcastScreen() {
         awayScore={awayScore}
         period={period}
         setBased={setBased}
+        showSets={showSets}
         unitLabel={setUnitLabel(sportKey)}
         pointLabel={pointLabel}
         elapsed={elapsed}
         trialRemaining={plan === "free" ? Math.max(0, trialRemainingAtStart - elapsed) : null}
         homeSets={homeSets}
         awaySets={awaySets}
-        onHome={(d) => setHomeScore((s) => Math.max(0, s + d))}
-        onAway={(d) => setAwayScore((s) => Math.max(0, s + d))}
+        onHome={(d) =>
+          tnRule
+            ? d > 0
+              ? tennisPoint("home")
+              : tennisPointMinus("home")
+            : setHomeScore((s) => Math.max(0, s + d))
+        }
+        onAway={(d) =>
+          tnRule
+            ? d > 0
+              ? tennisPoint("away")
+              : tennisPointMinus("away")
+            : setAwayScore((s) => Math.max(0, s + d))
+        }
         onPeriod={() => {
           setPeriod((p) => nextPeriodIn(activePeriods, p));
           if (sportKey === "baseball") setBaseball(emptyBaseballCount());
@@ -1009,6 +1131,7 @@ export function BroadcastScreen() {
         youtubeShareUrl={null}
         youtubeReadyAt={0}
         scoreSteps={sportKey === "basketball" ? [1, 2, 3] : [1]}
+        tennisPoints={tennisDisplay}
         baseballCount={sportKey === "baseball" ? baseball : null}
         onBall={onBall}
         onStrike={onStrike}
@@ -1082,14 +1205,27 @@ export function BroadcastScreen() {
           awayScore={awayScore}
           period={period}
           setBased={setBased}
+          showSets={showSets}
           unitLabel={setUnitLabel(sportKey)}
           pointLabel={pointLabel}
           elapsed={elapsed}
           trialRemaining={plan === "free" ? Math.max(0, trialRemainingAtStart - elapsed) : null}
           homeSets={homeSets}
           awaySets={awaySets}
-          onHome={(d) => setHomeScore((s) => Math.max(0, s + d))}
-          onAway={(d) => setAwayScore((s) => Math.max(0, s + d))}
+          onHome={(d) =>
+            tnRule
+              ? d > 0
+                ? tennisPoint("home")
+                : tennisPointMinus("home")
+              : setHomeScore((s) => Math.max(0, s + d))
+          }
+          onAway={(d) =>
+            tnRule
+              ? d > 0
+                ? tennisPoint("away")
+                : tennisPointMinus("away")
+              : setAwayScore((s) => Math.max(0, s + d))
+          }
           onPeriod={() => {
             setPeriod((p) => nextPeriodIn(activePeriods, p));
             // 野球はイニング手動変更でカウントもリセット
@@ -1100,6 +1236,7 @@ export function BroadcastScreen() {
           youtubeShareUrl={liveYoutubeId ? `https://youtu.be/${liveYoutubeId}` : null}
           youtubeReadyAt={youtubeReadyAt}
           scoreSteps={sportKey === "basketball" ? [1, 2, 3] : [1]}
+          tennisPoints={tennisDisplay}
           baseballCount={sportKey === "baseball" ? baseball : null}
           onBall={onBall}
           onStrike={onStrike}
@@ -1268,6 +1405,56 @@ export function BroadcastScreen() {
               </>
             )}
 
+            {sportKey === "tennis" && (
+              <>
+                <Text style={styles.label}>テニスのルール</Text>
+                <View style={styles.sportRow}>
+                  {HARD_TENNIS_RULES.map((r) => {
+                    const active = r.key === tennisRuleKey;
+                    return (
+                      <Pressable
+                        key={r.key}
+                        style={[styles.sportChip, active && styles.sportChipActive]}
+                        onPress={() => setTennisRuleKey(r.key)}
+                      >
+                        <Text style={[styles.sportChipText, active && styles.sportChipTextActive]}>
+                          {r.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.ruleHint}>
+                  ＋ボタンは「ポイント」を進めます。ゲーム・セット・マッチの確定は自動です。
+                </Text>
+              </>
+            )}
+
+            {sportKey === "soft_tennis" && (
+              <>
+                <Text style={styles.label}>ソフトテニスのルール</Text>
+                <View style={styles.sportRow}>
+                  {SOFT_TENNIS_RULES.map((r) => {
+                    const active = r.key === softTennisRuleKey;
+                    return (
+                      <Pressable
+                        key={r.key}
+                        style={[styles.sportChip, active && styles.sportChipActive]}
+                        onPress={() => setSoftTennisRuleKey(r.key)}
+                      >
+                        <Text style={[styles.sportChipText, active && styles.sportChipTextActive]}>
+                          {r.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.ruleHint}>
+                  ＋ボタンは「ポイント」を進めます。ゲーム・マッチの確定は自動です。
+                </Text>
+              </>
+            )}
+
             <Text style={styles.label}>ホームチーム</Text>
             <TextInput
               style={styles.input}
@@ -1409,7 +1596,8 @@ type ScoreControlsProps = {
   homeScore: number;
   awayScore: number;
   period: string;
-  setBased: boolean;
+  setBased: boolean; // 「次のセットへ」を手動で押す競技か（テニスは自動確定なので false）
+  showSets: boolean; // セット数を表示するか（バレー等 + 硬式テニス）
   unitLabel: string;
   pointLabel: string | null;
   elapsed: number;
@@ -1424,6 +1612,9 @@ type ScoreControlsProps = {
   youtubeShareUrl: string | null; // YouTube同時配信が起動していれば https://youtu.be/<id>
   youtubeReadyAt: number; // ウォームアップ完了予定時刻(ms)。これを過ぎるまでYouTubeリンクは共有しない
   scoreSteps: number[]; // 得点ボタンの加点ステップ（通常[1]・バスケ[1,2,3]・野球[1,2,3,4]）
+  // テニス系のときのみ。ゲーム内ポイントの表示用文字列（非テニスは null）。
+  // 非 null のとき ＋/− は「得点」ではなく「ポイント」を操作する。
+  tennisPoints: { home: string; away: string; tb?: true } | null;
   baseballCount: BaseballCount | null; // 野球のときのみ B/S/O＋走者
   onBall: () => void;
   onStrike: () => void;
@@ -1442,6 +1633,7 @@ function ScoreControls(props: ScoreControlsProps) {
     awayScore,
     period,
     setBased,
+    showSets,
     unitLabel,
     pointLabel,
     elapsed,
@@ -1456,6 +1648,7 @@ function ScoreControls(props: ScoreControlsProps) {
     youtubeShareUrl,
     youtubeReadyAt,
     scoreSteps,
+    tennisPoints,
     baseballCount,
     onBall,
     onStrike,
@@ -1550,11 +1743,11 @@ function ScoreControls(props: ScoreControlsProps) {
             <Text style={[styles.previewTeam, isPortrait && styles.previewTeamPortrait]} numberOfLines={1}>
               {homeTeam}
             </Text>
-            {setBased && <Text style={styles.previewSets}>{homeSets}</Text>}
+            {showSets && <Text style={styles.previewSets}>{homeSets}</Text>}
             <Text style={styles.previewScore}>
               {homeScore} - {awayScore}
             </Text>
-            {setBased && <Text style={styles.previewSets}>{awaySets}</Text>}
+            {showSets && <Text style={styles.previewSets}>{awaySets}</Text>}
             <Text style={[styles.previewTeam, isPortrait && styles.previewTeamPortrait]} numberOfLines={1}>
               {awayTeam}
             </Text>
@@ -1568,6 +1761,18 @@ function ScoreControls(props: ScoreControlsProps) {
               ]}
             >
               <Text style={styles.pointBadgeText}>{pointLabel}</Text>
+            </View>
+          ) : null}
+          {/* テニス系: いま何ポイントかを配信者にも見せる（＋/− は得点でなくポイントを動かす）。
+              スコアプレビューの得点はゲーム数なので、これが無いと操作結果が分からない。 */}
+          {tennisPoints ? (
+            <View style={styles.tnPointsRow}>
+              <Text style={styles.tnPointsLabel}>
+                {tennisPoints.tb ? "TB" : "ポイント"}
+              </Text>
+              <Text style={styles.tnPointsValue}>{tennisPoints.home}</Text>
+              <Text style={styles.tnPointsSep}>-</Text>
+              <Text style={styles.tnPointsValue}>{tennisPoints.away}</Text>
             </View>
           ) : null}
         </View>
@@ -1670,7 +1875,7 @@ function ScoreControls(props: ScoreControlsProps) {
         <View style={[styles.teamControl, isPortrait && styles.teamControlPortrait]}>
           <Text style={[styles.controlTeamName, isPortrait && styles.controlTeamNamePortrait]} numberOfLines={1}>
             {homeTeam}
-            {setBased ? `（${homeSets}${unitLabel}）` : ""}
+            {showSets ? `（${homeSets}${unitLabel}）` : ""}
           </Text>
           <View style={styles.scoreRow}>
             <Pressable style={[styles.minusBtn, isPortrait && styles.minusBtnPortrait]} hitSlop={6} onPress={() => onHome(-1)}>
@@ -1718,7 +1923,7 @@ function ScoreControls(props: ScoreControlsProps) {
         <View style={[styles.teamControl, isPortrait && styles.teamControlPortrait]}>
           <Text style={[styles.controlTeamName, isPortrait && styles.controlTeamNamePortrait]} numberOfLines={1}>
             {awayTeam}
-            {setBased ? `（${awaySets}${unitLabel}）` : ""}
+            {showSets ? `（${awaySets}${unitLabel}）` : ""}
           </Text>
           <View style={styles.scoreRow}>
             <Pressable style={[styles.minusBtn, isPortrait && styles.minusBtnPortrait]} hitSlop={6} onPress={() => onAway(-1)}>
@@ -1952,6 +2157,26 @@ const styles = StyleSheet.create({
   previewPeriod: { color: "#ddd", fontSize: 12, marginLeft: 4 },
   topLeftGroup: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, maxWidth: "82%" },
   pointBadge: { backgroundColor: "#f4a300", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
+  // テニス系のゲーム内ポイント（配信者プレビュー用）
+  tnPointsRow: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(0,0,0,0.75)",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 6,
+  },
+  tnPointsLabel: { color: "rgba(255,255,255,0.6)", fontWeight: "700", fontSize: 10 },
+  tnPointsValue: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 15,
+    fontVariant: ["tabular-nums"],
+  },
+  tnPointsSep: { color: "rgba(255,255,255,0.6)", fontSize: 11 },
   pointBadgeMatch: { backgroundColor: "#e63946" },
   pointBadgeText: { color: "#fff", fontWeight: "900", fontSize: 12 },
   stopButton: {
