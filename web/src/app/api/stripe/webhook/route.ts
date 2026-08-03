@@ -136,6 +136,35 @@ export async function POST(request: Request) {
         const userId = sub.metadata?.supabase_user_id;
         if (!userId) break;
 
+        // ★ 2026-08-04: アプリ内課金(IAP)で課金中なら plan を落とさない（二重ソース保護）。
+        //
+        //   RevenueCat 側の EXPIRATION には「Stripe で課金中なら降格しない」ガードが既に
+        //   あるのに、**Stripe 側にその対が無かった**。そのため、二重課金の方に
+        //   「Webを解約してください」と案内して解約すると、**アプリでは毎月払っているのに
+        //   その瞬間 plan が free に書き換わり、翌日の試合で「無料体験（10分）が終了して
+        //   います」と言われて配信できなくなる**。自動復旧は最長で約1ヶ月後（次回更新時）。
+        //   → IAP が生きているときは Stripe の列だけ消して plan は据え置く。
+        const { data: prof } = await supabaseAdmin
+          .from("profiles")
+          .select("iap_product_id")
+          .eq("id", userId)
+          .single();
+        if (prof?.iap_product_id) {
+          const { error: keepErr } = await supabaseAdmin
+            .from("profiles")
+            .update({
+              stripe_subscription_id: null,
+              current_period_end: null,
+            })
+            .eq("id", userId);
+          if (keepErr) {
+            console.error("[stripe-webhook] subscription.deleted keep-plan update failed:", keepErr.message, { userId });
+            throw new Error(`profiles update failed: ${keepErr.message}`);
+          }
+          console.log("[stripe-webhook] kept plan (active IAP subscription)", { userId });
+          break;
+        }
+
         const { error: updateErr } = await supabaseAdmin
           .from("profiles")
           .update({
