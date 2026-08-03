@@ -90,6 +90,28 @@ export function ScoreboardOverlay({ b }: { b: WatchBroadcast }) {
             <RunnerDiamond runners={b.runners} fs={fs} />
           </View>
         ) : null}
+
+        {/* テニス系: ゲーム内ポイント（0/15/30/40/Ad・タイブレーク/ファイナルのカウント）。
+            配信側エンジンが確定した表示用文字列 game_points をそのまま描く（ルール知識不要・
+            テニス以外では常に null なので競技判定も不要）。Web 版と同じ規範。 */}
+        {b.game_points ? (
+          <View style={styles.gamePointsRow}>
+            <Text style={[styles.gamePointsLabel, { fontSize: fs * 0.7 }]}>
+              {b.game_points.tb
+                ? b.sport === "ソフトテニス"
+                  ? "ファイナル"
+                  : "TB"
+                : "ポイント"}
+            </Text>
+            <Text style={[styles.gamePointsValue, { fontSize: fs }]}>
+              {b.game_points.home}
+            </Text>
+            <Text style={[styles.gamePointsSep, { fontSize: fs * 0.6 }]}>-</Text>
+            <Text style={[styles.gamePointsValue, { fontSize: fs }]}>
+              {b.game_points.away}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {/* 左下: 配信経過時間 */}
@@ -255,6 +277,25 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     gap: 10,
   },
+  gamePointsRow: {
+    marginTop: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(0,0,0,0.8)",
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 6,
+  },
+  gamePointsLabel: { color: "rgba(255,255,255,0.6)", fontWeight: "700" },
+  gamePointsValue: {
+    color: "#fff",
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
+  },
+  gamePointsSep: { color: "rgba(255,255,255,0.6)" },
+
   countGroup: { flexDirection: "row", alignItems: "center", gap: 4 },
   countLabel: { color: "#d1d5db", fontWeight: "700" },
   dotRow: { flexDirection: "row", alignItems: "center" },

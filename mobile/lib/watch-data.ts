@@ -10,7 +10,7 @@ import { SITE_URL } from "../config";
 const WATCH_COLUMNS =
   "id, share_code, broadcaster_id, sport, home_team, away_team, " +
   "home_score, away_score, home_sets, away_sets, tournament, period, point_label, " +
-  "balls, strikes, outs, runners, status, started_at, scoreboard_burned_in, " +
+  "balls, strikes, outs, runners, game_points, status, started_at, scoreboard_burned_in, " +
   "live_youtube_broadcast_id, youtube_video_id, live_status, notice";
 
 export type WatchBroadcast = {
@@ -31,6 +31,9 @@ export type WatchBroadcast = {
   strikes: number | null;
   outs: number | null;
   runners: { first?: boolean; second?: boolean; third?: boolean } | null;
+  // テニス系のゲーム内ポイント（表示用文字列）。配信側エンジンが確定した値をそのまま描く
+  // ため、視聴側はテニスのルールを知らなくてよい。テニス以外では常に null。
+  game_points: { home: string; away: string; tb?: boolean } | null;
   status: "live" | "ended";
   started_at: string;
   scoreboard_burned_in: boolean | null;

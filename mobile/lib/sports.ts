@@ -5,6 +5,8 @@
 // 制約: 純 TypeScript（React / Supabase / DOM 一切なし）。RN で動く。
 // DB カラムは broadcasts テーブルの home_sets / away_sets / set_results に対応する。
 
+import type { TennisRule } from "./tennis";
+
 /** 配信フォームで選べる競技キー */
 export type SportKey =
   | "soccer"
@@ -13,6 +15,8 @@ export type SportKey =
   | "volleyball"
   | "badminton"
   | "table_tennis"
+  | "tennis"
+  | "soft_tennis"
   | "track"
   | "other";
 
@@ -26,6 +30,9 @@ export const SPORTS: { key: SportKey; label: string }[] = [
   { key: "baseball", label: "野球" },
   { key: "basketball", label: "バスケ" },
   { key: "volleyball", label: "バレー" },
+  // テニス系は進行が専用エンジン（lib/tennis.ts）側。並び順は Web 版 SPORTS に合わせる。
+  { key: "tennis", label: "テニス" },
+  { key: "soft_tennis", label: "ソフトテニス" },
   { key: "badminton", label: "バドミントン" },
   { key: "table_tennis", label: "卓球" },
   { key: "track", label: "陸上" },
@@ -61,7 +68,15 @@ function generateBaseballPeriods(innings: number): string[] {
  * （バレー＝セット制 / 野球＝イニング生成 はここには含めない）
  */
 const PERIODS: Record<
-  Exclude<SportKey, "volleyball" | "baseball" | "badminton" | "table_tennis">,
+  Exclude<
+    SportKey,
+    | "volleyball"
+    | "baseball"
+    | "badminton"
+    | "table_tennis"
+    | "tennis"
+    | "soft_tennis"
+  >,
   string[]
 > = {
   soccer: ["前半", "後半", "延長"],
@@ -103,7 +118,21 @@ export function periodLabelForSet(sport: SportKey, gameNumber: number): string {
 export function periodsFor(sport: SportKey): string[] {
   if (isSetBased(sport)) return [periodLabelForSet(sport, 1)];
   if (sport === "baseball") return generateBaseballPeriods(9);
+  // テニス系はルール（1セットマッチ/3セットマッチ等）で本数が決まるため tennisPeriods()
+  // を使う。ここはルール未確定時のフォールバック。
+  if (sport === "tennis") return ["1SET"];
+  if (sport === "soft_tennis") return ["GAME"];
   return [...PERIODS[sport]];
+}
+
+/**
+ * テニス系のピリオド表。Web 版 broadcast/page.tsx の periods 算出と同じ結果にする。
+ * 硬式 = 最大セット数（3セットマッチなら 1SET..3SET）／ソフトテニス = ["GAME"] 固定。
+ */
+export function tennisPeriods(rule: TennisRule): string[] {
+  return rule.kind === "hard"
+    ? Array.from({ length: rule.setsToWin * 2 - 1 }, (_, i) => `${i + 1}SET`)
+    : ["GAME"];
 }
 
 /**
