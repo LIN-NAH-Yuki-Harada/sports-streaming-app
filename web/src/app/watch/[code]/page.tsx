@@ -82,6 +82,31 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [showNoticePanel, setShowNoticePanel] = useState(false);
   const [noticeDraft, setNoticeDraft] = useState("");
 
+  // お知らせが変わった瞬間だけ数秒だけ大きく強調する（2026-08-02 オーナー決定）。
+  // 常設の細い帯は見逃されやすい、という課題への対応。強調が解けたら帯に戻る。
+  // ページを開いた瞬間は強調しない（初回に prev を埋めて「変化」だけを拾う）。
+  const [noticeEmphasis, setNoticeEmphasis] = useState(false);
+  const prevNoticeRef = useRef<string | null | undefined>(undefined);
+  const noticeText = broadcast?.notice?.trim() || null;
+  const broadcastId = broadcast?.id ?? null;
+  // 依存は「配信が読めたか(broadcastId)」と「お知らせ本文」だけにする。
+  // broadcast オブジェクト全体に依存させると、スコア更新のたびに effect が再実行され
+  // cleanup が強調解除タイマーを破棄してしまい、強調が消えなくなる。
+  useEffect(() => {
+    if (!broadcastId) return;
+    if (prevNoticeRef.current === undefined) {
+      prevNoticeRef.current = noticeText;
+      return;
+    }
+    if (noticeText === prevNoticeRef.current) return;
+    prevNoticeRef.current = noticeText;
+    // 消した時（null 化）は強調不要。
+    if (!noticeText) return;
+    setNoticeEmphasis(true);
+    const timer = setTimeout(() => setNoticeEmphasis(false), 4000);
+    return () => clearTimeout(timer);
+  }, [broadcastId, noticeText]);
+
   // ログイン中ユーザーを一度だけ取得（配信者本人ならお知らせ編集 UI を出す。未ログインなら null のまま）
   useEffect(() => {
     const supabase = createClient();
@@ -627,8 +652,16 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             焼き込みあり/なし・LiveKit/HLS のどの経路でも CSS オーバーレイとして重ねる。 */}
         {isLive && broadcast.notice && (
           <div
-            className="absolute left-1/2 -translate-x-1/2 z-[2] max-w-[60%] bg-black/70 backdrop-blur-sm border border-[#e63946]/60 rounded-md px-3 py-1.5 text-[11px] sm:text-xs text-white text-center leading-snug"
+            className={`absolute left-1/2 -translate-x-1/2 z-[3] text-white text-center leading-snug rounded-md transition-all duration-300 ease-out ${
+              noticeEmphasis
+                ? // 変わった瞬間の強調（数秒）。赤地＋拡大で必ず目に入るようにする。
+                  "max-w-[80%] bg-[#e63946]/95 border border-[#e63946] px-5 py-3 text-sm sm:text-base font-bold scale-100 shadow-lg"
+                : // 通常の常設テロップ（配信者が消すまで出続ける）
+                  "max-w-[60%] bg-black/70 backdrop-blur-sm border border-[#e63946]/60 px-3 py-1.5 text-[11px] sm:text-xs"
+            }`}
             style={{ top: "calc(env(safe-area-inset-top, 0px) + 8px)" }}
+            role="status"
+            aria-live="polite"
           >
             <span className="mr-1">📢</span>
             {broadcast.notice}
