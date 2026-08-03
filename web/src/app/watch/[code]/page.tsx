@@ -33,6 +33,10 @@ const APP_STORE_URL = "https://apps.apple.com/jp/app/live-spotch/id6785001863";
 const PLAY_STORE_URL =
   "https://play.google.com/store/apps/details?id=com.linnah.livespotch";
 
+// 開始前共有のリンクを配信開始前に開いた人を待たせる設定。
+const WAIT_FOR_START_POLL_MS = 10_000; // 10秒ごとに配信を探す
+const WAIT_FOR_START_MAX_MS = 60 * 60_000; // 60分で打ち切り
+
 // broadcast を delayMs ぶん遅らせて返す（スコア表示を映像に同期させるため）。
 function useDelayedBroadcast(
   broadcast: Broadcast | null,
@@ -70,6 +74,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
   const [loadingBroadcast, setLoadingBroadcast] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // 開始前共有（アプリの ready 画面から配信開始**前**にリンクを配れる導線・2026-08-03）の受け皿。
+  // 未作成コードは「まだ始まっていない」可能性が高いので、すぐ「見つかりません」で終端せず待つ。
+  // 打ち切り後だけ従来の「見つかりません」に切り替える。
+  const [waitTimedOut, setWaitTimedOut] = useState(false);
   const [viewerToken, setViewerToken] = useState<string | null>(null);
   const [isWatching, setIsWatching] = useState(false);
   // 自前配信サーバー(MediaMTX)の HLS 視聴 URL。set されていれば HLS プレイヤーで直接再生
@@ -216,6 +224,29 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     fetchBroadcast();
   }, [code]);
 
+  // 未作成コードの待機ポーリング。配信が始まったら自動で映像に切り替わる。
+  // 上限 60 分（無期限に叩き続けない）。broadcast が取れた時点で停止する。
+  useEffect(() => {
+    if (loadingBroadcast || broadcast || waitTimedOut) return;
+    const startedAt = Date.now();
+    const id = setInterval(async () => {
+      if (Date.now() - startedAt > WAIT_FOR_START_MAX_MS) {
+        clearInterval(id);
+        setWaitTimedOut(true);
+        return;
+      }
+      const data = await getBroadcastByCode(code).catch(() => null);
+      if (data) {
+        setNotFound(false);
+        setBroadcast(data);
+        if (data.status === "live") {
+          getStreamPlaybackUrl(code).then(setHlsUrl).catch(() => {});
+        }
+      }
+    }, WAIT_FOR_START_POLL_MS);
+    return () => clearInterval(id);
+  }, [loadingBroadcast, broadcast, waitTimedOut, code]);
+
   // スコア表示の出し分け（発熱対策 Phase 1-A・2026-06-08）:
   // - 焼き込みあり配信（scoreboard_burned_in=true・従来/¥500）: スコアは映像に焼き込み済み
   //   → 視聴側オーバーレイ不要。
@@ -319,6 +350,32 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     return (
       <div className="flex items-center justify-center py-32">
         <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // ===== まだ始まっていない（開始前共有のリンクを先に開いた場合）=====
+  // 打ち切り前は待機画面。打ち切り後は従来の「見つかりません」へ落とす。
+  if ((notFound || !broadcast) && !waitTimedOut) {
+    return (
+      <div>
+        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+          <div className="flex items-center justify-between">
+            <Logo />
+            <h1 className="text-sm font-bold text-gray-400">視聴</h1>
+          </div>
+        </div>
+        <div className="mx-auto max-w-sm px-5 py-20 text-center">
+          <div className="w-16 h-16 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-6">
+            <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+          </div>
+          <h1 className="text-base font-bold">配信はまだ始まっていません</h1>
+          <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+            共有コード「{code.toUpperCase()}」<br />
+            この画面のままお待ちください。<br />
+            始まると自動で映像に切り替わります。
+          </p>
+        </div>
       </div>
     );
   }
