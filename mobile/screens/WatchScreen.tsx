@@ -35,6 +35,7 @@ import {
 import { ScoreboardOverlay } from "../components/ScoreboardOverlay";
 import { ModerationMenu } from "../components/ModerationMenu";
 import { LiveReactions } from "../components/LiveReactions";
+import { NoticeOverlay } from "../components/NoticeOverlay";
 import type { RootStackParamList } from "../navigation-types";
 
 // HLS(自前MediaMTX)視聴時、映像は約7秒遅れて届くため、リアルタイムのスコアを
@@ -566,6 +567,10 @@ function HlsStage({
       {/* スコアボード（映像遅延に同期させた値で表示） */}
       <ScoreboardOverlay b={delayed ?? broadcast} />
 
+      {/* 上部中央: 配信者からのお知らせ（変わった瞬間だけポップアップ→常設の帯へ）。
+          スコアと違い遅延させない（Web 版が非遅延の broadcast.notice を使うため）。 */}
+      <NoticeOverlay notice={broadcast.notice} topInset={topInset} />
+
       {/* 右上: LIVE + 試合名（視聴者数は LiveKit 由来のため HLS 視聴では非表示） */}
       <View
         style={[styles.topRight, { top: topInset + 10, right: 12 }]}
@@ -706,6 +711,9 @@ function Stage({
 
       {/* スコアボード（左上 + 左下 経過時間） */}
       <ScoreboardOverlay b={broadcast} />
+
+      {/* 上部中央: 配信者からのお知らせ（変わった瞬間だけポップアップ→常設の帯へ） */}
+      <NoticeOverlay notice={broadcast.notice} topInset={topInset} />
 
       {/* 右上: LIVE + 視聴者数 + 試合名（縦に積んで重なり回避） */}
       <View

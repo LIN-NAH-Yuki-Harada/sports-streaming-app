@@ -6,6 +6,7 @@ import {
   AppState,
   Easing,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -69,6 +70,8 @@ import {
   fetchLiveYoutubeId,
   fetchStreamTarget,
   insertScoreEvent,
+  getBroadcastNotice,
+  updateBroadcastNotice,
 } from "../lib/broadcasts";
 import {
   type Plan,
@@ -1498,6 +1501,46 @@ function ScoreControls(props: ScoreControlsProps) {
   const { width: winW, height: winH } = useWindowDimensions();
   const isPortrait = winH >= winW;
 
+  // ===== 視聴者へのお知らせテロップ（Web 版 PR#219 のアプリ移植・1.1.5）=====
+  // 画面が狭くキーボードも出るため、Web のインラインパネルではなくモーダルにする。
+  const [notice, setNotice] = useState<string | null>(null);
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [noticeDraft, setNoticeDraft] = useState("");
+
+  // 現在値を DB から読む。画面ロック復帰などで本コンポーネントが作り直されても
+  // 「お知らせを消す」が出続けるようにする（無いと視聴者側に出しっぱなしになる）。
+  useEffect(() => {
+    if (!shareCode) return;
+    let alive = true;
+    getBroadcastNotice(shareCode)
+      .then((v) => {
+        if (alive) setNotice(v);
+      })
+      .catch(() => {
+        /* 取得失敗は無視（未設定として扱う） */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [shareCode]);
+
+  // text=null で非表示に戻す。反映は視聴側の Realtime UPDATE で届く。
+  const applyNotice = useCallback(
+    async (text: string | null) => {
+      if (!shareCode) return;
+      const trimmed = text?.trim() || null;
+      const ok = await updateBroadcastNotice(shareCode, trimmed);
+      if (!ok) {
+        Alert.alert("お知らせを更新できませんでした", "電波の良い場所でもう一度お試しください。");
+        return;
+      }
+      setNotice(trimmed);
+      setNoticeDraft("");
+      setNoticeOpen(false);
+    },
+    [shareCode],
+  );
+
   return (
     <>
       {/* 上: 視聴者に見えているのと同じスコアボードのプレビュー ＋ 停止 */}
@@ -1561,6 +1604,18 @@ function ScoreControls(props: ScoreControlsProps) {
           <Text style={[styles.elapsedText, isPortrait && styles.elapsedTextPortrait]}>
             ⏱ {formatElapsed(elapsed)}
           </Text>
+          {/* 📢 視聴者へのお知らせ。出している間は赤地にして状態が一目で分かるようにする。 */}
+          <Pressable
+            style={[styles.noticeButton, notice ? styles.noticeButtonOn : null]}
+            onPress={() => {
+              setNoticeDraft(notice ?? "");
+              setNoticeOpen(true);
+            }}
+            hitSlop={6}
+            accessibilityLabel="視聴者へのお知らせ"
+          >
+            <Text style={styles.noticeButtonText}>📢</Text>
+          </Pressable>
           <Pressable
             style={[styles.stopButton, isPortrait && styles.stopButtonPortrait]}
             onPress={confirmStop}
@@ -1695,6 +1750,68 @@ function ScoreControls(props: ScoreControlsProps) {
 
       {/* 視聴者からの応援スタンプ（pointerEvents none で操作を邪魔しない） */}
       {shareCode ? <BroadcastReactions shareCode={shareCode} /> : null}
+
+      {/* 📢 お知らせ入力（モーダル）。撮影中に開くため、閉じる導線を必ず2つ用意する
+          （背景タップ＋キャンセル）。KeyboardAvoidingView でキーボードに隠れないようにする。 */}
+      <Modal
+        visible={noticeOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNoticeOpen(false)}
+      >
+        <Pressable
+          style={styles.noticeBackdrop}
+          onPress={() => setNoticeOpen(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={styles.noticeCenter}
+          >
+            {/* 内側のタップで閉じないよう、Pressable で伝播を止める */}
+            <Pressable style={styles.noticeSheet} onPress={() => {}}>
+              <Text style={styles.noticeTitle}>視聴者へのお知らせ</Text>
+              <Text style={styles.noticeHint}>
+                映像の上に表示されます（30文字まで）
+              </Text>
+              <TextInput
+                style={styles.noticeInput}
+                value={noticeDraft}
+                onChangeText={setNoticeDraft}
+                maxLength={30}
+                placeholder="例）延長タイブレーク中"
+                placeholderTextColor="#666"
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={() => applyNotice(noticeDraft)}
+              />
+              <Pressable
+                style={[
+                  styles.noticeApply,
+                  !noticeDraft.trim() && styles.noticeApplyDisabled,
+                ]}
+                disabled={!noticeDraft.trim()}
+                onPress={() => applyNotice(noticeDraft)}
+              >
+                <Text style={styles.noticeApplyText}>表示する</Text>
+              </Pressable>
+              {notice ? (
+                <Pressable
+                  style={styles.noticeClear}
+                  onPress={() => applyNotice(null)}
+                >
+                  <Text style={styles.noticeClearText}>お知らせを消す</Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                style={styles.noticeCancel}
+                onPress={() => setNoticeOpen(false)}
+              >
+                <Text style={styles.noticeCancelText}>キャンセル</Text>
+              </Pressable>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
     </>
   );
 }
@@ -1847,6 +1964,60 @@ const styles = StyleSheet.create({
   },
   stopText: { color: "#e63946", fontWeight: "800", fontSize: 13 },
   topRightGroup: { flexDirection: "row", alignItems: "center", gap: 8 },
+  // 📢 お知らせボタン（停止ボタンと同じ高さ感で並べる）
+  noticeButton: {
+    backgroundColor: "rgba(0,0,0,0.7)",
+    borderColor: "rgba(255,255,255,0.25)",
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  // お知らせを出している間は赤地にして、消し忘れに気づけるようにする
+  noticeButtonOn: {
+    backgroundColor: "rgba(230,57,70,0.85)",
+    borderColor: "#e63946",
+  },
+  noticeButtonText: { fontSize: 15 },
+  noticeBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)" },
+  noticeCenter: { flex: 1, justifyContent: "center", paddingHorizontal: 28 },
+  noticeSheet: {
+    backgroundColor: "#141414",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    padding: 18,
+  },
+  noticeTitle: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  noticeHint: { color: "#888", fontSize: 11, marginTop: 4 },
+  noticeInput: {
+    marginTop: 12,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: "#fff",
+    fontSize: 15,
+  },
+  noticeApply: {
+    marginTop: 12,
+    backgroundColor: "#e63946",
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  noticeApplyDisabled: { opacity: 0.35 },
+  noticeApplyText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  noticeClear: {
+    marginTop: 8,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  noticeClearText: { color: "#ddd", fontWeight: "700", fontSize: 13 },
+  noticeCancel: { marginTop: 10, paddingVertical: 6, alignItems: "center" },
+  noticeCancelText: { color: "#888", fontSize: 13 },
   youtubeStatus: { color: "#ff6b6b", fontWeight: "700" },
   elapsedText: {
     color: "#fff",
