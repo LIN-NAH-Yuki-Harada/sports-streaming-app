@@ -172,11 +172,22 @@ export function MyPageScreen() {
           ? "アプリ内課金のプランをご利用中の場合、iOS の「設定 > Apple ID > サブスクリプション」からの解約も必要です。"
           : "アプリ内課金のプランをご利用中の場合、Google Play の「お支払いと定期購入 > 定期購入」からの解約も必要です。"
       }\n\n削除しますか？`,
-      [
-        { text: "キャンセル", style: "cancel" },
-        { text: "解約画面を開く", onPress: openStoreSubscriptions },
-        { text: "削除する", style: "destructive", onPress: doDelete },
-      ],
+      // ★ 2026-08-04: ボタン順が iPhone 前提だった。
+      //   iOS は "destructive" が赤字で目立ち "cancel" が独立配置されるが、**Android は
+      //   配列の最後が右端＝いつも OK がある一番押しやすい位置**で、しかも destructive の
+      //   赤も効かない。結果 Android では「削除する」が右端に座り、反射的に押すと
+      //   **配信データごと取り返しのつかない削除**が走る。→ Android だけ順序を反転させる。
+      Platform.OS === "android"
+        ? [
+            { text: "削除する", style: "destructive" as const, onPress: doDelete },
+            { text: "解約画面を開く", onPress: openStoreSubscriptions },
+            { text: "キャンセル", style: "cancel" as const },
+          ]
+        : [
+            { text: "キャンセル", style: "cancel" as const },
+            { text: "解約画面を開く", onPress: openStoreSubscriptions },
+            { text: "削除する", style: "destructive" as const, onPress: doDelete },
+          ],
     );
   }, [doDelete, openStoreSubscriptions]);
 

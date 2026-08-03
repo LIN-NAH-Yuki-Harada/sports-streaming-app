@@ -544,6 +544,13 @@ function HlsStage({
     let lastTime = -1;
     let stuck = 0;
     const sub = player.addListener("timeUpdate", ({ currentTime }) => {
+      // ★ 2026-08-04: アプリが前面にいないときは何もしない。
+      //   Android は**バックグラウンドでも timeUpdate が届き続ける**ため、再生が止まった
+      //   ことを「ストールした」と誤判定し、resync() → play() で**裏で再生を再開**してしまう。
+      //   祖父母が視聴中に LINE へ切り替えると、画面に出ていないのに通信量と電池を食い続け、
+      //   1〜2時間で数百MB〜GB級になる（音が鳴り出すこともある）。
+      //   iPhone は前面を外れると再生自体が止まるので起きない＝iOS前提の穴。
+      if (AppState.currentState !== "active") return;
       if (currentTime === lastTime) {
         stuck++;
         if (stuck >= 3) {

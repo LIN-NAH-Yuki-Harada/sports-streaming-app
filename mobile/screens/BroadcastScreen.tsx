@@ -4,6 +4,7 @@ import {
   Alert,
   Animated,
   AppState,
+  BackHandler,
   Easing,
   KeyboardAvoidingView,
   Modal,
@@ -18,6 +19,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useKeepAwake } from "expo-keep-awake";
 import {
   AudioSession,
@@ -178,6 +180,7 @@ export function BroadcastScreen() {
   const [shareCode, setShareCode] = useState<string | null>(null);
 
   // 試合セットアップ（配信開始前に入力）
+  const insets = useSafeAreaInsets(); // Android では RN標準の SafeAreaView が効かないため必須
   const [sportKey, setSportKey] = useState<SportKey>("soccer");
   const [homeTeam, setHomeTeam] = useState("ホーム");
   const [awayTeam, setAwayTeam] = useState("アウェイ");
@@ -885,6 +888,24 @@ export function BroadcastScreen() {
     return () => sub.remove();
   }, [phase, finishLive, startRecovering]);
 
+  // ★ 2026-08-04: Android の「戻る」を配信中だけ乗っ取る。
+  //   横持ちで画面の端をつかんだ拍子に戻る操作が入ると、1回でホーム画面へ飛び
+  //   （配信中はタブバーを隠しているので戻れない）、もう1回でアプリが終了する。
+  //   停止処理が走らないので broadcasts は live のまま残り、**視聴者は止まった映像を
+  //   見続ける**（ゴースト配信）。iPhone にこの操作は無いため誰も踏まない＝iOS前提の穴。
+  //   → 既存の「配信を停止しますか？」に吸わせ、既定の戻る動作は止める。
+  useEffect(() => {
+    if (phase !== "live" || Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      Alert.alert("配信を停止しますか？", "視聴者に配信が終了します。", [
+        { text: "キャンセル", style: "cancel" },
+        { text: "停止する", style: "destructive", onPress: () => finishLive(null) },
+      ]);
+      return true; // true = 既定の戻る動作（画面遷移・アプリ終了）を行わない
+    });
+    return () => sub.remove();
+  }, [phase, finishLive]);
+
   // 回線切替(WiFi↔5G)の主動検知: 回線種別が変わったら古い TCP の timeout を待たず即再接続。
   // ＝同じ共有コードのまま新回線へ再 publish（視聴URL不変）。配信中のみ監視。
   useEffect(() => {
@@ -1361,7 +1382,17 @@ export function BroadcastScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        },
+      ]}
+    >
       {/* iOS: チーム名入力時にキーボードが入力欄に被らないよう KeyboardAvoidingView で避ける。
           旧実装の automaticallyAdjustKeyboardInsets は、キーボードを閉じた後も下端の
           content inset が解除されず残る iOS 既知バグがあり、「下までスクロールすると
@@ -1634,7 +1665,7 @@ export function BroadcastScreen() {
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -1848,6 +1879,14 @@ function ScoreControls(props: ScoreControlsProps) {
   const { width: winW, height: winH } = useWindowDimensions();
   const isPortrait = winH >= winW;
 
+  // ★ 2026-08-04: 実ユーザー（2年ビデオ係）から「Androidだと相手方の＋が隠れて押しづらい。
+  //   撮影中もホーム/戻るボタンが出ている」と報告。原因は **RN標準の SafeAreaView が
+  //   iOS でしか効かない**こと（Androidでは padding ゼロのただの View）。操作パネルが
+  //   ナビゲーションバーの下に潜っていた。**横向き配信ではAndroidのナビバーが画面の右端に
+  //   来る機種が多く、右側にあるアウェイの＋が特に当たる**＝報告と一致。
+  //   → SafeAreaView をやめ、両OSで効く useSafeAreaInsets で上下**左右**を空ける。
+  const insets = useSafeAreaInsets();
+
   // ===== 視聴者へのお知らせテロップ（Web 版 PR#219 のアプリ移植・1.1.5）=====
   // 画面が狭くキーボードも出るため、Web のインラインパネルではなくモーダルにする。
   const [notice, setNotice] = useState<string | null>(null);
@@ -1891,7 +1930,17 @@ function ScoreControls(props: ScoreControlsProps) {
   return (
     <>
       {/* 上: 視聴者に見えているのと同じスコアボードのプレビュー ＋ 停止 */}
-      <SafeAreaView style={styles.topOverlay} pointerEvents="box-none">
+      <View
+        style={[
+          styles.topOverlay,
+          {
+            paddingTop: insets.top + 12,
+            paddingLeft: insets.left + 12,
+            paddingRight: insets.right + 12,
+          },
+        ]}
+        pointerEvents="box-none"
+      >
         <View style={styles.topLeftGroup}>
           <View style={styles.scorePreview}>
             <Text style={[styles.previewTeam, isPortrait && styles.previewTeamPortrait]} numberOfLines={1}>
@@ -1984,7 +2033,7 @@ function ScoreControls(props: ScoreControlsProps) {
             </Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </View>
 
       {/* 野球: B/S/O カウント＋走者ダイヤ（甲子園TV中継風・下部スコア操作の上に配置） */}
       {baseballCount ? (
@@ -2025,7 +2074,18 @@ function ScoreControls(props: ScoreControlsProps) {
       ) : null}
 
       {/* 下: スコア操作パネル */}
-      <SafeAreaView style={[styles.controls, isPortrait && styles.controlsPortrait]} pointerEvents="box-none">
+      <View
+        style={[
+          styles.controls,
+          isPortrait && styles.controlsPortrait,
+          {
+            paddingBottom: insets.bottom + 12,
+            paddingLeft: insets.left + 12,
+            paddingRight: insets.right + 12,
+          },
+        ]}
+        pointerEvents="box-none"
+      >
         <View style={[styles.teamControl, isPortrait && styles.teamControlPortrait]}>
           <Text style={[styles.controlTeamName, isPortrait && styles.controlTeamNamePortrait]} numberOfLines={1}>
             {homeTeam}
@@ -2105,7 +2165,7 @@ function ScoreControls(props: ScoreControlsProps) {
             </View>
           ) : null}
         </View>
-      </SafeAreaView>
+      </View>
 
       {/* 視聴者からの応援スタンプ（pointerEvents none で操作を邪魔しない） */}
       {shareCode ? <BroadcastReactions shareCode={shareCode} /> : null}
@@ -2122,9 +2182,16 @@ function ScoreControls(props: ScoreControlsProps) {
           style={styles.noticeBackdrop}
           onPress={() => setNoticeOpen(false)}
         >
+          {/* ★ 2026-08-04: behavior が iOS だけだったため、**Androidの横持ちでキーボードが
+              画面の半分以上を占めると「表示する」「お知らせを消す」が隠れて押せなくなり、
+              出したお知らせを消せなくなる**（Modal 内は adjustResize が効かない）。
+              Android にも behavior を与え、横持ちでは中央寄せをやめて上に寄せる。 */}
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={styles.noticeCenter}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={[
+              styles.noticeCenter,
+              !isPortrait && styles.noticeCenterLandscape,
+            ]}
           >
             {/* 内側のタップで閉じないよう、Pressable で伝播を止める */}
             <Pressable style={styles.noticeSheet} onPress={() => {}}>
@@ -2391,6 +2458,8 @@ const styles = StyleSheet.create({
   noticeButtonText: { fontSize: 15 },
   noticeBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)" },
   noticeCenter: { flex: 1, justifyContent: "center", paddingHorizontal: 28 },
+  // 横持ちはキーボードが高いので、中央寄せをやめて上に寄せる（ボタンが隠れないように）
+  noticeCenterLandscape: { justifyContent: "flex-start", paddingTop: 12 },
   noticeSheet: {
     backgroundColor: "#141414",
     borderRadius: 14,
