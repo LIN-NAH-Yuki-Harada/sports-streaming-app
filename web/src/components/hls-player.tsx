@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * 自前配信サーバー（MediaMTX）の HLS（.m3u8）を再生するプレイヤー。
@@ -229,14 +229,44 @@ export function HlsPlayer({ src }: { src: string }) {
     };
   }, [src]);
 
+  // ★ 2026-08-04: ブラウザの自動再生ルールを満たすため既定でミュートにしているが、
+  //   **音を出す案内を一切出していなかった**。祖父母がリンクを開くと映像は出るのに無音で、
+  //   孫の名前を呼ぶ声もホイッスルも聞こえない。しかも LiveKit 経路（Android配信）は
+  //   ミュートしていないため、**同じサービスなのに配信者の端末によって音が出たり出なかったり
+  //   する**。解除手段が小さなスピーカーアイコンだけでは高齢の視聴者には届かない。
+  //   → ミュート中は大きな「🔊 タップして音を出す」を重ね、押したら解除する。
+  const [muted, setMuted] = useState(true);
+
+  const unmute = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = false;
+    // 一部ブラウザは muted 解除だけでは再生が止まるため念のため再開させる
+    v.play().catch(() => {});
+    setMuted(false);
+  };
+
   return (
-    <video
-      ref={videoRef}
-      className="w-full h-full object-contain bg-black"
-      playsInline
-      controls
-      autoPlay
-      muted
-    />
+    <div className="relative w-full h-full">
+      <video
+        ref={videoRef}
+        className="w-full h-full object-contain bg-black"
+        playsInline
+        controls
+        autoPlay
+        muted
+        onVolumeChange={(e) => setMuted((e.target as HTMLVideoElement).muted)}
+      />
+      {muted && (
+        <button
+          onClick={unmute}
+          className="absolute inset-x-0 top-1/2 -translate-y-1/2 mx-auto w-fit max-w-[85%] flex items-center gap-2 rounded-full bg-[#e63946] px-6 py-4 text-white text-base sm:text-lg font-bold shadow-2xl active:scale-95 transition"
+          aria-label="音を出す"
+        >
+          <span className="text-2xl">🔊</span>
+          タップして音を出す
+        </button>
+      )}
+    </div>
   );
 }
