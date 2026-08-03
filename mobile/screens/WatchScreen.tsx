@@ -302,20 +302,15 @@ export function WatchScreen({ route, navigation }: Props) {
     return () => clearInterval(id);
   }, [broadcast?.id, broadcast?.status, shareCode]);
 
-  // ===== 読み込み中 =====
-  if (loading) {
-    return (
-      <View style={styles.fill}>
-        <ActivityIndicator color="#e63946" />
-        <CloseButton onPress={close} />
-      </View>
-    );
-  }
-
   // 未作成コードの待機ポーリング（開始前共有・案C の受け皿）。
   // 配信開始**前**にリンクを共有できるようにしたため、家族が開始前に開く経路が正常系になった。
   // ここで「見つかりません」で終端すると開き直しを強いるので、10秒ごとに探し続け、
   // 配信が始まったら自動で切り替える。上限 60 分（無期限ポーリングで電池を食わない）。
+  //
+  // ★ このフックは**必ず早期 return より前**に置くこと。React のフックは毎レンダー同じ順序で
+  //   呼ばれる必要があり、`if (loading) return` の後ろに置くと初回レンダーで呼ばれず、
+  //   loading=false になった瞬間にフック数が変わって**必ずクラッシュする**（2026-08-03 に実際に
+  //   踏んだ。tsc では検出できない）。
   useEffect(() => {
     if (loading || broadcast) return;
     const startedAt = Date.now();
@@ -330,6 +325,17 @@ export function WatchScreen({ route, navigation }: Props) {
     }, WAIT_FOR_START_POLL_MS);
     return () => clearInterval(id);
   }, [loading, broadcast, shareCode]);
+
+  // ===== 読み込み中 =====
+  if (loading) {
+    return (
+      <View style={styles.fill}>
+        <ActivityIndicator color="#e63946" />
+        <CloseButton onPress={close} />
+      </View>
+    );
+  }
+
 
   // ===== 配信が見つからない =====
   if (!broadcast) {
