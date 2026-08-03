@@ -233,11 +233,19 @@ export type VolleyballRule = {
 /** バレーのルール種別。Web VOLLEYBALL_RULES と一致。 */
 export const VOLLEYBALL_RULES: Record<string, VolleyballRule> = {
   小学生6人制: { setsToWin: 2, setPoint: 21, finalSetPoint: 15 },
+  // ★ 2026-08-04 追加: 中学・高校の公式戦で最も多い形式。これが無かったため、25点を使いたい
+  //   人は「6人制」（=5セットマッチ）を選ぶしかなく、次の2つが同時に起きていた:
+  //   ①最終セット判定が「先取数×2−2」依存なので第3セットの規定点が25点のままになり、
+  //     「セットポイント」「マッチポイント」のバッジが最後まで一度も出ない
+  //   ②2セット先取で勝って停止しても3セット目の勝ちが加算されず、視聴者と履歴に
+  //     **「セット 1-1」という勝敗不明の記録**が残る（内訳は正しいのに合計だけ矛盾）
+  //   既存の課金顧客（中学バレー）に直撃するため、これを既定にする。
+  "6人制（3セットマッチ）": { setsToWin: 2, setPoint: 25, finalSetPoint: 15 },
   "6人制": { setsToWin: 3, setPoint: 25, finalSetPoint: 15 },
   "9人制": { setsToWin: 2, setPoint: 21, finalSetPoint: 21 },
 };
 export const VOLLEYBALL_RULE_NAMES = Object.keys(VOLLEYBALL_RULES);
-export const DEFAULT_VOLLEYBALL_RULE = "6人制";
+export const DEFAULT_VOLLEYBALL_RULE = "6人制（3セットマッチ）";
 
 /** 野球のルール種別（イニング数）。Web BASEBALL_RULES と一致。 */
 export const BASEBALL_RULES: Record<string, { innings: number }> = {

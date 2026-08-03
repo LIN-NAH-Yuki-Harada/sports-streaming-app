@@ -970,7 +970,7 @@ export function BroadcastScreen() {
   }, [phase, liveYoutubeId]);
 
   // セット/ゲーム制(バレー/バドミントン/卓球): 「次へ」= 現得点を集計→セット数加算→0-0リセット→次の番号へ
-  const handleNextSet = useCallback(() => {
+  const advanceSetNow = useCallback(() => {
     const r = advanceSet({ homeSets, awaySets, setResults }, homeScore, awayScore);
     setHomeSets(r.state.homeSets);
     setAwaySets(r.state.awaySets);
@@ -980,6 +980,26 @@ export function BroadcastScreen() {
     const gameNumber = r.state.homeSets + r.state.awaySets + 1;
     setPeriod(periodLabelForSet(sportKey, gameNumber));
   }, [homeSets, awaySets, setResults, homeScore, awayScore, sportKey]);
+
+  const handleNextSet = useCallback(() => {
+    // ★ 2026-08-04: 0-0 や同点で押されると、画面上は何も変わらないのに**中身のない
+    //   セットが記録に積まれる**（押すたび増える）。試合後の内訳が
+    //   「25-23 / 0-0 / 0-0 / 25-20」のように壊れるため、入口で止める。
+    if (homeScore === 0 && awayScore === 0) return; // 空押しは黙って無視
+    if (homeScore === awayScore) {
+      Alert.alert(
+        "同点のまま次のセットへ進みますか？",
+        "どちらのセット獲得にもなりません。押し間違いでなければ「進む」を選んでください。",
+        [
+          { text: "キャンセル", style: "cancel" },
+          { text: "進む", onPress: () => advanceSetNow() },
+        ],
+      );
+      return;
+    }
+    advanceSetNow();
+  }, [homeScore, awayScore, advanceSetNow]);
+
 
   // テニス/ソフトテニス: ＋は「ゲーム」ではなく「ポイント」を進める。
   // ゲーム/セット/マッチの確定はエンジン（lib/tennis.ts）が自動判定するので、
@@ -1630,6 +1650,15 @@ export function BroadcastScreen() {
                 の待機画面で受ける（web/mobile とも実装済み）。 */}
             <View style={styles.preShareCard}>
               <Text style={styles.preShareTitle}>📲 視聴リンクを先に共有（おすすめ）</Text>
+              {/* ★ 2026-08-04: 配信を終えると次の試合用にコードを採り直すため、大会日に
+                  「朝に送ったリンクで2試合目も見られる」と思い込む事故が必ず起きる。
+                  家族側には「この配信は終了しました」しか出ない。1回でも配信を終えた
+                  後だけ、配り直しが要ることを明示する。 */}
+              {lastDurationSec > 0 ? (
+                <Text style={styles.preShareWarn}>
+                  ⚠️ 新しい試合のリンクです。前のリンクでは見られません。もう一度共有してください。
+                </Text>
+              ) : null}
               <Text style={styles.preShareBody}>
                 配信中にLINEを開くと端末が熱くなり、映像が乱れる原因になります。
                 Android では映像が一時的に途切れます。開始前の共有がおすすめです。
@@ -1657,7 +1686,47 @@ export function BroadcastScreen() {
               ) : null}
             </View>
 
-            <Pressable style={styles.button} onPress={handleStart} disabled={busy}>
+            {/* ★ 2026-08-04: 無料プランの残り時間が開始前にどこにも出ていなかった。
+                過去に9分30秒使っている人が、チーム名を入れ、家族にリンクを送り、開始を
+                押すと**普通に始まって30秒後に突然切断**される（家族側は試合開始30秒で
+                「終了しました」）。試合はこれから、という最悪の体験になる。
+                → 押す前に必ず見える位置に出し、残り60秒未満は赤字＋確認を出す。 */}
+            {plan === "free" ? (
+              <View style={styles.trialNotice}>
+                <Text
+                  style={[
+                    styles.trialNoticeText,
+                    trialRemainingAtStart < 60 && styles.trialNoticeWarn,
+                  ]}
+                >
+                  無料体験 残り {formatElapsed(trialRemainingAtStart)}
+                </Text>
+                {trialRemainingAtStart < 60 ? (
+                  <Text style={styles.trialNoticeSub}>
+                    まもなく配信が自動で終了します。続けるにはプランのご登録が必要です。
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
+            <Pressable
+              style={styles.button}
+              onPress={() => {
+                if (plan === "free" && trialRemainingAtStart > 0 && trialRemainingAtStart < 60) {
+                  Alert.alert(
+                    "無料体験の残りがわずかです",
+                    `残り ${formatElapsed(trialRemainingAtStart)} で配信が自動終了します。このまま開始しますか？`,
+                    [
+                      { text: "キャンセル", style: "cancel" },
+                      { text: "開始する", onPress: () => handleStart() },
+                    ],
+                  );
+                  return;
+                }
+                handleStart();
+              }}
+              disabled={busy}
+            >
               <Text style={styles.buttonText}>{busy ? "準備中..." : "配信開始"}</Text>
             </Pressable>
           </View>
@@ -2332,6 +2401,22 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   preShareTitle: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  preShareWarn: {
+    color: "#f4a300",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+    fontWeight: "700",
+  },
+  trialNotice: { marginTop: 18, alignItems: "center" },
+  trialNoticeText: { color: "#9ab", fontSize: 13, fontWeight: "700" },
+  trialNoticeWarn: { color: "#e63946" },
+  trialNoticeSub: {
+    color: "#e63946",
+    fontSize: 11,
+    marginTop: 4,
+    textAlign: "center",
+  },
   preShareBody: {
     color: "#9ab",
     fontSize: 12,
