@@ -85,6 +85,10 @@ function useDelayedBroadcast(
   return delayed;
 }
 
+// 開始前共有で受け取った人が、配信開始前にリンクを開いたときの待機設定。
+const WAIT_FOR_START_POLL_MS = 10_000; // 10秒ごとに配信を探す
+const WAIT_FOR_START_MAX_MS = 60 * 60_000; // 60分で打ち切り（電池対策）
+
 type Props = NativeStackScreenProps<RootStackParamList, "Watch">;
 
 // アプリ内ネイティブ視聴画面。LiveKit で配信者の映像を直接購読して全画面表示する
@@ -95,6 +99,8 @@ export function WatchScreen({ route, navigation }: Props) {
 
   const [broadcast, setBroadcast] = useState<WatchBroadcast | null>(null);
   const [loading, setLoading] = useState(true);
+  // 未開始待ちが上限に達したか（true で「見つかりません」に切り替える）
+  const [waitTimedOut, setWaitTimedOut] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   // 通報・ブロック用の自分のユーザーID（Play/App Store の UGC ポリシー対応）。
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -306,14 +312,43 @@ export function WatchScreen({ route, navigation }: Props) {
     );
   }
 
+  // 未作成コードの待機ポーリング（開始前共有・案C の受け皿）。
+  // 配信開始**前**にリンクを共有できるようにしたため、家族が開始前に開く経路が正常系になった。
+  // ここで「見つかりません」で終端すると開き直しを強いるので、10秒ごとに探し続け、
+  // 配信が始まったら自動で切り替える。上限 60 分（無期限ポーリングで電池を食わない）。
+  useEffect(() => {
+    if (loading || broadcast) return;
+    const startedAt = Date.now();
+    const id = setInterval(async () => {
+      if (Date.now() - startedAt > WAIT_FOR_START_MAX_MS) {
+        clearInterval(id);
+        setWaitTimedOut(true);
+        return;
+      }
+      const b = await getBroadcastByCode(shareCode).catch(() => null);
+      if (b) setBroadcast(b);
+    }, WAIT_FOR_START_POLL_MS);
+    return () => clearInterval(id);
+  }, [loading, broadcast, shareCode]);
+
   // ===== 配信が見つからない =====
   if (!broadcast) {
-    return (
+    // コードの打ち間違いと「まだ始まっていない」を画面上で区別できないため、両方に
+    // 当てはまる書き方にし、コードを併記して打ち間違いにも気づけるようにする。
+    return waitTimedOut ? (
       <Message
         title="配信が見つかりません"
-        sub={`共有コード「${shareCode}」に該当する配信はありません。`}
+        sub={`共有コード「${shareCode}」に該当する配信はありません。コードをご確認ください。`}
         onClose={close}
       />
+    ) : (
+      <Message
+        title="配信はまだ始まっていません"
+        sub={`共有コード「${shareCode}」\nこの画面のままお待ちください。始まると自動で映像に切り替わります。`}
+        onClose={close}
+      >
+        <ActivityIndicator color="#e63946" />
+      </Message>
     );
   }
 

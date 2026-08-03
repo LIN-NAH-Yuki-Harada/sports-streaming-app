@@ -158,6 +158,11 @@ function formatScoreboardLine(a: {
 const BACKGROUND_GRACE_MS = 180_000; // 中断(電話/回線/背景)から復帰を待つ総デッドライン(3分)
 const RECONNECT_COOLDOWN_MS = 6_000; // 作り直し試行の最小間隔(乱発=thrash防止)
 const RECONNECT_SETTLE_MS = 1_500; // 切断検知から最初の作り直しまでの待ち(回線/カメラ安定待ち)
+// 共有ボタンを押してから「背景化」が飛ぶまでの猶予。これを超える背景化は共有起点とみなさない。
+const SHARE_TRIGGER_WINDOW_MS = 5_000;
+// 共有起点の離席で配信を終了しない猶予。共有先(LINE)は配信中の端末負荷で重く、
+// 3分では送信作業中に配信が殺されうるため長めに取る（board.md 2026-07-15 の結論）。
+const SHARE_AWAY_GRACE_MS = 600_000; // 10分
 const RECONNECT_STABLE_MS = 5_000; // open が来てから「成功」と確定するまでの安定確認(瞬間openで誤確定しない)
 
 export function BroadcastScreen() {
@@ -186,6 +191,12 @@ export function BroadcastScreen() {
   // テニス系の進行スナップショット（ポイント→ゲーム→セット→マッチをエンジンが確定する）
   const [tennis, setTennis] = useState<TennisSnapshot>(initialTennisSnapshot());
 
+  // 開始前共有（案C / 2026-08-03 Android共有クレーム対策 ＋ board.md 2026-07-15「配信中にLINEを
+  // 開くと端末負荷で重い」への構造対策）。共有コードを配信開始**前**に確定させ、ready 画面から
+  // 共有できるようにする。配信中に共有シートを開かせないことが目的。
+  const [pendingShareCode, setPendingShareCode] = useState(() => generateShareCode());
+  const [preShared, setPreShared] = useState(false);
+
   // ライブ中のスコア／ピリオド（バレーは home/awayScore = 現在セットの得点）
   const [homeScore, setHomeScore] = useState(0);
   const [awayScore, setAwayScore] = useState(0);
@@ -205,6 +216,8 @@ export function BroadcastScreen() {
   // 画面ロック復帰時に LiveKit 接続を“作り直す(remount)”ための状態
   const [liveKey, setLiveKey] = useState(0); // 変えると LiveKitRoom が再マウント＝再接続
   const bgAtRef = useRef(0); // バックグラウンドに入った時刻
+  // 共有ボタンを押した時刻。直後の背景化を「共有起点」と判定するために使う（Android対策）。
+  const shareOpenedAtRef = useRef(0);
   const remountingRef = useRef(false); // 再接続(作り直し)モード中は onDisconnected/closed で終了させない
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interruptedRef = useRef(false); // 通話等で映像キャプチャ中断中＝復帰まで作り直しを待つ
@@ -458,7 +471,9 @@ export function BroadcastScreen() {
       // 異常終了で残った自分のゴースト配信を先に全終了（二重配信の防止）
       await sweepGhostBroadcasts(session.user.id).catch(() => {});
 
-      const code = generateShareCode();
+      // 開始前共有で配布済みのコードをそのまま使う（ここで採番し直すと、先に共有した
+      // リンクが死ぬ）。衝突時のみ後段で採番し直す。
+      const code = pendingShareCode;
       const initialPeriod = activePeriods[0];
 
       // スコア・セット・野球カウントを初期化
@@ -484,7 +499,18 @@ export function BroadcastScreen() {
         initialPeriod,
       });
       if (created.error) {
-        setMessage("配信作成エラー: " + created.error);
+        // share_code は unique 制約。開始前共有では採番し直すと共有済みリンクが死ぬため、
+        // 衝突したときだけ新しいコードに切り替え、共有し直しを明示的に促す。
+        if (/duplicate|unique|23505/i.test(created.error)) {
+          const fresh = generateShareCode();
+          setPendingShareCode(fresh);
+          setPreShared(false);
+          setMessage(
+            "視聴リンクが変わりました。お手数ですが、もう一度共有してから配信を開始してください。",
+          );
+        } else {
+          setMessage("配信作成エラー: " + created.error);
+        }
         setBusy(false);
         return;
       }
@@ -611,6 +637,7 @@ export function BroadcastScreen() {
     selectedTeamId,
     youtubeEligible,
     youtubeLiveOn,
+    pendingShareCode,
   ]);
 
   // 配信終了（停止ボタン / 接続エラー / 切断 のいずれからも呼ばれる。二重実行は endedRef でガード）
@@ -697,6 +724,9 @@ export function BroadcastScreen() {
       setRtmpUrl(null);
       transportRef.current = null;
       setShareCode(null);
+      // 次の試合用に開始前共有コードを採番し直す（前の試合のリンクを使い回さない）。
+      setPendingShareCode(generateShareCode());
+      setPreShared(false);
       if (msg) setMessage(msg);
       setPhase("ready");
     },
@@ -723,8 +753,16 @@ export function BroadcastScreen() {
     }
   }, []);
 
+  // 共有シートを開いた瞬間を記録する。Android では直後に必ず "background" が飛ぶため、
+  // AppState ハンドラがこれを見て「離席」ではなく「共有」と判定する。
+  const markShareOpened = useCallback(() => {
+    shareOpenedAtRef.current = Date.now();
+  }, []);
+
   const startRecovering = useCallback(
-    (reason: string) => {
+    // settleMs: 最初の作り直しまでの待ち時間の上書き。共有シートからの復帰は
+    // 回線もカメラも無事なので 0（即試行）を渡して復帰を速める。
+    (reason: string, settleMs?: number) => {
       if (endedRef.current) return;
       if (remountingRef.current) {
         // 既に再接続中＝デッドラインだけ延長（中断が重なった場合）。試行ループは継続中。
@@ -762,18 +800,33 @@ export function BroadcastScreen() {
       // 初回は少し待つ（回線/カメラの安定待ち）。通話中ならクールダウン後に。
       reconnectTimerRef.current = setTimeout(
         attempt,
-        interruptedRef.current ? RECONNECT_COOLDOWN_MS : RECONNECT_SETTLE_MS,
+        interruptedRef.current
+          ? RECONNECT_COOLDOWN_MS
+          : (settleMs ?? RECONNECT_SETTLE_MS),
       );
     },
     [finishLive, stopRecovering],
   );
 
   // 画面ロック/バックグラウンド対応（同じ配信を続ける＝視聴URL不変）:
-  // ・背景化した時刻を記録（共有シートは "inactive" なので発火しない）。
-  // ・復帰("active")時に 90秒以内なら LiveKit 接続を“作り直して(remount)”再開。
+  // ・背景化した時刻を記録し、復帰("active")時に接続を“作り直して(remount)”再開する。
   //   → setLiveKey で LiveKitRoom を再マウント＝サーバーへ確実に再 publish。
   //   → 作り直し中は remountingRef で onDisconnected を抑止（誤終了防止）。
-  // ・90秒超の離脱、または 15秒以内に onConnected が来なければ終了（視聴者を宙ぶらりんにしない）。
+  // ・BACKGROUND_GRACE_MS(3分)超の離脱は終了（視聴者を宙ぶらりんにしない）。
+  //
+  // ★ 2026-08-03 修正（Android実クレーム「共有中に画面が真っ暗」）:
+  //   旧コメントは「共有シートは "inactive" なので発火しない」と書いていたが、これは **iOS だけ**
+  //   の話だった。React Native の Android には "inactive"（前面だが操作不能）が存在せず
+  //   （AppState.js の型定義で inactive は @platform ios、Android ネイティブ側の定数も
+  //   active/background の2つのみ）、Android の共有シートは別Activityとして起動するため
+  //   **必ず "background" が飛ぶ**。結果、共有するたびに再接続が走り、共有先(LINE)に留まって
+  //   3分を超えると配信そのものが終了していた。
+  //
+  //   対策: 共有ボタン起点の離席だけ扱いを変える。
+  //   - 終了しない猶予を SHARE_AWAY_GRACE_MS まで延ばす（共有先で手間取っても配信を殺さない）
+  //   - 復帰後の作り直しを待たずに即試行する（回線断ではなくカメラは無事なので待つ理由がない）
+  //   ※ 「作り直し自体をやめる」ことはしない。Android はバックグラウンドでカメラが実際に
+  //     停止するため、再 publish しないと**黒が戻らなくなる**（今より悪化する）。
   useEffect(() => {
     if (phase !== "live") return;
     const sub = AppState.addEventListener("change", (state) => {
@@ -783,14 +836,20 @@ export function BroadcastScreen() {
         if (bgAtRef.current === 0) return;
         const awayMs = Date.now() - bgAtRef.current;
         bgAtRef.current = 0;
-        if (awayMs > BACKGROUND_GRACE_MS) {
+        // 共有ボタン直後の背景化か（押してから背景化までの猶予を見て判定）。
+        const sharedAt = shareOpenedAtRef.current;
+        shareOpenedAtRef.current = 0;
+        const fromShare =
+          sharedAt > 0 && Date.now() - awayMs - sharedAt < SHARE_TRIGGER_WINDOW_MS;
+        const graceMs = fromShare ? SHARE_AWAY_GRACE_MS : BACKGROUND_GRACE_MS;
+        if (awayMs > graceMs) {
           finishLive(
             "長時間の離脱で配信を終了しました。再開するには「配信開始」を押してください。",
           );
           return;
         }
         // 接続を作り直して同じ配信を再開（視聴URLは変わらない）
-        startRecovering("foreground");
+        startRecovering(fromShare ? "share" : "foreground", fromShare ? 0 : undefined);
       }
     });
     return () => sub.remove();
@@ -1132,6 +1191,7 @@ export function BroadcastScreen() {
         youtubeReadyAt={0}
         scoreSteps={sportKey === "basketball" ? [1, 2, 3] : [1]}
         tennisPoints={tennisDisplay}
+        onShareOpened={markShareOpened}
         baseballCount={sportKey === "baseball" ? baseball : null}
         onBall={onBall}
         onStrike={onStrike}
@@ -1237,6 +1297,7 @@ export function BroadcastScreen() {
           youtubeReadyAt={youtubeReadyAt}
           scoreSteps={sportKey === "basketball" ? [1, 2, 3] : [1]}
           tennisPoints={tennisDisplay}
+          onShareOpened={markShareOpened}
           baseballCount={sportKey === "baseball" ? baseball : null}
           onBall={onBall}
           onStrike={onStrike}
@@ -1480,6 +1541,39 @@ export function BroadcastScreen() {
               placeholderTextColor="#666"
             />
 
+            {/* 開始前共有（案C）。配信中に共有シートを開かせないための導線。
+                Android は共有シートで必ず背景化して映像が途切れるため、開始前に済ませてもらう。
+                受け取った家族は配信開始前にリンクを開くので、視聴側は「まだ始まっていません」
+                の待機画面で受ける（web/mobile とも実装済み）。 */}
+            <View style={styles.preShareCard}>
+              <Text style={styles.preShareTitle}>📲 視聴リンクを先に共有（おすすめ）</Text>
+              <Text style={styles.preShareBody}>
+                配信中にLINEを開くと端末が熱くなり、映像が乱れる原因になります。
+                Android では映像が一時的に途切れます。開始前の共有がおすすめです。
+              </Text>
+              <Pressable
+                style={styles.preShareBtn}
+                onPress={async () => {
+                  try {
+                    await Share.share({
+                      message: `このあと試合をライブ配信します！\n始まったらこのリンクで見られます\n${SITE_URL}/watch/${pendingShareCode}`,
+                    });
+                    // iOS は共有完了の検知が曖昧なので「シートを開いたら共有済み」とみなす。
+                    setPreShared(true);
+                  } catch {
+                    /* 共有シートを閉じただけ等は無視 */
+                  }
+                }}
+              >
+                <Text style={styles.preShareBtnText}>LINEなどで共有する</Text>
+              </Pressable>
+              {preShared ? (
+                <Text style={styles.preShareDone}>
+                  ✅ 共有しました・このまま配信を開始できます
+                </Text>
+              ) : null}
+            </View>
+
             <Pressable style={styles.button} onPress={handleStart} disabled={busy}>
               <Text style={styles.buttonText}>{busy ? "準備中..." : "配信開始"}</Text>
             </Pressable>
@@ -1615,6 +1709,9 @@ type ScoreControlsProps = {
   // テニス系のときのみ。ゲーム内ポイントの表示用文字列（非テニスは null）。
   // 非 null のとき ＋/− は「得点」ではなく「ポイント」を操作する。
   tennisPoints: { home: string; away: string; tb?: true } | null;
+  // 共有シートを開く直前に呼ぶ。Android は共有で必ず背景化するため、親が
+  // 「これは離席ではなく共有だ」と判定できるようにする。
+  onShareOpened: () => void;
   baseballCount: BaseballCount | null; // 野球のときのみ B/S/O＋走者
   onBall: () => void;
   onStrike: () => void;
@@ -1649,6 +1746,7 @@ function ScoreControls(props: ScoreControlsProps) {
     youtubeReadyAt,
     scoreSteps,
     tennisPoints,
+    onShareOpened,
     baseballCount,
     onBall,
     onStrike,
@@ -1677,11 +1775,15 @@ function ScoreControls(props: ScoreControlsProps) {
       if (youtubeShareUrl) {
         message += `\n\n📺 YouTubeでの視聴はこちら（配信後のアーカイブもこちらで確認できます）\n${youtubeShareUrl}`;
       }
+      // Android は共有シートが別Activityで開くため必ず背景化する。押した事実を先に親へ伝え、
+      // 「離席」ではなく「共有」として扱わせる（無いと復帰時に配信が作り直され、
+      //   共有先に3分留まると配信が終了してしまう）。
+      onShareOpened();
       await Share.share({ message });
     } catch {
       // 共有シートを閉じただけ等は無視
     }
-  }, [watchUrl, youtubeShareUrl]);
+  }, [watchUrl, youtubeShareUrl, onShareOpened]);
 
   const confirmStop = useCallback(() => {
     Alert.alert("配信を停止しますか？", "視聴者に配信が終了します。", [
@@ -2101,6 +2203,37 @@ const styles = StyleSheet.create({
   sportChipText: { color: "#ccc", fontSize: 14, fontWeight: "600" },
   sportChipTextActive: { color: "#fff" },
   ruleHint: { color: "#9ab", fontSize: 12, marginTop: 2 },
+  // 開始前共有カード（ready 画面・配信開始ボタンの直上）
+  preShareCard: {
+    marginTop: 22,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(230,57,70,0.35)",
+    backgroundColor: "rgba(230,57,70,0.07)",
+    padding: 14,
+  },
+  preShareTitle: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  preShareBody: {
+    color: "#9ab",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  preShareBtn: {
+    marginTop: 12,
+    backgroundColor: "#e63946",
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+  preShareBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  preShareDone: {
+    color: "#4ade80",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 8,
+    textAlign: "center",
+  },
   ytToggle: {
     borderWidth: 1,
     borderColor: "#444",
