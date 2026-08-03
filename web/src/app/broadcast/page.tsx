@@ -40,6 +40,11 @@ import {
 
 const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "テニス", "ソフトテニス", "陸上", "その他"];
 
+// Android 横向きゲートの逃げ道として案内する Play ストア URL。
+// ネイティブアプリ版は端末の向きを自前で扱うためこのゲート自体が存在しない。
+const PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=com.linnah.livespotch";
+
 // 配信時間を「X時間Y分Z秒」形式に整形（配信終了サマリモーダル表示用）
 function formatBroadcastDuration(sec: number): string {
   const h = Math.floor(sec / 3600);
@@ -1903,22 +1908,58 @@ function BroadcastPageInner() {
   // ===== 入力フォーム（ログイン済み）=====
   return (
     <div>
-      {/* Android 縦持ちゲート: 横向きになるまでオーバーレイで案内（自動解除） */}
+      {/* Android 縦持ちゲート: 横向きになるまでオーバーレイで案内（自動解除）。
+          判定は matchMedia("(orientation: portrait)") ＝「OS が画面を回したか」であり
+          端末を物理的に傾けたかではない。端末の自動回転がロックされていると永久に
+          portrait のままになるため、解除手順とアプリ版への逃げ道を必ず併記する
+          （2026-08-03 お問い合わせ: 案内が消えず配信不能という報告を受けて追加）。 */}
       {isAndroid && isPortraitMode && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center gap-5 px-8 text-center">
-          <svg className="w-16 h-16 text-[#e63946]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-            <rect x="5" y="2" width="14" height="20" rx="2" />
-            <path strokeLinecap="round" d="M12 18h.01" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l3 3-3 3M7 8l-3 3 3 3" />
-          </svg>
-          <div>
-            <h2 className="text-lg font-bold text-white">横向きにしてください</h2>
-            <p className="mt-2 text-sm text-gray-400 leading-relaxed">
-              Androidは横向き（ランドスケープ）で配信すると<br />
-              視聴者に正しい向きで映像が届きます。
-            </p>
+        <div className="fixed inset-0 z-50 bg-black overflow-y-auto">
+          <div className="min-h-full flex flex-col items-center justify-center gap-5 px-8 py-10 text-center">
+            <svg className="w-16 h-16 text-[#e63946] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+              <rect x="5" y="2" width="14" height="20" rx="2" />
+              <path strokeLinecap="round" d="M12 18h.01" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l3 3-3 3M7 8l-3 3 3 3" />
+            </svg>
+            <div>
+              <h2 className="text-lg font-bold text-white">横向きにしてください</h2>
+              <p className="mt-2 text-sm text-gray-400 leading-relaxed">
+                Androidは横向き（ランドスケープ）で配信すると<br />
+                視聴者に正しい向きで映像が届きます。
+              </p>
+            </div>
+            <p className="text-xs text-gray-600">端末を横向きにすると自動で次に進みます</p>
+
+            {/* 逃げ道①: 自動回転ロックの解除手順 */}
+            <div className="w-full max-w-xs rounded-lg border border-gray-800 bg-[#111] p-4 text-left">
+              <p className="text-xs font-bold text-white">横向きにしても画面が回らない場合</p>
+              <p className="mt-1 text-[11px] text-gray-500 leading-relaxed">
+                端末の「画面の自動回転」がオフになっています。
+              </p>
+              <ol className="mt-2.5 space-y-1.5 text-[11px] text-gray-400 leading-relaxed list-decimal list-inside">
+                <li>画面の上端から下に2回スワイプ</li>
+                <li>「自動回転」（機種により「縦向き固定」）をタップしてオンにする</li>
+                <li>端末を横向きに持つと、この画面は自動で消えます</li>
+              </ol>
+            </div>
+
+            {/* 逃げ道②: アプリ版はこのゲートが無いので案内する */}
+            <div className="w-full max-w-xs rounded-lg border border-[#e63946]/30 bg-[#e63946]/5 p-4">
+              <p className="text-xs font-bold text-white">アプリ版ならこの画面は出ません</p>
+              <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">
+                Android アプリ版はこの案内なしで配信を開始できます。
+                （撮影は横向きがおすすめです）
+              </p>
+              <a
+                href={PLAY_STORE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 block rounded-md bg-[#e63946] px-4 py-2.5 text-xs font-bold text-white text-center"
+              >
+                Google Play で開く
+              </a>
+            </div>
           </div>
-          <p className="text-xs text-gray-600">端末を横向きにすると自動で次に進みます</p>
         </div>
       )}
       <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
