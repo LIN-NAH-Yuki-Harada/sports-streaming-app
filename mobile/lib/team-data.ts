@@ -132,7 +132,7 @@ export async function createTeam(params: {
   description?: string;
 }): Promise<{ team?: FullTeam; error?: string }> {
   const token = await getAccessToken();
-  if (!token) return { error: "セッションがありません。再ログインしてください。" };
+  if (!token) return { error: "通信が不安定です。電波の良い場所で再度お試しください。（改善しない場合は一度ログインし直してください）" };
 
   try {
     const res = await fetch(`${SITE_URL}/api/teams`, {
@@ -164,7 +164,7 @@ export async function joinTeamByCode(
   inviteCode: string,
 ): Promise<{ team?: FullTeam; alreadyMember?: boolean; error?: string }> {
   const token = await getAccessToken();
-  if (!token) return { error: "セッションがありません。再ログインしてください。" };
+  if (!token) return { error: "通信が不安定です。電波の良い場所で再度お試しください。（改善しない場合は一度ログインし直してください）" };
 
   try {
     const res = await fetch(`${SITE_URL}/api/teams/join`, {

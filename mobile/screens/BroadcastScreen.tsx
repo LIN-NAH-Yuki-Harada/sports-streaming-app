@@ -181,6 +181,9 @@ export function BroadcastScreen() {
 
   // 試合セットアップ（配信開始前に入力）
   const insets = useSafeAreaInsets(); // Android では RN標準の SafeAreaView が効かないため必須
+  // 開始前画面の情報取得（プラン/チーム/YouTube可否/無料残量）が失敗したかどうか
+  const [setupLoadFailed, setSetupLoadFailed] = useState(false);
+  const [setupReloadKey, setSetupReloadKey] = useState(0);
   const [sportKey, setSportKey] = useState<SportKey>("soccer");
   const [homeTeam, setHomeTeam] = useState("ホーム");
   const [awayTeam, setAwayTeam] = useState("アウェイ");
@@ -283,6 +286,7 @@ export function BroadcastScreen() {
   // finishLive から「最新の得点状態」を参照するための ref（毎レンダー更新・依存配列を膨らませない）。
   // 終了時に、未確定の最終セット得点を set_results へ記録するのに使う。
   const liveScoreRef = useRef({
+    isTennis: !!tnRule,
     setBased,
     homeScore,
     awayScore,
@@ -293,6 +297,7 @@ export function BroadcastScreen() {
     rule: activeSetRule,
   });
   liveScoreRef.current = {
+    isTennis: !!tnRule,
     setBased,
     homeScore,
     awayScore,
@@ -359,11 +364,17 @@ export function BroadcastScreen() {
       } else {
         setTrialRemainingAtStart(0);
       }
-    })().catch(() => {});
+    })().catch(() => {
+      // ★ 2026-08-04: ここで黙って握り潰していたため、弱電波でプラン/チームの取得に
+      //   失敗すると**チーム選択欄が出ないまま**になり、配信者は気づかずに個人配信として
+      //   開始してしまう（チームの試合一覧に出ない）。無料残量も 0 のまま表示される。
+      //   → 取得できなかったことを画面に出し、やり直せるようにする。
+      if (!cancelled) setSetupLoadFailed(true);
+    });
     return () => {
       cancelled = true;
     };
-  }, [phase]);
+  }, [phase, setupReloadKey]);
 
   // 競技/ルールを変えたら、最初のピリオドに合わせる（ready 画面で選択時）
   useEffect(() => {
@@ -483,7 +494,7 @@ export function BroadcastScreen() {
       const { data: sessionData } = await supabase.auth.getSession();
       const session = sessionData.session;
       if (!session) {
-        setMessage("セッションがありません。再ログインしてください。");
+        setMessage("通信が不安定です。電波の良い場所で再度お試しください。（改善しない場合は一度ログインし直してください）");
         setBusy(false);
         return;
       }
@@ -726,6 +737,25 @@ export function BroadcastScreen() {
             away_score: ls.awayScore,
             period: ls.period,
           }).catch(() => {});
+
+          // ★ 2026-08-04: テニス系の後始末（Web 版は既にやっている）。
+          //   ①途中で止めると**進行中セットのゲーム数が内訳に残らない**ので追記する。
+          //   ②終了後も game_points / point_label が DB に残り、視聴側や履歴に
+          //     「ポイント 40-30」「マッチポイント」が出しっぱなしになるので消す。
+          if (ls.isTennis) {
+            if (ls.homeScore > 0 || ls.awayScore > 0) {
+              await updateScore(shareCode, {
+                set_results: [
+                  ...ls.setResults,
+                  { home: ls.homeScore, away: ls.awayScore },
+                ],
+              }).catch(() => {});
+            }
+            await updateScore(shareCode, {
+              game_points: null,
+              point_label: null,
+            }).catch(() => {});
+          }
         }
       }
       if (shareCode) await endBroadcast(shareCode).catch(() => {});
@@ -750,7 +780,8 @@ export function BroadcastScreen() {
         if (used > 0) {
           const { data } = await supabase.auth.getSession();
           const tok = data.session?.access_token;
-          if (tok) await consumeTrial(tok, used).catch(() => {});
+          // 配信IDを渡すとサーバー側で「その配信が実在するか」を検証できる（不正加算の防止）。
+        if (tok) await consumeTrial(tok, used, broadcastIdRef.current ?? undefined).catch(() => {});
         }
       }
       setToken(null);
@@ -1073,16 +1104,24 @@ export function BroadcastScreen() {
     setPeriod((p) => nextPeriodIn(activePeriods, p));
   }, [activePeriods]);
   const onBall = useCallback(() => setBaseball((c) => addBall(c)), []);
+  // ★ 2026-08-04: ストライク/アウトだけ「state を直接読んで書き戻す」書き方だったため、
+  //   素早く連打すると**同じ古い値を2回読んで1回分が落ちる**（ボールと走者は関数形式で
+  //   書かれていて安全）。thirdOut を外で使う必要があるため関数形式にはできないので、
+  //   ref に最新値を持って即時反映させることで取りこぼしを防ぐ。
+  const baseballRef = useRef(baseball);
+  baseballRef.current = baseball;
   const onStrike = useCallback(() => {
-    const { count, thirdOut } = addStrike(baseball);
+    const { count, thirdOut } = addStrike(baseballRef.current);
+    baseballRef.current = count; // 次の連打が古い値を読まないよう即時反映
     setBaseball(count);
     if (thirdOut) advanceInning();
-  }, [baseball, advanceInning]);
+  }, [advanceInning]);
   const onOut = useCallback(() => {
-    const { count, thirdOut } = recordOut(baseball);
+    const { count, thirdOut } = recordOut(baseballRef.current);
+    baseballRef.current = count;
     setBaseball(count);
     if (thirdOut) advanceInning();
-  }, [baseball, advanceInning]);
+  }, [advanceInning]);
   const onRunner = useCallback(
     (base: keyof BaseballRunners) => setBaseball((c) => toggleRunner(c, base)),
     [],
@@ -1643,6 +1682,21 @@ export function BroadcastScreen() {
               placeholder="〇〇カップ など"
               placeholderTextColor="#666"
             />
+
+            {setupLoadFailed ? (
+              <View style={styles.setupErrorCard}>
+                <Text style={styles.setupErrorText}>
+                  プラン・チーム情報を取得できませんでした。このまま開始すると、チームに
+                  紐づかない個人配信になります。
+                </Text>
+                <Pressable
+                  style={styles.setupErrorBtn}
+                  onPress={() => setSetupReloadKey((k) => k + 1)}
+                >
+                  <Text style={styles.setupErrorBtnText}>再読み込み</Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             {/* 開始前共有（案C）。配信中に共有シートを開かせないための導線。
                 Android は共有シートで必ず背景化して映像が途切れるため、開始前に済ませてもらう。
@@ -2408,6 +2462,24 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontWeight: "700",
   },
+  setupErrorCard: {
+    marginTop: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(244,163,0,0.5)",
+    backgroundColor: "rgba(244,163,0,0.08)",
+    padding: 12,
+  },
+  setupErrorText: { color: "#f4a300", fontSize: 12, lineHeight: 18 },
+  setupErrorBtn: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  setupErrorBtnText: { color: "#fff", fontWeight: "700", fontSize: 12 },
   trialNotice: { marginTop: 18, alignItems: "center" },
   trialNoticeText: { color: "#9ab", fontSize: 13, fontWeight: "700" },
   trialNoticeWarn: { color: "#e63946" },

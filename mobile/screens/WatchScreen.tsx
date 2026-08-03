@@ -10,7 +10,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useKeepAwake } from "expo-keep-awake";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import {
   AudioSession,
@@ -85,9 +85,26 @@ function useDelayedBroadcast(
   return delayed;
 }
 
+// 条件付きのスリープ抑止。expo-keep-awake の useKeepAwake は無条件なので、
+// 命令APIを effect で包んで「必要な間だけ」抑止する。
+function useKeepAwakeWhile(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
+    return () => {
+      deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
+    };
+  }, [active]);
+}
+const KEEP_AWAKE_TAG = "spotch-watch";
+
 // 開始前共有で受け取った人が、配信開始前にリンクを開いたときの待機設定。
 const WAIT_FOR_START_POLL_MS = 10_000; // 10秒ごとに配信を探す
-const WAIT_FOR_START_MAX_MS = 60 * 60_000; // 60分で打ち切り（電池対策）
+// ★ 2026-08-04: 60分は長すぎた。共有コードの**手打ちはアプリの主要導線**で、打ち間違えると
+//   1.1.4 では即「見つかりません」だったのに、待機画面の導入で**60分待たされる**ようになった。
+//   開始前共有の受け皿としては5分あれば足り（配信者は開始直前に共有する）、打ち間違いにも
+//   早く気づける。あわせて待機画面に「コードが違う可能性」を併記する。
+const WAIT_FOR_START_MAX_MS = 5 * 60_000; // 5分で打ち切り
 
 type Props = NativeStackScreenProps<RootStackParamList, "Watch">;
 
@@ -95,9 +112,12 @@ type Props = NativeStackScreenProps<RootStackParamList, "Watch">;
 // （Safari に飛ばさないのでブラウザのバーが出ない／スコアは ScoreboardOverlay で重ねる）。
 export function WatchScreen({ route, navigation }: Props) {
   const { shareCode } = route.params;
-  useKeepAwake(); // 視聴中はスリープさせない
 
   const [broadcast, setBroadcast] = useState<WatchBroadcast | null>(null);
+  // ★ 2026-08-04: 無条件で抑止していたため、**待機画面のまま画面が消えない**。
+  //   試合30分前にリンクを開いて車内や屋外で待つ祖父母がいるので電池を空にしかねない。
+  //   → 映像が出ている（配信が live）間だけ抑止する。
+  useKeepAwakeWhile(broadcast?.status === "live");
   const [loading, setLoading] = useState(true);
   // 未開始待ちが上限に達したか（true で「見つかりません」に切り替える）
   const [waitTimedOut, setWaitTimedOut] = useState(false);
@@ -350,7 +370,7 @@ export function WatchScreen({ route, navigation }: Props) {
     ) : (
       <Message
         title="配信はまだ始まっていません"
-        sub={`共有コード「${shareCode}」\nこの画面のままお待ちください。始まると自動で映像に切り替わります。`}
+        sub={`共有コード「${shareCode}」\nこの画面のままお待ちください。始まると自動で映像に切り替わります。\n（コードが違う可能性もあります）`}
         onClose={close}
       >
         <ActivityIndicator color="#e63946" />

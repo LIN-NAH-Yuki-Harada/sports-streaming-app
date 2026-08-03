@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -154,7 +155,15 @@ export default function App() {
     );
   }
 
-  return <SafeAreaProvider>{content}</SafeAreaProvider>;
+  return (
+    <SafeAreaProvider>
+      {/* ★ 2026-08-04: 背景が黒（#0a0a0a）なのにステータスバーの文字色を指定していなかった。
+          Android は既定が暗い文字なので**時刻・電池・電波が読めない**。SafeArea の修正で
+          上端が正しく空くと、この読めなさがかえって目立つためセットで対応する。 */}
+      <StatusBar style="light" />
+      {content}
+    </SafeAreaProvider>
+  );
 }
 
 const styles = StyleSheet.create({

@@ -131,7 +131,7 @@ export function MyPageScreen() {
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
       if (!token) {
-        Alert.alert("エラー", "セッションがありません。再ログインしてください。");
+        Alert.alert("エラー", "通信が不安定です。電波の良い場所で再度お試しください。（改善しない場合は一度ログインし直してください）");
         return;
       }
       const res = await fetch(`${SITE_URL}/api/account/delete`, {
