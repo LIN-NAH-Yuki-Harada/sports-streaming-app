@@ -14,7 +14,7 @@ import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Purchases, { type PurchasesPackage } from "react-native-purchases";
 import { supabase } from "../lib/supabase";
-import { waitForPaidPlan } from "../lib/plan";
+import { fetchPlan, waitForPaidPlan } from "../lib/plan";
 import { RC_SUPPORTED, ensureRcIdentity } from "../lib/revenuecat";
 import { SITE_URL } from "../config";
 
@@ -63,21 +63,36 @@ export function PaywallScreen() {
       // 現在の契約状況（プラン／課金元）を取得する。取れなかった場合は購入を止めない
       // （安全側＝買えなくなるより二重課金の警告が出ない方がまし、という判断ではなく、
       //   取得失敗で購入不能にすると正当な新規購入まで塞ぐため）。
+      // 🔴 profiles の stripe_subscription_id / iap_product_id は **service_role 専用**で、
+      //    クライアント(authenticated)には列レベル GRANT されていない。
+      //    PostgREST は1列でも権限が無いとクエリ**全体**を 42501 で落とすため、それらを
+      //    混ぜて select すると plan まで取れず prof=null になり、下の出し分けが全て
+      //    素通りして「このプランを購入」に落ちる＝二重課金ガードが 100% 不発になる。
+      //    （本番へ実際にリクエストして確認: select=plan 単独でも 42501、
+      //      select=display_name は 200。許可列だけを指定すること）
+      //    → GRANT 済みの plan は fetchPlan で、課金元は RevenueCat から判定する。
       if (uid) {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("plan, stripe_subscription_id, iap_product_id")
-          .eq("id", uid)
-          .single();
-        if (!cancelled && prof) {
-          const pr = prof as {
-            plan: "free" | "broadcaster" | "team" | null;
-            stripe_subscription_id: string | null;
-            iap_product_id: string | null;
-          };
-          setCurrentPlan(pr.plan ?? "free");
-          setBilledViaStripe(!!pr.stripe_subscription_id);
-          setBilledViaIap(!!pr.iap_product_id);
+        const plan = await fetchPlan(uid);
+        if (!cancelled) setCurrentPlan(plan);
+        // 課金元の判定は有料プランのときだけ行う（無料ユーザーに余計な通信をしない）。
+        if (plan !== "free" && RC_SUPPORTED) {
+          try {
+            // ★ getCustomerInfo は「いま RevenueCat にログインしている人」を返す。
+            //    ensureRcIdentity を先に通さないと匿名ユーザーの情報を見てしまい、
+            //    IAP 課金者を「Webで契約中」と誤判定する（購入時 :133 と同じ手順）。
+            const identityOk = await ensureRcIdentity(uid);
+            const info = await Purchases.getCustomerInfo();
+            const hasIap = Object.keys(info.entitlements.active).length > 0;
+            // 本人として照合できたときだけ信用する。照合できなければ両方 false のまま
+            //  ＝「ご利用中のプラン」の出し分けだけが効く安全な状態に留める。
+            if (!cancelled && identityOk) {
+              setBilledViaIap(hasIap);
+              // 有料プランなのに RevenueCat に購読が無い ＝ Web(Stripe) 経由。
+              setBilledViaStripe(!hasIap);
+            }
+          } catch {
+            /* 課金元が判定できなくても購入は塞がない（正当な新規購入を守る） */
+          }
         }
       }
       if (!RC_SUPPORTED) {
