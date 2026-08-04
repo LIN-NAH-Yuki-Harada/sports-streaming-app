@@ -106,6 +106,15 @@ const WAIT_FOR_START_POLL_MS = 10_000; // 10秒ごとに配信を探す
 //   早く気づける。あわせて待機画面に「コードが違う可能性」を併記する。
 const WAIT_FOR_START_MAX_MS = 5 * 60_000; // 5分で打ち切り
 
+// HLS 視聴の自動復帰ウォッチドッグ（Web 版 hls-player.tsx と同じ考え方・同じ値）。
+const WATCHDOG_TICK_MS = 2000; // 監視間隔（web: STALL_TICK_MS）
+const STALL_LIMIT = 3; // 約6秒 currentTime が進まなければ再同期（web: STALL_LIMIT）
+// 「エラーにならず loading のまま戻ってこない」用。iOS はバッファ枯渇で status が
+// error ではなく loading になるため、error 監視だけでは永久スピナーになる。
+const LOADING_LIMIT = 5; // 約10秒 loading が続いたら再同期
+// 再同期は m3u8 の読み直しなので数秒かかる。その間の再判定を止めて連打を防ぐ。
+const RESYNC_COOLDOWN_MS = 10_000;
+
 type Props = NativeStackScreenProps<RootStackParamList, "Watch">;
 
 // アプリ内ネイティブ視聴画面。LiveKit で配信者の映像を直接購読して全画面表示する
@@ -517,15 +526,25 @@ function HlsStage({
   // readyToPlay へ遷移し終えた場合にオーバーレイが消えなくなるレースがある）。
   const [playerStatus, setPlayerStatus] = useState<string>(() => player.status);
 
+  // 直近に再同期した時刻。復帰はロードに数秒かかるので、その間ウォッチドッグが
+  // 「まだ止まっている」と誤判定して連打しないためのクールダウンに使う。
+  const lastResyncAtRef = useRef(0);
+
   // ライブ先頭へ再同期して再生し直す（エラー復帰・背景復帰・ストール共通）。
   // replace は同期版だと iOS でメインスレッドロード＋非推奨警告のため replaceAsync。
   const resync = useCallback(() => {
-    player
-      .replaceAsync(url)
-      .then(() => player.play())
-      .catch(() => {
-        /* 解放済み・ロード失敗は無視（次のリトライ/statusChangeに任せる） */
-      });
+    lastResyncAtRef.current = Date.now();
+    try {
+      player
+        .replaceAsync(url)
+        .then(() => player.play())
+        .catch(() => {
+          /* 解放済み・ロード失敗は無視（次のリトライ/statusChangeに任せる） */
+        });
+    } catch {
+      /* プレイヤー解放済み。expo-video は解放後のメソッド呼び出しで**同期例外**を
+         投げるため .catch() では拾えない。タイマーから呼ばれるので握りつぶす。 */
+    }
   }, [player, url]);
 
   // エラー時の自動リトライ（3秒間隔・アンマウントで停止）。
@@ -558,33 +577,88 @@ function HlsStage({
 
   // ストール監視（Web 版 hls-player の watchdog 相当）。配信者の回線切替などで
   // セグメント列が不連続になると、エラーにならず再生位置だけ止まることがある。
-  // currentTime が 3 回連続（約6秒）進んでいなければライブ先頭へ再同期する。
+  //
+  // ★ 2026-08-05: timeUpdate 駆動をやめて setInterval 駆動にした。
+  //   iOS の timeUpdate は AVPlayer.addPeriodicTimeObserver 実装で、Apple の仕様は
+  //   「interpreted according to the timeline of the current item」＝**再生タイムライン駆動**。
+  //   つまり再生が止まるとイベント自体が来なくなる（止まる瞬間に1回来るだけ）。
+  //   「止まったことを、止まると来なくなるイベントで検知する」構造だったため、
+  //   iPhone ではストール検知が**原理的に発火しなかった**。
+  //   （Android の timeUpdate は Handler の実時間ループなので発火する＝この穴は iOS 限定。
+  //     2026-08-04 の「背面で通信を食う」も Android だけで起きたのはこのため。）
+  //   実時間の setInterval から currentTime を読みに行けば両OSで検知できる。
+  //   あわせて「エラーにならず loading のまま戻ってこない」も同じループで拾う
+  //   （iOS はバッファ枯渇で status が error ではなく loading になるため、
+  //     statusChange の error 監視だけでは 30 秒後の手動「再読込」まで復帰しない）。
   useEffect(() => {
-    player.timeUpdateEventInterval = 2;
     let lastTime = -1;
     let stuck = 0;
-    const sub = player.addListener("timeUpdate", ({ currentTime }) => {
-      // ★ 2026-08-04: アプリが前面にいないときは何もしない。
-      //   Android は**バックグラウンドでも timeUpdate が届き続ける**ため、再生が止まった
-      //   ことを「ストールした」と誤判定し、resync() → play() で**裏で再生を再開**してしまう。
-      //   祖父母が視聴中に LINE へ切り替えると、画面に出ていないのに通信量と電池を食い続け、
-      //   1〜2時間で数百MB〜GB級になる（音が鳴り出すこともある）。
-      //   iPhone は前面を外れると再生自体が止まるので起きない＝iOS前提の穴。
-      if (AppState.currentState !== "active") return;
-      if (currentTime === lastTime) {
+    let loadingTicks = 0;
+    let everPlayed = false;
+    const id = setInterval(() => {
+      // アプリが前面にいないときは何もしない。前面でないのに resync() → play() すると
+      // 画面に出ていないのに通信量と電池を食い続ける（2026-08-04 の Android 事案）。
+      if (AppState.currentState !== "active") {
+        stuck = 0;
+        loadingTicks = 0;
+        return;
+      }
+      let status: string;
+      let time: number;
+      let playing: boolean;
+      try {
+        status = player.status;
+        time = player.currentTime;
+        playing = player.playing;
+      } catch {
+        return; // 解放済みプレイヤー（アンマウント直後など）
+      }
+      if (status === "readyToPlay") everPlayed = true;
+
+      // 再同期直後はロードに数秒かかる。その間は判定しない（連打・無限リロード防止）。
+      if (Date.now() - lastResyncAtRef.current < RESYNC_COOLDOWN_MS) {
+        stuck = 0;
+        loadingTicks = 0;
+        lastTime = time;
+        return;
+      }
+
+      // error は既存の statusChange リトライ（3秒）に任せる。idle は再生対象なし。
+      if (status === "error" || status === "idle") {
+        stuck = 0;
+        loadingTicks = 0;
+        lastTime = time;
+        return;
+      }
+
+      if (status === "loading") {
+        stuck = 0;
+        // 初回ロードは弱電波だと10秒以上かかる。途中で叩き落とすと永久にロードできなく
+        // なるので、**一度でも再生できた後**の loading だけ復帰対象にする。
+        loadingTicks = everPlayed ? loadingTicks + 1 : 0;
+        if (loadingTicks >= LOADING_LIMIT) {
+          loadingTicks = 0;
+          resync();
+        }
+        return;
+      }
+
+      // ここから status === "readyToPlay"
+      loadingTicks = 0;
+      // 視聴画面に一時停止ボタンは無いので「前面なのに再生していない」も異常扱いにする
+      // （背面復帰の play() が失敗して静止画のまま固まるケースの受け皿）。
+      if (!playing || time <= lastTime + 0.01) {
         stuck++;
-        if (stuck >= 3) {
+        if (stuck >= STALL_LIMIT) {
           stuck = 0;
           resync();
         }
       } else {
         stuck = 0;
-        lastTime = currentTime;
       }
-    });
-    return () => {
-      sub.remove();
-    };
+      lastTime = time;
+    }, WATCHDOG_TICK_MS);
+    return () => clearInterval(id);
   }, [player, resync]);
 
   // 30秒再生が始まらなければ手動リカバリ導線（永久スピナー回避）。
