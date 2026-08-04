@@ -12,7 +12,8 @@ export const runtime = "nodejs";
  * 戻り値（成功）: { rtmpUrl, playbackUrl, path }
  *   - rtmpUrl  = rtmp://<STREAM_HOST>/live/<shareCode>?user=<USER>&pass=<SECRET>
  *                （★この完全URLをそのまま RtmpPublisher.streamUrl に渡す。2要素パス必須＝下記参照）
- *   - playbackUrl = https://<STREAM_HOST>/live/<shareCode>/index.m3u8（視聴・共有コードで誰でも）
+ *   - playbackUrl = https://<STREAM_PLAYBACK_HOST ?? STREAM_HOST>/live/<shareCode>/index.m3u8
+ *                （視聴・共有コードで誰でも。CDN 前段を置く場合だけ publish と別ホストになる）
  *
  * 認証モデル: MediaMTX internal auth。視聴(read)は誰でも / 配信(publish)はパスワード必須。
  *   SECRET は MediaMTX 設定と同じ値を Vercel env(STREAM_PUBLISH_SECRET)に置く。
@@ -39,6 +40,13 @@ export async function POST(request: Request) {
   //    nil を返して native 側が "invalid url" で落ちる（2026-06-25 実機で発生）。
   //    host/secret/user すべて trim して空白混入を無害化する。
   const host = process.env.STREAM_HOST?.trim();
+  //    視聴(HLS)だけを CDN 前段(CloudFront)へ逃がすためのホスト。未設定なら従来どおり
+  //    STREAM_HOST を使う（＝env を入れるまで挙動は 1bit も変わらない）。
+  //    ★ RTMP publish 側は必ず STREAM_HOST（VPS直・1935番）のまま。CDN は HTTP/HTTPS しか
+  //      通せないため、ここを取り違えると publish が CDN の 1935 番に繋ぎに行って iOS 配信が
+  //      全滅する（しかも provision は 200 を返すので LiveKit フォールバックも効かない）。
+  //    ★ `||` で空文字も host に落とす（上記の空白混入対策と同じ理由）。
+  const playbackHost = process.env.STREAM_PLAYBACK_HOST?.trim() || host;
   const secret = process.env.STREAM_PUBLISH_SECRET?.trim();
   const pubUser = (process.env.STREAM_PUBLISH_USER || "spotch").trim();
   if (!host || !secret) {
@@ -90,7 +98,7 @@ export async function POST(request: Request) {
   //    視聴 HLS も同じパス（https://host/live/<code>/index.m3u8）。Caddy は全パス転送なので変更不要。
   const streamPath = `live/${broadcast.share_code}`;
   const rtmpUrl = `rtmp://${host}/${streamPath}?user=${encodeURIComponent(pubUser)}&pass=${encodeURIComponent(secret)}`;
-  const playbackUrl = `https://${host}/${streamPath}/index.m3u8`;
+  const playbackUrl = `https://${playbackHost}/${streamPath}/index.m3u8`;
 
   // 7. 視聴側が HLS URL を見つけられるよう broadcasts に保存（secret は保存しない）。
   //    自前RTMP経路は端末の焼き込み(プレーンテキスト)をやめ、視聴側で CSS の綺麗な
