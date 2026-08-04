@@ -4,8 +4,12 @@
     "slug": "mobile",
     "owner": "live-spotch",
     "scheme": "spotch",
-    "version": "1.1.5",
+    "version": "1.1.6",
     "orientation": "default",
+    "//locales": "★App Store の言語が「EN 英語」と表示される問題の対策。infoPlist の2キーだけでは不十分で、Apple は .lproj フォルダから対応言語を判定するため、Expo の locales 機構で ja.lproj を実際に生成させる必要がある（prebuild して find ios -name '*.lproj' が0件であることを確認済み）。※ Expo の Locales プラグインは中身が空の JSON を早期 return で無視するので、ja.json には必ず1キー以上入れること。",
+    "locales": {
+      "ja": "./locales/ja.json"
+    },
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
@@ -15,7 +19,10 @@
       "infoPlist": {
         "NSCameraUsageDescription": "試合をライブ配信するためにカメラを使用します",
         "NSMicrophoneUsageDescription": "試合音声を配信するためにマイクを使用します",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDevelopmentRegion": "ja",
+        "CFBundleLocalizations": ["ja"],
+        "NSLocalNetworkUsageDescription": "同じWi-Fi上の配信機器を探すために使用します"
       },
       "bitcode": false
     },
