@@ -2295,10 +2295,15 @@ function ScoreControls(props: ScoreControlsProps) {
 
       {/* 📢 お知らせ入力（モーダル）。撮影中に開くため、閉じる導線を必ず2つ用意する
           （背景タップ＋キャンセル）。KeyboardAvoidingView でキーボードに隠れないようにする。 */}
+      {/* ★ supportedOrientations 必須（iOS）: RN の Modal は既定が ["portrait"] のため、
+          これが無いと**横持ちで撮影中に📢を開いた瞬間、モーダルだけ縦向きに提示され
+          画面ごと回ったように見える**（2026-08-05 実利用で報告）。配信は横持ちが基本なので
+          landscape を必ず許可する。Android には効かない prop なので無害。 */}
       <Modal
         visible={noticeOpen}
         transparent
         animationType="fade"
+        supportedOrientations={["portrait", "landscape"]}
         onRequestClose={() => setNoticeOpen(false)}
       >
         <Pressable

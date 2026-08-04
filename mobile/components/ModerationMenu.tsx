@@ -98,10 +98,14 @@ export function ModerationMenu({
   }
 
   return (
+    // ★ supportedOrientations 必須（iOS）: 既定が ["portrait"] なので、横持ち視聴中に
+    //   通報シートを開くと画面ごと縦に回ったように見える。UGC審査で見られる導線なので
+    //   ここが不自然に見えるのは避ける。Android には効かない prop なので無害。
     <Modal
       visible={visible}
       transparent
       animationType="fade"
+      supportedOrientations={["portrait", "landscape"]}
       onRequestClose={onClose}
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
