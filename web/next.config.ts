@@ -7,8 +7,13 @@ import type { NextConfig } from "next";
 //   - img    : Google アバター(lh3) / Supabase / Meta Pixel ビーコン
 //   - media  : LiveKit(blob) ほか
 // Stripe.js はブラウザで読み込まない（Checkout はサーバー生成 URL へのリダイレクト）ため CSP 不要。
-// ⚠️ 強制(enforce)前に必ず追加すること: 自前配信 HLS(MediaMTX/VPS) の再生オリジンを
-//    connect-src と media-src に加える（現状は動的URLのため Report-Only の違反レポートで確定させる）。
+// 自前配信 HLS（2026-08-04 追加）: hls.js は XHR で取りに行くので connect-src、Safari /
+//   expo-video のネイティブ再生は media-src が要る。VPS直(live.live-spotch.com)と
+//   CDN前段(CloudFront)の**両方**を許可する。
+//   ★両方を並べるのが要点: CDN障害時に stream_playback_url を VPS直へ戻すのが唯一の
+//     緊急ロールバック手段なので、enforce 後にそのロールバック先が塞がっていてはならない。
+//   TODO: CloudFront は今 `*.cloudfront.net` で広く許可している。ディストリビューションが
+//     確定したら `https://dXXXXXXXX.cloudfront.net` にピン留めする。
 const CSP_REPORT_ONLY = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -18,8 +23,8 @@ const CSP_REPORT_ONLY = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://lh3.googleusercontent.com https://*.supabase.co https://www.facebook.com",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.livekit.cloud wss://*.livekit.cloud https://*.vercel-insights.com https://www.facebook.com https://connect.facebook.net",
-  "media-src 'self' blob: https://*.livekit.cloud",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.livekit.cloud wss://*.livekit.cloud https://*.vercel-insights.com https://www.facebook.com https://connect.facebook.net https://live.live-spotch.com https://*.cloudfront.net",
+  "media-src 'self' blob: https://*.livekit.cloud https://live.live-spotch.com https://*.cloudfront.net",
   "frame-src 'self' https://www.facebook.com",
   "worker-src 'self' blob:",
 ].join("; ");
