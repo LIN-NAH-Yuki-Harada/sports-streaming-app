@@ -287,6 +287,10 @@ export function BroadcastScreen() {
   // 終了時に、未確定の最終セット得点を set_results へ記録するのに使う。
   const liveScoreRef = useRef({
     isTennis: !!tnRule,
+    // ソフトテニスだけ「マッチ確定時にエンジンが setResults へ push するのに
+    // hGames/aGames を 0 に戻さない」ため、終了時の追記が二重になる。その判定に使う。
+    tennisKind: tnRule?.kind ?? null,
+    tennisMatchWon: tennis.matchWon,
     setBased,
     homeScore,
     awayScore,
@@ -298,6 +302,8 @@ export function BroadcastScreen() {
   });
   liveScoreRef.current = {
     isTennis: !!tnRule,
+    tennisKind: tnRule?.kind ?? null,
+    tennisMatchWon: tennis.matchWon,
     setBased,
     homeScore,
     awayScore,
@@ -348,6 +354,20 @@ export function BroadcastScreen() {
         fetchMyProfile(uid),
       ]);
       if (cancelled) return;
+      // ★ 2026-08-05: lib の fetch* は **throw せず既定値を返す**（fetchPlan→"free" /
+      //   fetchMyTeams→[] / fetchMyProfile→null）。supabase-js もネットワーク失敗を
+      //   例外にせず {data:null,error} で返すため、下の .catch は実際には呼ばれず、
+      //   ede9a17 で入れた「取得失敗の警告」は**デッドコード**だった。
+      //   それどころか plan="free" が確定し、有料契約者の開始前画面に
+      //   「無料体験 残り10:00」が出てチーム選択欄も消え、個人配信として始まってしまう。
+      //   → 戻り値で判定する。profiles の行はサインアップ時に必ず作られるので、
+      //     null は「読めなかった」と断定できる（3本の中で最も確実な失敗指標）。
+      if (!profile) {
+        setSetupLoadFailed(true);
+        return; // 誤った既定値（free / チーム無し）を画面に適用しない
+      }
+      // 再読み込みで復旧したときに警告カードを必ず消す（従来は true のままだった）。
+      setSetupLoadFailed(false);
       setPlan(p);
       setMyTeams(teams);
       // YouTube同時配信は「チームプラン＋YouTube連携済み(channel_id)＋連携ON」のときだけ。
@@ -743,7 +763,14 @@ export function BroadcastScreen() {
           //   ②終了後も game_points / point_label が DB に残り、視聴側や履歴に
           //     「ポイント 40-30」「マッチポイント」が出しっぱなしになるので消す。
           if (ls.isTennis) {
-            if (ls.homeScore > 0 || ls.awayScore > 0) {
+            // ★ 2026-08-05: ソフトテニスで最後まで進めた場合は**追記しない**。
+            //   エンジンはマッチ確定時に setResults へ push する一方 hGames/aGames を
+            //   0 に戻さない（硬式のセット確定側は戻す）。そのまま追記すると
+            //   set_results が ["3-1", "3-1"] と二重になり、Web のスケジュール画面が
+            //   全件描画するため記録が2行出る。＝ソフトテニス専用の抜け。
+            const alreadyRecorded =
+              ls.tennisKind === "soft" && !!ls.tennisMatchWon;
+            if (!alreadyRecorded && (ls.homeScore > 0 || ls.awayScore > 0)) {
               await updateScore(shareCode, {
                 set_results: [
                   ...ls.setResults,
@@ -1036,22 +1063,35 @@ export function BroadcastScreen() {
   // ゲーム/セット/マッチの確定はエンジン（lib/tennis.ts）が自動判定するので、
   // ここは返ってきたスナップショットを既存の列（得点=ゲーム数 / セット数 / set_results）へ
   // 写すだけ。DB 反映は既存のスコア同期 effect が拾う。
+  // テニスの状態を画面の各 state へ反映する（＋と Undo の両方から使う共通処理）。
+  const applyTennisSnapshot = useCallback((s: TennisSnapshot) => {
+    setTennis(s);
+    setHomeScore(s.hGames);
+    setAwayScore(s.aGames);
+    setHomeSets(s.hSets);
+    setAwaySets(s.aSets);
+    setSetResults(
+      s.setResults.map((r) => {
+        const [h, a] = r.split("-").map(Number);
+        return { home: h || 0, away: a || 0 };
+      }),
+    );
+  }, []);
+
+  // 直前の ＋ を丸ごと取り消すためのスナップショット（1手ぶん）。
+  // ★ なぜ必要か: 誤タップでゲーム→セット→マッチが一気に確定すると、hSets が増え
+  //   setResults にも1件積まれる。tennisRemovePoint は**ゲーム境界を跨がない**仕様
+  //   （Web版と共通・変更不可）なので、− を押しても hPts===0 で no-op になり
+  //   誤って与えたゲームもセットも戻せない。丸ごと巻き戻す手段が要る。
+  const tennisUndoRef = useRef<TennisSnapshot | null>(null);
+
   const tennisPoint = useCallback(
     (side: "home" | "away") => {
       if (!tnRule) return;
       if (tennis.matchWon) return; // 確定後は no-op
+      tennisUndoRef.current = tennis; // ＋を押す直前の状態を1手ぶん保持
       const { next, events } = tennisAddPoint(tnRule, tennis, side);
-      setTennis(next);
-      setHomeScore(next.hGames);
-      setAwayScore(next.aGames);
-      setHomeSets(next.hSets);
-      setAwaySets(next.aSets);
-      setSetResults(
-        next.setResults.map((s) => {
-          const [h, a] = s.split("-").map(Number);
-          return { home: h || 0, away: a || 0 };
-        }),
-      );
+      applyTennisSnapshot(next);
       // セット確定で period を進める。マッチ確定時は進めない
       //（2-0 で完走したときに「3SET」と出るオフバイワンを防ぐ・Web 版と同じ）。
       if (events.setWon && !events.matchWon && tnRule.kind === "hard") {
@@ -1074,29 +1114,68 @@ export function BroadcastScreen() {
           "試合終了の判定です",
           "このまま終了しますか？ 団体戦などで続ける場合は「まだ続ける」を選んでください。",
           [
-            { text: "まだ続ける", onPress: () => setTennis((t) => ({ ...t, matchWon: null })) },
+            {
+              text: "まだ続ける",
+              onPress: () => {
+                // ★ 2026-08-05: matchWon を落とすだけでは**団体戦が成立しない**。
+                //   ソフトテニスはエンジンがマッチ確定時に setResults へ push する一方で
+                //   hGames/aGames を 0 に戻さない（硬式のセット確定側は戻す）。そのため
+                //   3-2 のまま再開し、次の1ゲームを取った瞬間にまた確定して同じアラートが
+                //   出続け、確定のたびに set_results へゴミが積まれて内訳が壊れる
+                //   （"3-2" / "3-3" / … と増える）。
+                //   → 直前の対戦の結果は setResults に残したまま、ゲーム/ポイントだけ
+                //     0-0 に戻す。これで第2対戦を 0-0 から始められる。
+                //   硬式はエンジンが既にゲームを 0 に戻しているので matchWon を落とすだけでよい
+                //   （＝既定の1セットマッチのまま3セット戦うケースがそのまま続行できる）。
+                if (tnRule.kind === "soft") {
+                  applyTennisSnapshot({
+                    ...next,
+                    matchWon: null,
+                    hGames: 0,
+                    aGames: 0,
+                    hPts: 0,
+                    aPts: 0,
+                    inTiebreak: false,
+                  });
+                } else {
+                  applyTennisSnapshot({ ...next, matchWon: null });
+                }
+              },
+            },
             { text: "試合終了にする", style: "cancel" },
           ],
         );
       }
     },
-    [tnRule, tennis, activePeriods],
+    [tnRule, tennis, activePeriods, applyTennisSnapshot],
   );
 
   // ポイントの取り消し（現在のゲーム内のみ）。ゲーム/セット境界は跨がない。
   const tennisPointMinus = useCallback(
     (side: "home" | "away") => {
       if (!tnRule) return;
-      // マッチ確定後に − を押したら「まだ続ける」とみなして確定を解除する。
-      // 上のアラートを閉じてしまった人のための二つ目の逃げ道（詰みを作らない）。
+      // マッチ確定後の − は「直前の ＋ を丸ごと取り消す」（1手 Undo）。
+      // ★ 2026-08-05: 従来は matchWon を落とすだけだったので、誤タップで
+      //   ゲーム→セット→マッチが一気に確定したとき、増えた hSets と setResults が
+      //   残ったままだった（2回目の − は hPts===0 で完全な no-op）。
+      //   スナップショットへ丸ごと戻せば、誤って与えたゲーム・セット・内訳もまとめて消える。
+      //   上のアラートを閉じてしまった人のための逃げ道でもある（詰みを作らない）。
       if (tennis.matchWon) {
-        setTennis((t) => ({ ...t, matchWon: null }));
+        const prev = tennisUndoRef.current;
+        if (prev) {
+          tennisUndoRef.current = null; // 1手ぶんだけ。連打で過去まで遡らせない
+          applyTennisSnapshot(prev);
+        } else {
+          // スナップショットが無い（配信を跨いだ復帰など）ときは、少なくとも確定だけ
+          // 解除して操作不能を回避する（従来挙動へのフォールバック）。
+          setTennis((t) => ({ ...t, matchWon: null }));
+        }
         return;
       }
       if (side === "home" ? tennis.hPts === 0 : tennis.aPts === 0) return;
       setTennis(tennisRemovePoint(tennis, side));
     },
-    [tnRule, tennis],
+    [tnRule, tennis, applyTennisSnapshot],
   );
 
   // 野球カウント操作（B/S/O＋走者）。3アウト時はイニング(period)を自動で前進。
