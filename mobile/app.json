@@ -6,10 +6,7 @@
     "scheme": "spotch",
     "version": "1.1.6",
     "orientation": "default",
-    "//locales": "★App Store の言語が「EN 英語」と表示される問題の対策。infoPlist の2キーだけでは不十分で、Apple は .lproj フォルダから対応言語を判定するため、Expo の locales 機構で ja.lproj を実際に生成させる必要がある（prebuild して find ios -name '*.lproj' が0件であることを確認済み）。※ Expo の Locales プラグインは中身が空の JSON を早期 return で無視するので、ja.json には必ず1キー以上入れること。",
-    "locales": {
-      "ja": "./locales/ja.json"
-    },
+    "//locales": "★App Store の言語が「EN 英語」と表示される問題の対策。infoPlist の2キーだけでは不十分で、Apple は .lproj フォルダから対応言語を判定するため ja.lproj を実際に生成させる必要がある。ただし `expo.locales` を使うと Android にも無意味なリソース（iOS のキー名のまま）が生成され、2026-08-05 に Android の Gradle ビルドが失敗した（iOS は同一コミットで成功）。そのため locales はここに書かず、iOS 限定の ./plugins/withIosOnlyLocales.js で適用する。",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
@@ -69,6 +66,7 @@
         }
       ],
       "./plugins/withGoogleSignInModularHeaders.js",
+      "./plugins/withIosOnlyLocales.js",
       [
         "expo-splash-screen",
         {
