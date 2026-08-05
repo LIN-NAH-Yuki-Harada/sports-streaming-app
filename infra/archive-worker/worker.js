@@ -145,6 +145,69 @@ async function getOAuthClient(refreshToken, accessToken, profileId) {
   return oauth;
 }
 
+// ★ アップロード前ゲート（2026-08-05 追加）
+//
+// YouTube は「15分を超える動画」をチャンネル単位で制限している（電話番号の確認で解放）。
+// ★最悪なのは、制限を超えた動画でも **insert 自体は成功する**こと。YouTube は一旦受け取り、
+//   後から（数分〜数時間後に）削除する。つまり **insert の結果では検知できない**。
+//   従来は videoId が返った時点で completed にし、その直後に元録画を削除していたため、
+//   失敗が記録されないまま元データも消えていた。
+//   実損5本: 2026-08/02 103.6分・08/01 99.3分・07/30 59.0分・07/22 46.6分・07/22 35.7分
+//
+// 事後に生存確認する案も検討したが、**それでは「消えたことを後から知る」だけで試合記録は救えない**
+// （電話番号未確認のチャンネルでは何度リトライしても必ず消えるため）。事前に弾くのが唯一の解。
+//
+// コスト: channels.list は 1 ユニット。videos.insert の投稿枠とは別プールから引くので実質無料。
+// 権限: youtube.readonly は最初から要求済み → **既存の refresh_token でそのまま動く**（再連携不要）。
+//
+// ★制限はチャンネル単位で、しかも**変化する**（実データで、あるチャンネルが1日で
+//   allowed になった例を確認）。キャッシュせず毎回取る。
+const LONG_UPLOAD_LIMIT_SEC = 15 * 60; // これを超えると longUploadsStatus の確認が要る
+const YOUTUBE_MAX_UPLOAD_SEC = 12 * 60 * 60; // YouTube の絶対上限
+
+async function checkLongUploadGate(oauth, durationSec) {
+  if (durationSec > YOUTUBE_MAX_UPLOAD_SEC) {
+    return {
+      ok: false,
+      message:
+        `この録画は約${Math.round(durationSec / 3600)}時間で、YouTubeの上限（12時間）を超えています。\n` +
+        `アップロードしても削除されるため、中止しました。元の録画はサーバーに48時間だけ残ります。`,
+    };
+  }
+  if (durationSec <= LONG_UPLOAD_LIMIT_SEC) return { ok: true };
+
+  let longStatus = null;
+  try {
+    const youtube = google.youtube({ version: "v3", auth: oauth });
+    const res = await youtube.channels.list({ part: ["status"], mine: true });
+    const item = res.data && res.data.items && res.data.items[0];
+    longStatus = item && item.status && item.status.longUploadsStatus;
+  } catch (e) {
+    // ★フェイルオープン。判定できないことを理由にアーカイブを止めない。
+    //   ここで閉じると「APIが一時的に不調 → 全部のアーカイブが失敗」になる。
+    log("longUploadsStatus check failed (fail-open):", String(e).slice(0, 200));
+    return { ok: true };
+  }
+  // 値は allowed / eligible / disallowed / longUploadsUnspecified。allowed 以外は上げない。
+  // 取得できなかった場合（null）もフェイルオープン。
+  if (!longStatus || longStatus === "allowed") return { ok: true };
+
+  return {
+    ok: false,
+    message:
+      `この録画は約${Math.round(durationSec / 60)}分ですが、YouTubeチャンネルが「15分を超える動画」を\n` +
+      `アップロードできる状態になっていません（longUploadsStatus=${longStatus}）。\n` +
+      `このままアップロードすると、YouTubeが一旦受け取ったあとで削除してしまうため中止しました。\n` +
+      `\n` +
+      `【対処】配信者ご本人が https://www.youtube.com/verify で電話番号の確認を行ってください\n` +
+      `（数分で完了・身分証は不要です）。反映まで最大24時間かかることがあります。\n` +
+      `確認後、この配信の youtube_upload_status を 'pending'、youtube_retry_count を 0 に\n` +
+      `戻せば自動で再実行されます。\n` +
+      `\n` +
+      `※ 元の録画はサーバーに48時間だけ残ります。それを過ぎると復旧できません。`,
+  };
+}
+
 async function uploadToYouTube(filePath, b, oauth) {
   const youtube = google.youtube({ version: "v3", auth: oauth });
   const dateLabel = b.started_at
@@ -194,7 +257,10 @@ function classify(err) {
   ) {
     return { type: "token-revoked", msg };
   }
-  // YouTube API 日次クォータ超過（videos.insert=1600unit・標準10,000unit/日≒6本/日）。
+  // YouTube API 日次クォータ超過。
+  // ★2026-08-05 訂正: videos.insert は「1600ユニット」ではなく**投稿本数の専用枠（1日100本）**で、
+  //   標準の10,000ユニットプールとは別勘定（旧コメントの「≒6本/日」は誤り）。
+  //   ユニットを消費するのは channels.list(1) や videos.list(1) などの読み取り側。
   // 403 で届くため auth-refresh より先に判定する。クォータは翌日16時JSTに復活する
   // ので retry を消費せず pending 維持で翌日自動再開させる（従来は25分で永久failed化）。
   const reason =
@@ -1278,6 +1344,25 @@ async function main() {
       throw new Error(`normalized output invalid (duration=${finalDur}s) — not uploading`);
     }
     log(`canonicalized & verified: ${Math.round(finalDur)}s -> uploading`);
+
+    // ★ 15分ゲート: 上げても後から消される動画は、そもそも上げない（上の関数のコメント参照）。
+    //   ここで止めれば元録画は残るので、配信者が電話番号確認を済ませてから再実行できる。
+    const gate = await checkLongUploadGate(oauth, finalDur);
+    if (!gate.ok) {
+      log("long-upload gate blocked", b.share_code, `${Math.round(finalDur)}s`);
+      await setStatus(b.id, {
+        youtube_upload_status: "failed",
+        youtube_upload_error: gate.message.slice(0, 500),
+        youtube_retry_count: retry,
+      });
+      // 中間生成物だけ掃除。★元録画は残す（48時間以内なら再実行で救える）。
+      try {
+        fs.rmSync(workDir, { recursive: true, force: true });
+      } catch {
+        /* noop */
+      }
+      return;
+    }
 
     const videoId = await uploadToYouTube(uploadPath, b, oauth);
     await setStatus(b.id, {
