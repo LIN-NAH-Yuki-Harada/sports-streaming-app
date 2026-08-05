@@ -309,9 +309,21 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       const updated = await getBroadcastByCode(shareCodeRef.current);
       if (updated) {
         setBroadcast(updated);
-        // 配信開始がページ読み込み後の場合に備え、HLS URL も追従取得
+        // 配信開始がページ読み込み後の場合に備え、HLS URL も追従取得。
+        // ★ string が取れなかったときは降格しない（mobile 側と同じガード）。
+        //   null をそのまま setHlsUrl すると `isLive && hlsUrl` の分岐が外れて
+        //   HlsPlayer がアンマウントされ、LiveKit 経路（自前RTMP配信にはパブリッシャーが
+        //   いない）に落ちて 5〜10 秒の黒画面になる。Supabase の一時的な 5xx や電波瞬断で
+        //   毎回これが起きるのは割に合わない。
+        //   なお緊急ロールバック（stream_playback_url を VPS 直へ書き戻す）は string で
+        //   返るので、この経路でちゃんと追従する。
         if (updated.status === "live") {
-          getStreamPlaybackUrl(updated.share_code).then(setHlsUrl).catch(() => {});
+          const url = await getStreamPlaybackUrl(updated.share_code).catch(
+            () => null,
+          );
+          if (typeof url === "string") {
+            setHlsUrl((prev) => (prev === url ? prev : url));
+          }
         }
         if (updated.status === "ended") {
           clearInterval(interval);
