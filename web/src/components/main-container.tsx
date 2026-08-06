@@ -14,6 +14,11 @@ function getVariant(pathname: string): Variant {
   //   大画面でも狭い列の中でしか映像が見られなかった。ページ側が自前で全画面レイアウトを
   //   組んでいる（min-h-screen / flex-col）ので full にする。
   if (pathname.startsWith("/watch")) return "full"; // 視聴ページ（映像を画面いっぱいに）
+  // ★ 2026-08-06: 管理画面は自前で全画面レイアウト（min-h-screen / 独自ヘッダー /
+  //   max-w-5xl）を組んでいるのに normal に落ちていて、**admin 側の max-w-5xl が
+  //   MainContainer の max-w-4xl に締められて効いていなかった**。
+  //   グラフを並べる画面なので幅は広いほうがよい。/watch と同じ理由で full にする。
+  if (pathname.startsWith("/admin")) return "full"; // 管理画面（自前レイアウト・グラフ主体）
   if (TEXT_PATHS.some((p) => pathname.startsWith(p))) return "text";
   if (pathname === "/discover") return "wide";
   if (WIDE_PREFIXES.some((p) => pathname.startsWith(p))) return "wide";
