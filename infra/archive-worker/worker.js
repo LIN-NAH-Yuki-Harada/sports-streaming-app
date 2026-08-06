@@ -129,6 +129,72 @@ function findRecordings(shareCode) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// ★ アーカイブされないと確定した録画を、その場で削除する（2026-08-06 追加）
+//
+// なぜ: MediaMTX は**プランに関係なく全配信を録画する**。しかしアーカイブ対象外
+//   （¥300/無料/YouTube未連携/自動アーカイブOFF）や短すぎる配信の録画は、
+//   **一度も使われないまま recordDeleteAfter(48h) を待って消えるだけ**だった。
+//   実測（2026-07-22〜08-06 の92本）: **58%(53本)が対象外で、15日間に 23.1GB が
+//   無駄にディスクを通過**していた。大会日（ピーク21.4GB/日）の圧迫の主因はここ。
+//   アップロード成功時は既に削除しているので、消し忘れていたのは「上げない」側だけ。
+//
+// ★安全弁（これが無いと生の試合を消しうる）:
+//   `/api/cron/cleanup` は**心拍を打たないアプリ配信を「開始から2時間」で ended にする**
+//   （心拍を打つのは Web 配信のみ）。つまり **まだ配信中の行がここに来ることがある**。
+//   その録画を消すと進行中の試合が失われるので、**直近まで書き込みがあったファイルは消さない**。
+const DROP_UNARCHIVED_RECORDINGS =
+  process.env.DROP_UNARCHIVED_RECORDINGS !== "0"; // 既定ON。"0" で従来どおり48h保持
+const DROP_MIN_IDLE_MS =
+  Number(process.env.DROP_MIN_IDLE_MS) || 10 * 60 * 1000; // 10分以内に書かれたものは触らない
+
+function dropRecordings(shareCode, reason) {
+  if (!DROP_UNARCHIVED_RECORDINGS) return;
+  let recs;
+  try {
+    recs = findRecordings(shareCode);
+  } catch {
+    return;
+  }
+  if (!recs || recs.length === 0) return;
+  const now = Date.now();
+  let dropped = 0;
+  let skipped = 0;
+  let bytes = 0;
+  for (const r of recs) {
+    let mtimeMs = 0;
+    try {
+      mtimeMs = fs.statSync(r.p).mtimeMs;
+    } catch {
+      continue; // 既に無い
+    }
+    if (now - mtimeMs < DROP_MIN_IDLE_MS) {
+      skipped++; // まだ書き込まれている可能性 → 触らない（48hの自動削除に任せる）
+      continue;
+    }
+    try {
+      fs.unlinkSync(r.p);
+      dropped++;
+      bytes += r.size || 0;
+    } catch {
+      /* 既に無い等は無視 */
+    }
+  }
+  // 1つでも残したならディレクトリは畳まない（rmdir は空でなければ失敗するので実質同じだが明示）
+  if (skipped === 0) {
+    try {
+      fs.rmdirSync(path.join(RECORDINGS_DIR, "live", shareCode));
+    } catch {
+      /* not empty → keep */
+    }
+  }
+  if (dropped > 0 || skipped > 0) {
+    log(
+      `dropped recordings (${reason}): ${shareCode} ${dropped} file(s) ${Math.round(bytes / 1048576)}MB` +
+        (skipped ? ` [skipped ${skipped} still-writing]` : ""),
+    );
+  }
+}
+
 async function getOAuthClient(refreshToken, accessToken, profileId) {
   const oauth = new google.auth.OAuth2(
     YOUTUBE_CLIENT_ID,
@@ -1080,6 +1146,8 @@ async function main() {
       youtube_upload_error: "not eligible (plan/auto_archive/youtube link)",
     });
     log("cancelled (not eligible):", b.share_code);
+    // この録画は永久にアップロードされない＝保持する意味がゼロ。ここで消す。
+    dropRecordings(b.share_code, "not eligible");
     return;
   }
 
@@ -1223,6 +1291,8 @@ async function main() {
       log(
         `cancelled (too short): ${b.share_code} video=${Math.round(videoTotalSec)}s wall=${Math.round(wallSec)}s`,
       );
+      // 短すぎてアーカイブしないと確定した録画も保持する意味がない。
+      dropRecordings(b.share_code, "too short");
       return;
     }
   }
