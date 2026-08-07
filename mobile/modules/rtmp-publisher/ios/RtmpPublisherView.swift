@@ -275,7 +275,38 @@ class RtmpPublisherView: ExpoView {
       vs.videoSize = CGSize(width: videoWidth, height: videoHeight)
       vs.bitRate = videoBitrate
       vs.expectedFrameRate = fps
+      // ★瞬間ビットレートの上限を「最大値基準」で明示的に固定する（2026-08-07）。
+      //
+      // 既定は [0.0, 0.0]。この 0 は「未指定」を意味し、HaishinKit は
+      // VideoCodecSettings.makeOptions() で **エンコーダセッションを作った時点の bitRate** から
+      // `bitRate / 8 * 1.5` を計算してハード上限にする。
+      // ところが invalidateSession() の比較対象に **bitRate は含まれていない**ため、
+      // 後からビットレートを変えてもこの上限は再計算されない。
+      //
+      // 一方エンコーダセッションは「アプリのバックグラウンド復帰」と「着信などの音声中断の終了」で
+      // 作り直される。つまり弱電波で 512kbps まで絞られた状態でホーム画面に行って戻ると、
+      // 新しいセッションの上限が **768kbps に焼き付き**、その後 ConstantFPSBitRateStrategy が
+      // 指令値を 3.5Mbps まで戻しても **実際の送出は 768kbps を超えられなくなる**
+      // （＝配信を作り直すまで低画質のまま）。
+      //
+      // ★上限を外す（nil）のではなく videoBitrate 基準で固定するのが要点。
+      //   バースト上限自体は残るので、CBR 化のような帯域の無駄遣いにはならない。
+      vs.dataRateLimits = [Double(videoBitrate) / 8 * 1.5, 1.0]
       try await stream.setVideoSettings(vs)
+
+      // ★音声 64kbps → 128kbps（2026-08-07）。
+      // これまで setAudioSettings を一度も呼んでおらず、ライブラリ既定の
+      // AudioCodecSettings.defaultBitRate = 64kbps のままだった。
+      // 体育館は残響＋歓声＝広帯域ノイズで AAC が最も苦手な条件であり、かつ保護者が
+      // 最も価値を感じるのは「子どもの名前が呼ばれた」「応援の声」といった音声情報。
+      // +64kbps は映像予算 3.5Mbps に対して 1.8% でしかない。
+      // 端末が対応しない値なら applicableEncodeBitRates により自動で丸められる。
+      var aus = await stream.audioSettings
+      aus.bitRate = 128_000
+      // 失敗しても配信自体は続行させる（音声設定は"あれば良い"もので、
+      // ここで throw すると配信開始そのものが落ちる＝最優先事項に反する）。
+      try? await stream.setAudioSettings(aus)
+
       await mixer.addOutput(stream)
       // 音声エンジン開始（AudioSession activate 後・stream 配線後）。映像とは独立した音声経路。
       audioSource?.start()
@@ -478,7 +509,27 @@ final class AudioEngineSource: @unchecked Sendable {
 // ライブ切断の根治。VPS ログの "segment duration changed from 2s to 4s" が原因）。帯域不足時は
 // videoSettings.bitRate のみを下げ、視聴に耐える下限（床）で止める。
 final actor ConstantFPSBitRateStrategy: StreamBitRateStrategy {
-  static let statusCountsThreshold: Int = 15
+  // ★画質の復帰速度（2026-08-07 に 15 → 8 へ）。
+  //
+  // HaishinKit の NetworkMonitor は1秒間隔で評価し、送出キューが2回連続で増えただけで
+  // 降格イベントを出す（measureInterval = 3）。5G のハンドオーバー1回でも簡単に発火する。
+  // ＝ **降格は約2秒**。
+  //
+  // 一方、復帰はこの閾値ぶん .status を数えてから1段上げるので
+  // 「16秒に1回 +最大値/10」でしか戻らない。512kbps → 3.5Mbps は9段＝**最短2分24秒**。
+  // しかも途中で降格が1回でも来るとカウンタが 0 に戻る。**非対称は約70倍**だった。
+  //
+  // さらに、一気に最大へ戻す高速パス（NetworkMonitorEvent.reset）は
+  // ライブラリのどこからも emit されない**死にコード**であることを確認済み
+  // （HaishinKit 2.2.5 の Network/ 配下を全文検索して0件）。つまり実運用では
+  // この匍匐前進だけが唯一の復帰手段。
+  //
+  // 体育館は一瞬の詰まりが多いため、これが「配信は止まらないが、ずっと汚いまま」
+  // という形で顕在化する。16秒に1回でも詰まりが起きれば永久に床付近へ張り付く。
+  //
+  // ★5 まで下げないのは、上げるペースが速いほど帯域の限界を試す回数が増え、
+  //   弱電波では上下動（＝見た目のちらつき）が増えるため。8 は約1分20秒で復帰する。
+  static let statusCountsThreshold: Int = 8
 
   let mamimumVideoBitRate: Int  // 上限（ceiling）。プロトコル要件（綴りはライブラリ準拠）。
   let mamimumAudioBitRate: Int = 0
