@@ -32,7 +32,7 @@ import {
 // ★ 退会（アカウント削除）は Apple 5.1.1(v) 対応でアプリ内から完結（/api/account/delete）。
 // ログアウトもアプリ内で完結（supabase.auth.signOut）。
 
-const APP_VERSION = "1.1.6";
+const APP_VERSION = "1.1.7";
 const IS_IOS = Platform.OS === "ios";
 
 export function MyPageScreen() {
@@ -196,10 +196,13 @@ export function MyPageScreen() {
   const planLabel = (IS_IOS ? PLAN_LABELS_NO_PRICE : PLAN_LABELS)[
     profile?.plan ?? "free"
   ];
-  const displayName = profile?.display_name || email || "ユーザー";
-  const initial = (profile?.display_name || email || "U")
-    .charAt(0)
-    .toUpperCase();
+  // ★名前スロットにメールを混ぜない（2026-08-07）。
+  //   ①メールは下に専用行があるので純粋な重複、②Apple の Hide My Email を使った人の
+  //   リレーアドレス（xxxx@privaterelay.appleid.com）が名前として出てしまう、
+  //   ③何より**空の display_name が「メールが出ているから正常」に見えて発覚が遅れた**。
+  //   TeamScreen が既に使っている「名前未設定」に揃える。
+  const displayName = profile?.display_name || "名前未設定";
+  const initial = (profile?.display_name || "U").charAt(0).toUpperCase();
   const youtubeLinked = Boolean(profile?.youtube_channel_id);
 
   return (
