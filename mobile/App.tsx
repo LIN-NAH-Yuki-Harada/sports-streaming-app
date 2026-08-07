@@ -18,6 +18,8 @@ import { HistoryScreen } from "./screens/HistoryScreen";
 import { MyPageScreen } from "./screens/MyPageScreen";
 import { WatchScreen } from "./screens/WatchScreen";
 import { PaywallScreen } from "./screens/PaywallScreen";
+import { NameSetupScreen } from "./screens/NameSetupScreen";
+import { fetchMyProfile } from "./lib/mypage-data";
 import { configureRevenueCat, rcLogIn, rcLogOut } from "./lib/revenuecat";
 import type { RootStackParamList } from "./navigation-types";
 
@@ -83,6 +85,8 @@ function RootNavigator() {
 export default function App() {
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
   const [session, setSession] = useState<Session | null | undefined>(undefined);
+  // 表示名ゲート。null = 判定中 / true = 出す / false = 出さない。
+  const [needsName, setNeedsName] = useState<boolean | null>(null);
 
   useEffect(() => {
     // reject ハンドラを必ず付ける: AsyncStorage がネイティブ層で失敗(破損/容量)しても
@@ -129,6 +133,69 @@ export default function App() {
     if (ready) SplashScreen.hideAsync().catch(() => {});
   }, [ready]);
 
+  // 表示名が未設定ならゲートを出す（Web の NameSetupModal 相当）。
+  //
+  // ★依存配列は session ではなく session?.user?.id。
+  //   onAuthStateChange（上の effect）はトークン更新のたびに**別オブジェクトの
+  //   session**を流すため、session を依存に置くと配信中にトークンが更新された瞬間に
+  //   この effect が再実行され、判定中スピナー → content 差し替え →
+  //   **NavigationContainer ごと再マウント＝配信画面が消える**。ここは絶対に変えないこと。
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid) {
+      setNeedsName(null);
+      return;
+    }
+    let done = false;
+    const settle = (v: boolean) => {
+      if (done) return;
+      done = true;
+      setNeedsName(v);
+    };
+    // ★保険1（タイムアウト）: lib/supabase.ts の createClient は fetch にタイムアウトを
+    //   持たない。体育館の弱電波で TCP が張れたまま応答が返らないと、判定待ちのまま
+    //   アプリが永久に起動しなくなる（＝全ユーザーが対象の事故）。2.5秒で必ず
+    //   fail-open する。遅れて届いた結果は done=true で採用しないので、
+    //   「起動から10秒後に突然ゲートが被さる」も同時に防いでいる。
+    const t = setTimeout(() => settle(false), 2500);
+    (async () => {
+      try {
+        // ★保険2（キャッシュ）: 一度でも名前があると分かった端末は以後 fetch を撃たない。
+        //   ほぼ全ユーザーの2回目以降の起動がノーコストになり、オフラインでも即起動する。
+        const cached = await AsyncStorage.getItem(`name_ok_v1:${uid}`);
+        if (cached === "1") {
+          settle(false);
+          return;
+        }
+        const p = await fetchMyProfile(uid);
+        // ★fail-open が絶対条件: fetchMyProfile は throw せず失敗時 null を返す。
+        //   null は「名前が空」ではなく「取れなかった」。ここを取り違えると、
+        //   電波が悪いだけで全ユーザーが閉じられないゲートに閉じ込められる。
+        if (!p) {
+          settle(false);
+          return;
+        }
+        // ★空文字と NULL の両方を「未設定」として拾う。
+        //   DBトリガー handle_new_user() は coalesce(..., '') で**空文字**を入れるため、
+        //   `=== null` だけの判定では本番で1件も発火しない。
+        const blank = !p.display_name || p.display_name.trim() === "";
+        if (!blank) {
+          AsyncStorage.setItem(`name_ok_v1:${uid}`, "1").catch(() => {});
+        }
+        settle(blank);
+      } catch {
+        settle(false);
+      }
+    })();
+    return () => {
+      done = true;
+      clearTimeout(t);
+    };
+  }, [session?.user?.id]);
+
+  // ★ここから下は分岐（let content への代入）であって return ではない。
+  //   App.tsx に early return を足すとフックの順序が壊れて 100% クラッシュするので、
+  //   このコンポーネントには return を1つも増やさないこと。
   let content;
   if (onboarded === null || session === undefined) {
     content = (
@@ -146,7 +213,31 @@ export default function App() {
       />
     );
   } else if (!session) {
+    // ★ゲートは必ずこの後ろ。前に置くと未ログインの人にも名前を聞いてしまう。
     content = <AuthScreen />;
+  } else if (needsName === null) {
+    // 判定中（最長 2.5 秒）。タブが一瞬見えてからゲートが被さるちらつきを防ぐ。
+    content = (
+      <View style={styles.center}>
+        <ActivityIndicator color="#e63946" />
+      </View>
+    );
+  } else if (needsName) {
+    // ★NavigationContainer の「外」に置く。RootStack の screen にすると
+    //   Android の戻る / iOS のスワイプで抜けられてしまうが、ここで content ごと
+    //   差し替えればナビゲーションが存在しない＝構造的に回避不能になる。
+    content = (
+      <NameSetupScreen
+        userId={session.user.id}
+        onSaved={() => {
+          AsyncStorage.setItem(`name_ok_v1:${session.user.id}`, "1").catch(() => {});
+          setNeedsName(false);
+        }}
+        // ★onSkip ではキャッシュを書かない＝次回起動でまたゲートが出る。
+        //   onSaved と同じ処理にまとめると、諦めた人が二度と聞かれなくなり機能が死ぬ。
+        onSkip={() => setNeedsName(false)}
+      />
+    );
   } else {
     content = (
       <NavigationContainer>
