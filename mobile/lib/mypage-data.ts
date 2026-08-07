@@ -43,6 +43,20 @@ const PROFILE_PUBLIC_COLUMNS =
   "id, display_name, plan, youtube_channel_id, youtube_channel_name, " +
   "youtube_live_enabled, subscription_status";
 
+// ★ネットワーク待ちの上限（ミリ秒）。
+//
+// なぜ必要か: lib/supabase.ts の createClient は `db.timeout` を渡しておらず、
+// postgrest-js は timeout 未指定なら**素の fetch をそのまま使う**。そして
+// React Native の Android 実装（OkHttpClientProvider）は
+// `// No timeouts by default` ＝ connect/read/write すべて 0（無制限）。
+// つまり「TCP は張れているが応答が返らない」回線（混雑した4G、WiFi→LTE 切替直後、
+// 体育館の弱電波）では、**この Promise は永久に settle しない**。
+//
+// 名前ゲート（NameSetupScreen）はこの Promise の settle を待って画面を解放するので、
+// タイムアウトが無いと**全画面ゲートに固着して強制終了しか手が無くなる**。
+// リポジトリの既存作法（lib/broadcasts.ts の AbortController + setTimeout）に揃える。
+const NETWORK_TIMEOUT_MS = 15_000;
+
 /** profiles の行（明示列 SELECT の結果）を MyProfile に正規化する。 */
 function mapProfileRow(data: unknown): MyProfile {
   const row = data as {
@@ -71,46 +85,73 @@ function mapProfileRow(data: unknown): MyProfile {
 
 /**
  * 指定ユーザーのプロフィール（マイページ表示用）を取得する。
- * 取得失敗時は null を返す。plan が想定外の値なら安全側に "free" 扱い。
+ * 取得失敗時・タイムアウト時は null を返す。plan が想定外の値なら安全側に "free" 扱い。
+ * タイムアウトの理由は下の NETWORK_TIMEOUT_MS のコメントを参照。
  */
 export async function fetchMyProfile(userId: string): Promise<MyProfile | null> {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select(PROFILE_PUBLIC_COLUMNS)
-    .eq("id", userId)
-    .single();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), NETWORK_TIMEOUT_MS);
+  try {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select(PROFILE_PUBLIC_COLUMNS)
+      .eq("id", userId)
+      .abortSignal(ctrl.signal)
+      .single();
 
-  if (error || !data) {
-    if (error) console.error("プロフィール取得エラー:", error.message);
+    if (error || !data) {
+      if (error) console.error("プロフィール取得エラー:", error.message);
+      return null;
+    }
+
+    return mapProfileRow(data);
+  } catch (e) {
+    console.error("プロフィール取得エラー(例外):", e);
     return null;
+  } finally {
+    clearTimeout(timer);
   }
-
-  return mapProfileRow(data);
 }
+
 
 /**
  * 表示名を更新する（Web 版 updateProfile の display_name 限定版）。
  * profiles は機密列が列レベル GRANT で遮断されているため、RETURNING * 相当の
  * .select()（引数なし）は 42501 になる。Web と同じく明示列リストで取得する。
- * 成功時は更新後のプロフィール、失敗時は null を返す。
+ * 成功時は更新後のプロフィール、失敗時・タイムアウト時は null を返す。
+ *
+ * ★タイムアウトは「失敗」として null を返す。呼び出し側から見ると通常のエラーと
+ *   区別が付かないが、それでよい（どちらもリトライ or 諦めるしか手が無いため）。
  */
 export async function updateDisplayName(
   userId: string,
   displayName: string,
 ): Promise<MyProfile | null> {
-  const { data, error } = await supabase
-    .from("profiles")
-    .update({ display_name: displayName })
-    .eq("id", userId)
-    .select(PROFILE_PUBLIC_COLUMNS)
-    .single();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), NETWORK_TIMEOUT_MS);
+  try {
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ display_name: displayName })
+      .eq("id", userId)
+      .abortSignal(ctrl.signal)
+      .select(PROFILE_PUBLIC_COLUMNS)
+      .single();
 
-  if (error || !data) {
-    if (error) console.error("表示名の更新エラー:", error.message);
+    if (error || !data) {
+      if (error) console.error("表示名の更新エラー:", error.message);
+      return null;
+    }
+
+    return mapProfileRow(data);
+  } catch (e) {
+    // abort は postgrest 側で握られて error 返却になるはずだが、
+    // 経路が変わっても呼び出し側に例外を漏らさない（lib の約束＝throw しない）。
+    console.error("表示名の更新エラー(例外):", e);
     return null;
+  } finally {
+    clearTimeout(timer);
   }
-
-  return mapProfileRow(data);
 }
 
 /** プランの日本語表示ラベル（Web の PLAN_LABELS と一致させる）。 */

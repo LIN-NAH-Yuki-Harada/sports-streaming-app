@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -47,6 +47,17 @@ const SKIP_AFTER_FAILURES = 2;
 
 const MAX_NAME_LENGTH = 30;
 
+// ★見張りタイマー（保険の二重化）。
+// lib 側（updateDisplayName）に 15 秒の AbortController を入れたので通常はそちらが
+// 先に効く。ただし「lib のタイムアウトが将来外される」「abort が経路の都合で
+// 効かない」場合でも、**画面が固着しないこと**だけは画面側で保証しておく。
+// 起動判定（App.tsx）が 2.5 秒で必ず fail-open するのと同じ思想を、保存側にも適用する。
+const SAVE_WATCHDOG_MS = 20_000;
+
+// ログアウト（脱出口の1つ）の待ち上限。auth-js の signOut は必ずサーバー往復を
+// 待つうえタイムアウトを持たないため、これが無いと圏外で完全な無反応になる。
+const LOGOUT_TIMEOUT_MS = 8_000;
+
 export function NameSetupScreen({
   userId,
   onSaved,
@@ -68,9 +79,28 @@ export function NameSetupScreen({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [failures, setFailures] = useState(0);
+  // 保存の「試行番号」。見張りタイマーが打ち切った後に遅れて届いた結果を捨てるために使う。
+  // これが無いと、諦めて先に進んだ後に onSaved() が遅れて発火して画面が二重に動く。
+  const attemptRef = useRef(0);
   // ★AppState リスナーは絶対に足さない: Android に "inactive" は無く、共有シートや
   //   権限ダイアログのたびに background→active が飛ぶ。復帰で再判定すると
   //   **全画面ゲートがライブ配信画面に被さる**（このプロダクト最悪の事故）。
+
+  // 見張り: saving が SAVE_WATCHDOG_MS を超えたら強制的に解放して失敗を1回数える。
+  // ★これにより「保存中...のまま入力もボタンも死に、失敗が数えられないので
+  //   『あとで設定する』が永久に出ない」という詰みを構造的に防ぐ。
+  useEffect(() => {
+    if (!saving) return;
+    const mine = attemptRef.current;
+    const t = setTimeout(() => {
+      if (attemptRef.current !== mine) return;
+      attemptRef.current += 1; // 遅れて返る結果を無効化する
+      setSaving(false);
+      setFailures((n) => n + 1);
+      setError("通信が応答しません。電波状況をご確認のうえ、再度お試しください。");
+    }, SAVE_WATCHDOG_MS);
+    return () => clearTimeout(t);
+  }, [saving]);
 
   const isPortrait = height >= width;
 
@@ -86,10 +116,14 @@ export function NameSetupScreen({
       return;
     }
 
+    const mine = attemptRef.current + 1;
+    attemptRef.current = mine;
     setSaving(true);
     setError("");
     try {
       const updated = await updateDisplayName(userId, trimmed);
+      // 見張りタイマーに打ち切られた後の遅延結果は捨てる（画面が二重に動くのを防ぐ）。
+      if (attemptRef.current !== mine) return;
       // ★成功したときだけ閉じる。updateDisplayName は throw せず失敗時 null を返すので、
       //   await しただけで閉じると「保存されていないのにゲートが消える」＝この機能が丸ごと無意味になる。
       if (updated) {
@@ -102,7 +136,7 @@ export function NameSetupScreen({
       // ★Web 版(name-setup-modal.tsx)は成功パスで setSaving(false) を呼んでいない。
       //   Web は再描画でモーダルごと消えるので露見しないが、そのまま写すと
       //   ここでは「保存中...」のまま永久ロックする。必ず finally に置く。
-      setSaving(false);
+      if (attemptRef.current === mine) setSaving(false);
     }
   }, [name, onSaved, saving, userId]);
 
@@ -116,7 +150,47 @@ export function NameSetupScreen({
           text: "ログアウト",
           style: "destructive",
           onPress: () => {
-            supabase.auth.signOut().catch(() => {});
+            // ★signOut は**例外を投げず `{ error }` を返す**ので `.catch()` では拾えない。
+            // ★さらに scope に関わらず**必ずサーバーへ revoke を投げ、その往復を待つ**
+            //   （auth-js GoTrueClient.js:3283-3294 を実装で確認）。往復がネットワーク層で
+            //   失敗すると `_removeSession()` に到達しないまま早期 return するため、
+            //   圏外では**押しても何も起きない**（＝脱出口として機能しない）。
+            //   しかも往復自体にタイムアウトが無いので、応答が返らない回線では
+            //   Promise が永久に settle しない。
+            //   → 自前でタイムアウトを付け、**どの経路でも必ずユーザーに結果を返す**。
+            void (async () => {
+              const giveUp = () => {
+                setError(
+                  "ログアウトできませんでした。「あとで設定する」からお進みください。",
+                );
+                // 唯一の確実な脱出口を即座に開放する（失敗回数の条件を満たさせる）。
+                setFailures((n) => Math.max(n, SKIP_AFTER_FAILURES));
+              };
+              let settled = false;
+              const timer = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                giveUp();
+              }, LOGOUT_TIMEOUT_MS);
+              try {
+                // scope:"local" は他端末のセッションを巻き込まないため
+                // （この画面の目的は「この端末で別アカウントに入り直す」だけ）。
+                const { error: signOutError } = await supabase.auth.signOut({
+                  scope: "local",
+                });
+                if (settled) return;
+                settled = true;
+                if (signOutError) giveUp();
+                // 成功時は onAuthStateChange(SIGNED_OUT) を App.tsx が拾って
+                // content が AuthScreen に切り替わる＝この画面は消える。何もしない。
+              } catch {
+                if (settled) return;
+                settled = true;
+                giveUp();
+              } finally {
+                clearTimeout(timer);
+              }
+            })();
           },
         },
       ],
