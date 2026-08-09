@@ -1,6 +1,9 @@
 {
-  "platforms": ["apple"],
+  "platforms": ["apple", "android"],
   "apple": {
     "modules": ["RtmpPublisherModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.rtmppublisher.RtmpPublisherModule"]
   }
 }

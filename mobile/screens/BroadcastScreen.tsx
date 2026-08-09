@@ -591,13 +591,20 @@ export function BroadcastScreen() {
       // まず自前配信サーバー(ネイティブRTMP→MediaMTX＋端末スコア焼き込み)を試す。サーバーフラグ
       // (NEXT_PUBLIC_STREAM_SELFHOST) がOFF/未設定なら null が返るので、従来の LiveKit 経路へ
       // 自動フォールバックする（=本番が壊れない・サーバー側フラグ1つで全体切替）。
-      // RTMP 自前配信は iOS 専用モジュール（modules/rtmp-publisher = apple only）。
-      // Android はサーバーフラグに関わらず必ず LiveKit にフォールバックする
-      // （Android で RTMP を選ぶとネイティブビューが無くクラッシュするため）。
-      const stream =
-        created.id && Platform.OS === "ios"
-          ? await fetchStreamTarget(created.id)
-          : null;
+      // ★2026-08-10: Android にもネイティブ RTMP 実装（RootEncoder 2.6.7・Kotlin）を載せたので
+      //   iOS 限定を解除した。以前は「Android で RTMP を選ぶとネイティブビューが無くクラッシュする」
+      //   ためガードしていたが、modules/rtmp-publisher/android/ を追加済み。
+      //
+      // 【なぜ Android も RTMP にするのか】
+      //   Android の LiveKit(WebRTC) 経路は、電波が苦しくなると**解像度そのものを落とす**
+      //   （実測で 320x180 まで落ちうる＝720p の1/16の情報量）。さらに YouTube へは
+      //   ヘッドレス Chrome で画面を録り直すため、コマ数の食い違いでカクつく。
+      //   2026-08-09 の関東大会（実顧客）で「見るに耐えない」画質になった。
+      //   RTMP は TCP なので、パケットが落ちても**画質を捨てずに再送**する。iOS 実測 3,400-3,505kbps。
+      //
+      // ★サーバーフラグ（NEXT_PUBLIC_STREAM_SELFHOST）が OFF なら従来どおり null が返り
+      //   LiveKit へ自動フォールバックする＝**サーバー側の1フラグで即座に戻せる**。
+      const stream = created.id ? await fetchStreamTarget(created.id) : null;
       if (stream) {
         transportRef.current = "rtmp";
         endedRef.current = false;

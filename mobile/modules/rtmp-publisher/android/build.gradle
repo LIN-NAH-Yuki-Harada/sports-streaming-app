@@ -1,0 +1,31 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.rtmppublisher'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.rtmppublisher"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  // RootEncoder: Android の RTMP 配信ライブラリ（Apache-2.0）。
+  // JitPack 配信（expo-template-bare-minimum の allprojects に jitpack.io が含まれる）。
+  //
+  // ★2.6.7 に固定（安易に上げないこと）。理由は二重制約:
+  //   1) 2.7.1+ は Kotlin 2.3 ビルド（metadata 2.3.0）で、RN 0.85 の Kotlin 2.1.20
+  //      では「incompatible version of Kotlin metadata」となり読めない。
+  //   2) 2.7.0〜2.7.3 には「Camera2 動的fpsレンジでカメラフリーズ」既知バグがある
+  //      （upstream PR #2105 / issue #1609。2.7.4 で修正）。実戦で 29 分時点の
+  //      映像フリーズとして発現した（2026-07-19）。2.6.7 は固定fpsレンジ＋
+  //      surfaceTexture タイムスタンプ非使用で両方の地雷を回避できる最新版。
+  //   → アプリ全体の Kotlin を 2.2.x に上げたら 2.7.5+ へ更新するのが正道。
+  //   本モジュールが使う API は 2.6.7 / 2.7.0 / 2.7.5 で同一（ソース突合済み）。
+  implementation 'com.github.pedroSG94.RootEncoder:library:2.6.7'
+}
