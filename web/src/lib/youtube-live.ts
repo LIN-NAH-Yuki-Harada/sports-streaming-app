@@ -308,3 +308,76 @@ export async function getStreamStatus(
     healthStatus: item.status?.healthStatus?.status ?? null,
   };
 }
+
+/**
+ * 「一度も映像が届かなかった」Live broadcast を削除する（空枠の掃除）。
+ *
+ * ## なぜ必要か（2026-08-10 実発生）
+ * 配信を開始した瞬間に YouTube 側の枠（liveBroadcast）を作る設計のため、
+ * 開始してすぐ止めて配信し直すと、**空の枠がチャンネルに残り続ける**。
+ * 視聴者からは「サレジオ 0-0 AEGIS」のような**中身のない配信が並んで見え**、
+ * どちらを見ればよいのか分からなくなる（実際に関東大会で2試合とも発生）。
+ * 残った枠を開くと「◯◯ を待っています」の紫画面のまま止まっている。
+ *
+ * ## ★安全設計（実際の試合を消したら取り返しがつかない）
+ * fail-closed。以下を**すべて**満たしたときだけ削除する:
+ *   1. YouTube 側の lifeCycleStatus が **一度も live/complete になっていない**
+ *      （= RTMP が一度も届いていない。これが最も確実な判定）
+ *   2. 呼び出し側が「短時間で終わった」と判断している
+ * 判定に必要な情報が取れない・API が失敗した場合は **削除しない**（false を返す）。
+ *
+ * @returns 削除したら true。削除しなかった/できなかったら false。
+ */
+export async function deleteEmptyLiveBroadcast(
+  broadcastId: string,
+  oauth2Client: OAuth2Client,
+): Promise<boolean> {
+  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+
+  // 1) 現在の lifeCycleStatus を確認する。
+  //    complete / live / liveStarting は「映像が来た（来ている）」ので絶対に消さない。
+  let lifeCycle: string | null = null;
+  try {
+    const res = await youtube.liveBroadcasts.list({
+      id: [broadcastId],
+      part: ["status"],
+    });
+    lifeCycle = res.data?.items?.[0]?.status?.lifeCycleStatus ?? null;
+  } catch (e) {
+    console.error("[youtube] lifeCycleStatus 取得に失敗（削除しない）:", e);
+    return false;
+  }
+
+  // 取得できなかった＝判断材料が無い → 消さない
+  if (!lifeCycle) {
+    console.warn("[youtube] lifeCycleStatus 不明のため削除しない:", broadcastId);
+    return false;
+  }
+
+  // ★ホワイトリスト方式: 「映像が一度も来ていない」と確信できる状態だけを許可する。
+  //   ブラックリスト（live/complete 以外なら消す）にすると、将来 YouTube が
+  //   新しい状態を足したときに実データを消しうる。
+  const NEVER_WENT_LIVE = new Set([
+    "created",
+    "ready",
+    "testStarting",
+    "testing",
+    "revoked",
+  ]);
+  if (!NEVER_WENT_LIVE.has(lifeCycle)) {
+    console.log(
+      `[youtube] 映像が届いた形跡があるため削除しない: ${broadcastId} (${lifeCycle})`,
+    );
+    return false;
+  }
+
+  // 2) 削除
+  try {
+    await youtube.liveBroadcasts.delete({ id: broadcastId });
+    console.log(`[youtube] 空の配信枠を削除: ${broadcastId} (${lifeCycle})`);
+    return true;
+  } catch (e) {
+    console.error("[youtube] 空枠の削除に失敗（無害・残るだけ）:", e);
+    return false;
+  }
+}
