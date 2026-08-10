@@ -400,9 +400,9 @@ function PricingPageInner() {
             <p className="text-xs text-gray-500 mt-3 leading-relaxed">
               共有コードで配信・アーカイブを視聴。
             </p>
-            <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-500 flex-1">
+            <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-400 flex-1">
               <li>✓ ライブ視聴（登録不要）</li>
-              <li>✓ アーカイブ視聴（チームプラン配信のYouTube限定公開）</li>
+              <li>✓ アーカイブ視聴（配信者がYouTube連携をONにしたチームプラン配信のみ）</li>
             </ul>
             <button
               disabled
@@ -485,9 +485,27 @@ function PricingPageInner() {
                 <span>✓ YouTube に自動アーカイブ（ご自身のチャンネルに長期保存）</span>
                 <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
               </li>
-              <li className="text-gray-500">🔜 リモコンでスコア操作（別端末から）</li>
-              <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
+              <li className="text-gray-400">🔜 リモコンでスコア操作（別端末から）</li>
+              <li className="text-gray-400">🔜 AI ハイライト自動生成</li>
             </ul>
+            {/* アーカイブが「残らない」二大原因。加入前に必ず見える位置に出す。 */}
+            <div className="mt-3 pt-3 border-t border-white/10 space-y-1.5 text-[11px] text-gray-400 leading-relaxed">
+              <p>
+                ※ YouTube 関連の機能には、マイページでのご自身の YouTube アカウント連携が必要です（初期状態はOFF）。
+              </p>
+              <p>
+                ※ 15分を超える録画の保存には、YouTube チャンネルの電話番号確認（
+                <a
+                  href="https://www.youtube.com/verify"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#e63946] hover:underline"
+                >
+                  youtube.com/verify
+                </a>
+                ・数分で完了・身分証不要）が必要です。未確認のチャンネルでは保存されません。
+              </p>
+            </div>
             {currentPlan === "team" ? (
               <button
                 onClick={handleManage}

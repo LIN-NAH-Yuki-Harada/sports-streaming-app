@@ -14,11 +14,11 @@ const PLAY_STORE_URL =
 const FAQ_ITEMS = [
   {
     q: "子どもの顔が映るのが心配です。大丈夫ですか？",
-    a: "共有コードを知る人だけが視聴できる限定公開なので、ご家族・チーム関係者以外には配信は届きません。アーカイブは配信者ご自身のYouTubeチャンネルに「限定公開」で保存され、リンクを知る人だけが視聴できます。",
+    a: "LIVE SPOtCH のプレイヤーでの配信は、共有コードを知る人だけが視聴できる限定公開です。検索や一覧には表示されません。なお、チームプランで「YouTube Live 同時配信」または「YouTube 自動アーカイブ」をONにした場合は、配信者ご自身のYouTubeチャンネルにも「限定公開」で映像が流れます。YouTubeの限定公開はURLを知っている人なら視聴できる状態のため、共有コードとは保護の仕組みが異なります。YouTube連携は初期状態ではOFFで、配信者ご自身が設定しない限り有効になりません。",
   },
   {
     q: "配信の画質はどれくらいですか？",
-    a: "HD画質（720p）で配信しています。一般的なLTE回線・WiFi環境で安定して視聴できます。",
+    a: "HD画質（720p）を上限に配信します。通信状況に応じて画質は自動で調整されるため、電波の弱い会場では一時的に画質が下がることがあります。安定したWiFi・LTE環境では、HD画質でご覧いただけます。",
   },
   {
     q: "10分の無料お試し時間が終わったらどうなりますか？",
@@ -26,7 +26,11 @@ const FAQ_ITEMS = [
   },
   {
     q: "配信者プランとチームプランの違いは？",
-    a: "配信者プラン（¥300/月）は個人保護者向けの「ライブ配信専用プラン」です。自社プレイヤーで試合をリアルタイムに家族へ届ける用途に最適（アーカイブ保存はありません）。チームプラン（¥500/月）は記録運用向けで、自社プレイヤー配信に加えて YouTube Live 同時配信・YouTube への自動アーカイブ・チーム管理・スケジュール管理・リモコン操作（開発中）・AIハイライト（開発中）が追加されます。",
+    a: "配信者プラン（¥300/月）は個人保護者向けの「ライブ配信専用プラン」です。自社プレイヤーで試合をリアルタイムに家族へ届ける用途に最適（アーカイブ保存はありません）。チームプラン（¥500/月）は記録運用向けで、自社プレイヤー配信に加えて YouTube Live 同時配信・YouTube への自動アーカイブ・チーム管理・スケジュール管理・リモコン操作（開発中）・AIハイライト（開発中）が追加されます。なお YouTube 関連の機能をご利用いただくには、マイページでご自身の YouTube アカウントを連携する設定が必要です（初期状態はOFF）。",
+  },
+  {
+    q: "チームプランのアーカイブ（録画）は、何もしなくても残りますか？",
+    a: "2つの準備が必要です。①マイページでご自身の YouTube アカウントを連携してください（初期状態はOFFのため、未設定のままだと録画は保存されません）。②15分を超える試合を保存する場合は、その YouTube チャンネルで電話番号の確認（youtube.com/verify・数分で完了・身分証不要）を済ませてください。未確認のチャンネルは YouTube 側が15分超の動画を受け付けないため、アップロードを中止します。サッカー・バレーなど多くの試合は15分を超えるため、初回配信の前にこの2つをご確認ください。",
   },
   {
     q: "複数の家族・親戚が同時に視聴できますか？",
@@ -453,7 +457,7 @@ export default function LandingPage() {
           {[
             { title: "試合に行けない日に", desc: "仕事で応援に行けなくても、スマホでリアルタイム観戦。お子さまの活躍を見逃しません。", image: "/lp-scenes-office-dad.jpg", alt: "仕事中の父親がオフィスからスマホで子どもの試合をライブ観戦" },
             { title: "おじいちゃん、おばあちゃんに", desc: "遠方に住む祖父母にもコードを送るだけ。孫の試合を一緒に応援。", image: "/lp-scenes-grandparents.jpg", alt: "離れた地域の祖父母がタブレットで孫の試合を観戦" },
-            { title: "チームの振り返りに", desc: "チームプランのアーカイブ自動保存で、試合後の反省会や戦術確認に。コーチも選手も使えます。", image: "/lp-scenes-coach-review.jpg", alt: "スポーツ少年団のコーチが試合アーカイブで戦術を振り返る様子" },
+            { title: "チームの振り返りに", desc: "チームプランのアーカイブ自動保存（YouTube連携が必要）で、試合後の反省会や戦術確認に。コーチも選手も使えます。", image: "/lp-scenes-coach-review.jpg", alt: "スポーツ少年団のコーチが試合アーカイブで戦術を振り返る様子" },
             { title: "大会・講演会の中継に", desc: "スポーツに限らず、学校行事や講演会の限定配信にも対応。", image: "/lp-scenes-school-event.jpg", alt: "学校行事や地域大会をライブ配信して関係者に届ける様子" },
           ].map((item) => (
             <div key={item.title} className="group rounded-2xl ring-1 ring-white/10 overflow-hidden bg-white/[0.02] hover:ring-[#e63946]/40 hover:-translate-y-1 transition duration-300">
@@ -536,12 +540,12 @@ export default function LandingPage() {
           <div className="rounded-2xl ring-1 ring-white/10 bg-white/[0.02] p-5 sm:p-6">
             <p className="text-xs text-gray-500 mb-1">視聴する人</p>
             <p className="text-2xl sm:text-3xl font-black">無料</p>
-            <p className="text-xs text-gray-500 mt-3 leading-relaxed">
-              共有コードでライブ視聴。登録不要。チームプラン配信はYouTubeアーカイブも視聴可。
+            <p className="text-xs text-gray-400 mt-3 leading-relaxed">
+              共有コードでライブ視聴。登録不要。配信者がYouTube連携をONにしていれば、アーカイブも視聴できます。
             </p>
             <ul className="mt-4 space-y-2 text-[11px] sm:text-xs text-gray-400">
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> ライブ視聴（登録不要）</li>
-              <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> アーカイブ視聴（チームプラン配信のYouTube限定公開）</li>
+              <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> アーカイブ視聴（配信者がYouTube連携をONにしたチームプラン配信のみ）</li>
             </ul>
           </div>
           <div className="rounded-2xl ring-1 ring-white/10 bg-white/[0.02] p-5 sm:p-6">
@@ -574,9 +578,24 @@ export default function LandingPage() {
                 <span className="flex gap-1.5"><span className="text-[#e63946]">✓</span> YouTube に自動アーカイブ（長期保存）</span>
                 <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
               </li>
-              <li className="text-gray-500">🔜 リモコンでスコア操作（別端末から）</li>
-              <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
+              <li className="text-gray-400">🔜 リモコンでスコア操作（別端末から）</li>
+              <li className="text-gray-400">🔜 AI ハイライト自動生成</li>
             </ul>
+            <div className="mt-4 pt-3 border-t border-white/10 space-y-1.5 text-[11px] text-gray-400 leading-relaxed">
+              <p>※ YouTube 関連の機能には、マイページでのご自身の YouTube アカウント連携が必要です（初期状態はOFF）。</p>
+              <p>
+                ※ 15分を超える録画の保存には、YouTube チャンネルの電話番号確認が必要です（
+                <a
+                  href="https://www.youtube.com/verify"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#e63946] hover:underline"
+                >
+                  youtube.com/verify
+                </a>
+                ・数分で完了）。
+              </p>
+            </div>
           </div>
         </div>
       </section>
