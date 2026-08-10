@@ -35,6 +35,9 @@ function PricingPageInner() {
   const { user, profile, loading: authLoading } = useAuth();
   const [loadingPlan, setLoadingPlan] = useState<Plan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // アプリ内課金（App Store / Google Play）で登録した人は Stripe の顧客IDを持たないため、
+  // カスタマーポータルを開けない。その場合にストア側の解約手順を案内する。
+  const [showStoreCancelHelp, setShowStoreCancelHelp] = useState(false);
   // 未ログインで「加入」を押したらログイン/登録フォームを出す（クーポン有無に関わらず）。
   const [showAuth, setShowAuth] = useState(false);
 
@@ -155,6 +158,8 @@ function PricingPageInner() {
   const handleManage = async () => {
     if (!user) return;
     setLoadingPlan(currentPlan as Plan);
+    setError(null);
+    setShowStoreCancelHelp(false);
     try {
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
@@ -166,10 +171,17 @@ function PricingPageInner() {
       const data = await res.json();
       if (res.ok) {
         window.location.href = data.url;
+        return;
+      }
+      // 404 = Stripe の顧客が存在しない = アプリ内課金（App Store / Google Play）で
+      // ご登録の方。API の英語メッセージをそのまま出すと日本語画面に
+      // 「No Stripe customer found」と表示され、解約したい人が行き止まりになる。
+      if (res.status === 404) {
+        setShowStoreCancelHelp(true);
       } else {
         setError(data.error ?? "カスタマーポータルを開けませんでした");
-        setLoadingPlan(null);
       }
+      setLoadingPlan(null);
     } catch {
       setError("通信エラーが発生しました");
       setLoadingPlan(null);
@@ -302,6 +314,33 @@ function PricingPageInner() {
         {error && (
           <div className="mb-4 rounded-md bg-[#e63946]/10 border border-[#e63946]/30 px-4 py-3 text-sm text-[#e63946]">
             {error}
+          </div>
+        )}
+
+        {/* アプリ内課金でご登録の方へ（カスタマーポータルが開けない場合の解約案内） */}
+        {showStoreCancelHelp && (
+          <div className="mb-4 rounded-lg bg-[#111] border border-white/15 px-4 py-4 text-sm">
+            <p className="font-semibold text-white">
+              アプリ内課金でご登録の方は、ストア側でお手続きください
+            </p>
+            <p className="mt-2 text-xs text-gray-400 leading-relaxed">
+              このアカウントは iPhone / Android アプリ内（App Store / Google Play）でご登録いただいているため、
+              このページからは解約・支払い方法の変更ができません。ストア決済の仕様によるものです。
+            </p>
+            <ul className="mt-3 space-y-2 text-xs text-gray-300 list-disc list-outside pl-5">
+              <li>
+                <strong className="text-white">iPhone / iPad</strong>：「設定」→ 一番上のお名前（Apple ID）→「サブスクリプション」→ LIVE SPOtCH →「サブスクリプションをキャンセル」
+              </li>
+              <li>
+                <strong className="text-white">Android</strong>：「Google Play ストア」→ 右上のアイコン →「お支払いと定期購入」→「定期購入」→ LIVE SPOtCH →「定期購入を解約」
+              </li>
+            </ul>
+            <p className="mt-3 text-xs text-gray-400 leading-relaxed">
+              解約後も、課金済みの期間の末日までは引き続きご利用いただけます。
+              うまくいかない場合は
+              <a href="/contact" className="text-[#e63946] hover:underline mx-1">お問い合わせ</a>
+              よりご連絡ください。
+            </p>
           </div>
         )}
 
@@ -489,10 +528,29 @@ function PricingPageInner() {
               </li>
             )}
             <li>決済は Stripe を通じて安全に処理されます。カード情報は当社では一切保持しません。</li>
-            <li>解約はマイページまたは「プラン管理」からいつでも可能です。</li>
+            <li>
+              解約はいつでも可能です。このページ（Web）からクレジットカードでご登録の場合はマイページの「プラン管理」から、
+              iPhone / Android のアプリ内でご登録の場合は各ストアのサブスクリプション管理画面からお手続きください。
+            </li>
             <li>解約後も当該月末までは引き続きご利用いただけます。</li>
           </ul>
         </div>
+
+        {/* 法定表示・規約へのリンク（特定商取引法／Apple ガイドライン 3.1.2 で購入画面からの導線が必要） */}
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-gray-400">
+          <a href="/terms" className="hover:text-white underline underline-offset-2 transition">
+            利用規約
+          </a>
+          <a href="/privacy" className="hover:text-white underline underline-offset-2 transition">
+            プライバシーポリシー
+          </a>
+          <a href="/tokusho" className="hover:text-white underline underline-offset-2 transition">
+            特定商取引法に基づく表示
+          </a>
+        </div>
+        <p className="mt-3 text-center text-[11px] text-gray-500 leading-relaxed">
+          プランにお申し込みいただいた時点で、利用規約およびプライバシーポリシーに同意したものとみなします。
+        </p>
       </div>
     </div>
   );
