@@ -35,6 +35,10 @@ dependencies {
   // 2.7.4 の "Camera2Source use fps range fixed to avoid dynamic range" は
   // 7/19 に踏んだ29分フリーズ（動的fpsレンジ）の upstream 修正そのものなので、
   // 2.8.0 はその修正も含む。過去に「2.7.4+ は Kotlin 2.3 製で使えない」と判断したが、
-  // 根拠が確認できなかったため実ビルドで検証する。
-  implementation 'com.github.pedroSG94.RootEncoder:library:2.8.0'
+  // 根拠が確認できなかったため実ビルドで検証中。
+  // ★ただし調査の結果、openCamera の実装は 2.6.7〜2.8.0 で**同一**と判明したため、
+  //   版上げは今回の「Open camera 0 failed」の対策にはならない。真因は実行時権限。
+  //   ビルド実績のある 2.6.7 に戻し、権限の修正だけを入れる（一度に1つだけ変える）。
+  //   2.7.4 の fps レンジ修正（29分フリーズ対策）は、版上げの互換確認が済んでから別途。
+  implementation 'com.github.pedroSG94.RootEncoder:library:2.6.7'
 }

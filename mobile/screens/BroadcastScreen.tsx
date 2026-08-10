@@ -7,7 +7,9 @@ import {
   BackHandler,
   Easing,
   KeyboardAvoidingView,
+  Linking,
   Modal,
+  PermissionsAndroid,
   Platform,
   Pressable,
   SafeAreaView,
@@ -484,6 +486,46 @@ export function BroadcastScreen() {
   const handleStart = useCallback(async () => {
     setBusy(true);
     setMessage(null);
+
+    // ★2026-08-10: Android は配信開始前に自分で実行時許可を取りに行く。
+    //
+    // 【なぜ必要か】このアプリには実行時権限を要求するコードが**1行も無かった**。
+    //   旧 LiveKit 経路では `getUserMedia` がライブラリ内部で許可ダイアログを出していたが、
+    //   **RTMP 経路はそこへ行く前に return する**ため、許可が一度も要求されない。
+    //   RootEncoder は権限を確認せずカメラを開きに行き、蹴られると
+    //   "Open camera 0 failed" とだけ返す（実機で発生・2026-08-10）。
+    //   ＝**新規インストールした端末は全て確実にこの穴に落ちる。**
+    //
+    // ★配信の行を作る前に置くこと。後ろに置くと、許可が下りなかったときに
+    //   配信データだけが作られて宙に浮く。
+    // ★RTMP / LiveKit の分岐より前に置くこと（両経路に効く。LiveKit 側は
+    //   二重に要求されるが、許可済みならダイアログは出ないので無害）。
+    if (Platform.OS === "android") {
+      try {
+        const res = await PermissionsAndroid.requestMultiple([
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        ]);
+        const cam = res[PermissionsAndroid.PERMISSIONS.CAMERA];
+        const mic = res[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
+        if (cam !== "granted" || mic !== "granted") {
+          const never =
+            cam === "never_ask_again" || mic === "never_ask_again";
+          setMessage(
+            never
+              ? "カメラとマイクの使用を許可してください。設定画面を開きます。"
+              : "カメラとマイクの使用が必要です。もう一度「配信開始」を押し、表示される確認で「許可」を選んでください。",
+          );
+          if (never) Linking.openSettings().catch(() => {});
+          setBusy(false);
+          return;
+        }
+      } catch {
+        // 権限APIが失敗しても配信開始そのものは塞がない（従来どおり進んで
+        // ネイティブ側のエラーに委ねる）。ここで止めると回復不能になる。
+      }
+    }
+
     let createdCode: string | null = null;
 
     // 配信の行を作った**後**に失敗したときの後始末。
