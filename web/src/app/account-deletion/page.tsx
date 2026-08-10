@@ -23,7 +23,7 @@ export default function AccountDeletionPage() {
         <p className="mt-1 text-xs text-gray-500">
           Delete your LIVE SPOtCH account — by LIN-NAH株式会社
         </p>
-        <p className="mt-2 text-[10px] text-gray-600">最終更新日: 2026年7月4日</p>
+        <p className="mt-2 text-xs text-gray-400">最終更新日: 2026年8月11日</p>
 
         <div className="mt-8 space-y-8 text-sm md:text-[15px] text-gray-300 leading-relaxed">
           <section>
@@ -298,7 +298,7 @@ export default function AccountDeletionPage() {
         </div>
 
         <div className="mt-12 pt-6 border-t border-white/5">
-          <p className="text-[10px] text-gray-600">LIN-NAH株式会社</p>
+          <p className="text-xs text-gray-400">LIN-NAH株式会社</p>
           <a
             href="/"
             className="inline-block mt-4 text-xs text-gray-400 hover:text-white transition"

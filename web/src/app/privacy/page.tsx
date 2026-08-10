@@ -164,7 +164,7 @@ export default function PrivacyPage() {
       </div>
 
       <div className="mt-12 pt-6 border-t border-white/5">
-        <p className="text-[10px] text-gray-600">LIN-NAH株式会社</p>
+        <p className="text-xs text-gray-400">LIN-NAH株式会社</p>
         <a href="/" className="inline-block mt-4 text-xs text-gray-400 hover:text-white transition">
           ← トップに戻る
         </a>

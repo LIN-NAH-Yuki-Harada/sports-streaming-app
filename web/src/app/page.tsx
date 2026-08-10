@@ -284,7 +284,7 @@ export default function LandingPage() {
                 >
                   まずは10分間、無料で試す
                 </a>
-                <span className="text-sm text-gray-600 px-2 sm:px-4 py-1 sm:py-3">
+                <span className="text-sm text-gray-400 px-2 sm:px-4 py-1 sm:py-3">
                   Webブラウザで今すぐ使えます
                 </span>
               </div>
@@ -324,7 +324,7 @@ export default function LandingPage() {
                     className="h-[57px] w-auto"
                   />
                 </a>
-                <span className="text-[11px] text-gray-600 leading-relaxed">
+                <span className="text-[11px] text-gray-400 leading-relaxed">
                   iOS / Android
                   <br />
                   アプリ配信中
@@ -372,7 +372,9 @@ export default function LandingPage() {
               {/* 左下: 共有コード */}
               <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-black/70 backdrop-blur-sm rounded px-2.5 py-1.5">
                 <span className="text-[8px] text-gray-400">コード</span>
-                <span className="text-[10px] font-black tracking-widest">A8C3</span>
+                {/* 実物は 8 文字（database.ts の generateShareCode）。見本も 8 文字に揃える。
+                    紛らわしい I/O/0/1 を除いた文字種から構成。 */}
+                <span className="text-[10px] font-black tracking-wider">A8C3KRWP</span>
               </div>
             </div>
           </div>
@@ -425,7 +427,7 @@ export default function LandingPage() {
               {s.emoji} {s.name}
             </span>
           ))}
-          <span className="text-xs sm:text-sm text-gray-600 px-3 sm:px-4 py-1.5 sm:py-2">...その他すべてのスポーツ</span>
+          <span className="text-xs sm:text-sm text-gray-400 px-3 sm:px-4 py-1.5 sm:py-2">...その他すべてのスポーツ</span>
         </div>
       </section>
 
@@ -722,7 +724,7 @@ export default function LandingPage() {
       {/* フッター */}
       <footer className="border-t border-white/5 py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-6xl">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-600">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-400">
             <p>© 2026 LIVE SPOtCH / LIN-NAH株式会社</p>
             <div className="flex flex-wrap gap-4 sm:gap-6 justify-center">
               <a
@@ -749,7 +751,7 @@ export default function LandingPage() {
             </div>
           </div>
           {/* ストアバッジ利用に伴う帰属表記（Google Play ブランドガイドライン準拠） */}
-          <p className="mt-4 text-[10px] text-gray-700 text-center sm:text-right leading-relaxed">
+          <p className="mt-4 text-[11px] text-gray-400 text-center sm:text-right leading-relaxed">
             Google Play および Google Play のロゴは Google LLC の商標です。App Store は Apple Inc. のサービスマークです。
           </p>
         </div>
