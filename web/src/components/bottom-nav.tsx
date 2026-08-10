@@ -9,7 +9,7 @@ export function BottomNav() {
   // LP（ルート）・法的ページ・視聴ページ・配信中・Egress合成テンプレートでは非表示。
   // /egress-template は LiveKit Cloud の Chrome が録画/RTMP push する合成専用ページなので、
   // ナビが写り込むと YouTube 映像に出てしまう（発熱対策 Phase 1-D）。
-  const hiddenPaths = ["/terms", "/privacy", "/contact", "/watch", "/egress-template"];
+  const hiddenPaths = ["/terms", "/privacy", "/tokusho", "/account-deletion", "/contact", "/watch", "/egress-template"];
   if (pathname === "/" || hiddenPaths.some((path) => pathname.startsWith(path))) return null;
 
   const tabs = [

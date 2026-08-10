@@ -744,6 +744,7 @@ export default function LandingPage() {
               <a href="/terms" className="hover:text-gray-400 transition">利用規約</a>
               <a href="/privacy" className="hover:text-gray-400 transition">プライバシーポリシー</a>
               <a href="/tokusho" className="hover:text-gray-400 transition">特定商取引法に基づく表示</a>
+              <a href="/account-deletion" className="hover:text-gray-400 transition">アカウント削除</a>
               <a href="/contact" className="hover:text-gray-400 transition">お問い合わせ</a>
             </div>
           </div>

@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 
-const TEXT_PATHS = ["/terms", "/privacy", "/contact", "/reset-password"];
+const TEXT_PATHS = ["/terms", "/privacy", "/tokusho", "/account-deletion", "/contact", "/reset-password"];
 const WIDE_PREFIXES = ["/search", "/schedule"];
 
 type Variant = "full" | "wide" | "normal" | "text";

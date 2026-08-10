@@ -1,4 +1,13 @@
+import type { Metadata } from "next";
 import { Logo } from "@/components/logo";
+
+export const metadata: Metadata = {
+  title: "プライバシーポリシー",
+  description:
+    "LIVE SPOtCH（LIN-NAH株式会社）のプライバシーポリシー。収集する情報、利用目的、外部サービスへの委託、Cookie・アクセス解析、データの保管とユーザーの権利について説明しています。",
+  alternates: { canonical: "/privacy" },
+  robots: { index: true, follow: true },
+};
 
 export default function PrivacyPage() {
   return (

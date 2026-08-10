@@ -1,4 +1,13 @@
+import type { Metadata } from "next";
 import { Logo } from "@/components/logo";
+
+export const metadata: Metadata = {
+  title: "利用規約",
+  description:
+    "LIVE SPOtCH（LIN-NAH株式会社）の利用規約。アカウント登録、サービス内容、料金・支払い、禁止事項、コンテンツの取り扱い、退会についての条件を定めています。",
+  alternates: { canonical: "/terms" },
+  robots: { index: true, follow: true },
+};
 
 export default function TermsPage() {
   return (

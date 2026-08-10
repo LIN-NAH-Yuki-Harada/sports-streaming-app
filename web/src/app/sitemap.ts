@@ -42,5 +42,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "yearly",
       priority: 0.3,
     },
+    {
+      // ログインできない方がアカウント削除を依頼するためのページ。
+      // 辿り着けないと意味がないので sitemap にも載せる。
+      url: `${SITE_URL}/account-deletion`,
+      lastModified,
+      changeFrequency: "yearly",
+      priority: 0.3,
+    },
   ];
 }
