@@ -50,22 +50,46 @@ export default function PrivacyPage() {
             <li>法令に基づく場合</li>
             <li>
               本サービスの提供に必要な範囲で、以下の外部サービスプロバイダーに委託する場合
-              <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-gray-500">
+              <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-gray-400">
                 <li>Supabase（データベース・認証基盤）</li>
                 <li>LiveKit（映像配信基盤）</li>
-                <li>Vercel（ホスティング）</li>
+                <li>Vercel（ホスティング／アクセス解析・表示速度計測）</li>
+                <li>Amazon Web Services - Amazon CloudFront（映像配信のCDN・視聴者のIPアドレスおよびアクセスログ）</li>
+                <li>当社が管理する配信サーバー（配信映像そのものの中継・一時保存）</li>
+                <li>Google LLC - YouTube（チームプランで連携された場合に限り、配信映像およびYouTubeアカウント情報）</li>
                 <li>Stripe（決済処理）</li>
                 <li>Apple App Store / Google Play・RevenueCat（アプリ内課金の決済・購読管理）</li>
+                <li>Resend（お知らせ等のメール配信・メールアドレス／米国事業者）</li>
               </ul>
+              <p className="ml-4 mt-2 text-xs text-gray-400">
+                これらの一部は日本国外（米国等）のサーバーで情報を取り扱います。
+              </p>
             </li>
           </ol>
         </section>
 
         <section>
-          <h2 className="text-base font-semibold text-white mb-3">4. Cookieの使用</h2>
+          <h2 className="text-base font-semibold text-white mb-3">4. Cookie・アクセス解析と情報の外部送信</h2>
           <p className="text-gray-400">
-            本サービスでは、認証状態の維持およびサービスの利便性向上のためにCookieを使用します。
+            本サービスでは、以下の目的でCookie等の識別子を使用し、一部の情報を外部事業者へ送信します。
+          </p>
+          <ul className="list-disc list-inside mt-2 space-y-1 text-gray-400">
+            <li>
+              <strong className="text-gray-300">認証状態の維持・利便性向上</strong>: ログイン状態を保持するために使用します。
+            </li>
+            <li>
+              <strong className="text-gray-300">アクセス解析・表示速度の計測</strong>: サービス改善のため、
+              Vercel Analytics および Vercel Speed Insights により、閲覧されたページ・参照元・
+              おおまかな地域・端末やブラウザの種類・表示速度に関する情報を取得します。
+              送信先は Vercel Inc.（米国）です。
+            </li>
+          </ul>
+          <p className="mt-2 text-gray-400">
             ブラウザの設定によりCookieを無効にすることができますが、一部の機能が利用できなくなる場合があります。
+          </p>
+          <p className="mt-2 text-gray-400">
+            今後、広告の配信・効果測定を目的とした情報の外部送信を開始する場合は、開始前に本ポリシーを改定し、
+            送信先および送信される情報を公表します。
           </p>
         </section>
 
