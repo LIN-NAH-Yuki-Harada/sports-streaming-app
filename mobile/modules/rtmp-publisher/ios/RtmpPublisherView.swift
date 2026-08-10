@@ -92,7 +92,7 @@ class RtmpPublisherView: ExpoView {
   }
 
   // 着信(.began)=音声HWが電話に占有される → 音声エンジン停止（音声のみ無音。映像は capture 専用化で継続）。
-  // 通話終了(.ended .shouldResume)=audio session 再有効化＋音声エンジン再起動で音声だけ自動復帰
+  // 通話終了(.ended)=audio session 再有効化＋音声エンジン再起動で音声だけ自動復帰
   //   （映像は音声と別キャプチャなので、着信中も通話後も無関係に流れ続ける）。
   @objc private func handleAudioInterruption(_ note: Notification) {
     guard
@@ -105,13 +105,41 @@ class RtmpPublisherView: ExpoView {
       // 実マイクは使えなくなるが、無音を流し続けてストリーム(エンコーダ/多重化)を生かす＝映像継続。
       audioSource?.beginInterruption()
     case .ended:
-      let optRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-      if AVAudioSession.InterruptionOptions(rawValue: optRaw).contains(.shouldResume) {
-        try? AVAudioSession.sharedInstance().setActive(true)
-        audioSource?.endInterruption() // 無音を止めて実マイクへ復帰
-      }
+      // ★2026-08-10: .shouldResume の有無に関わらず復帰を試みるよう変更した。
+      //
+      // 【なぜ】以前は `.shouldResume` が付いているときだけ復帰していた。しかし
+      //   **iOS はこの印を必ず付けるわけではなく、特に LINE通話のような VoIP アプリでは
+      //   付かないことがある**。印が来なければこの分岐は何もせず、音声セッションが
+      //   非アクティブのまま固定される＝マイクが戻らず、JS 側の中断フラグも解除されず、
+      //   再接続ループが「通話中だから待つ」を無限に繰り返してデッドロックする。
+      //   2026-08-09 の関東大会準決勝（サレジオ vs 日本航空・実顧客）で、LINE通話のあと
+      //   **72分の試合の残り全部が静止画のまま配信された**。
+      //
+      // 印を無視して復帰を試みても、失敗すれば例外が返るだけで悪化はしない（fail-safe）。
+      resumeAudioSession(attempt: 0)
     @unknown default:
       break
+    }
+  }
+
+  /// 音声セッションを再有効化してマイクを復帰させる。失敗したら間隔を空けて数回やり直す。
+  ///
+  /// 通話終了直後は相手アプリがまだ音声デバイスを掴んでいて `setActive(true)` が
+  /// 失敗することがある。一度きりの試行だと、そこで諦めて永久に無音のままになる。
+  private func resumeAudioSession(attempt: Int) {
+    let maxAttempts = 6      // 1秒間隔で最大6回＝約6秒粘る
+    do {
+      try AVAudioSession.sharedInstance().setActive(true)
+      audioSource?.endInterruption() // 無音を止めて実マイクへ復帰
+    } catch {
+      guard attempt < maxAttempts else {
+        // 復帰できなかった。JS 側には watchdog があり、中断が長引けば
+        // 接続を作り直して復旧するので、ここで配信を落としたりはしない。
+        return
+      }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        self?.resumeAudioSession(attempt: attempt + 1)
+      }
     }
   }
 

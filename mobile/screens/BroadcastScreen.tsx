@@ -160,6 +160,11 @@ function formatScoreboardLine(a: {
 const BACKGROUND_GRACE_MS = 180_000; // 中断(電話/回線/背景)から復帰を待つ総デッドライン(3分)
 const RECONNECT_COOLDOWN_MS = 6_000; // 作り直し試行の最小間隔(乱発=thrash防止)
 const RECONNECT_SETTLE_MS = 1_500; // 切断検知から最初の作り直しまでの待ち(回線/カメラ安定待ち)
+// ★中断(通話等)が解除されないまま何秒待ったら、解除を待たずに作り直しへ進むか。
+//   2026-08-09 の関東大会準決勝で、LINE通話のあと中断フラグが永久に立ちっぱなしになり、
+//   再接続ループが「通話中だから待つ」を無限に繰り返して**残り全部が静止画**になった。
+//   ネイティブ側の復帰処理も直したが、そこが失敗しても必ず復旧できるよう二重にする。
+const INTERRUPT_WAIT_MAX_MS = 20_000;
 // 共有ボタンを押してから「背景化」が飛ぶまでの猶予。これを超える背景化は共有起点とみなさない。
 const SHARE_TRIGGER_WINDOW_MS = 5_000;
 // 共有起点の離席で配信を終了しない猶予。共有先(LINE)は配信中の端末負荷で重く、
@@ -232,6 +237,7 @@ export function BroadcastScreen() {
   const remountingRef = useRef(false); // 再接続(作り直し)モード中は onDisconnected/closed で終了させない
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interruptedRef = useRef(false); // 通話等で映像キャプチャ中断中＝復帰まで作り直しを待つ
+  const interruptedAtRef = useRef(0); // 中断が始まった時刻（長引いたら待たずに作り直す判定用）
   const wasLiveRef = useRef(false); // 一度でも open(配信確立)したか。配信中エラーは終了せず再接続するため
   const wasInterruptedRef = useRef(false); // 今回の再接続が通話起因か（終了メッセージ出し分け用）
   const recoverDeadlineRef = useRef(0); // 再接続を諦める総デッドライン（この時刻を過ぎたら finishLive）
@@ -878,8 +884,21 @@ export function BroadcastScreen() {
         }
         if (interruptedRef.current) {
           // 通話中＝カメラ使用不可。作り直さずクールダウン後に再チェック。
-          reconnectTimerRef.current = setTimeout(attempt, RECONNECT_COOLDOWN_MS);
-          return;
+          // ★ただし待つのは INTERRUPT_WAIT_MAX_MS まで。中断解除の通知が来ない端末/経路
+          //   （LINE通話等の VoIP は iOS が .shouldResume を付けないことがある）では、
+          //   ここで待ち続けると**永久に復旧しない**。上限を超えたら中断フラグを落として
+          //   通常の作り直しに進む（カメラがまだ使えなければ、その試行が失敗して
+          //   またクールダウンするだけ＝安全に再試行され続ける）。
+          const stuckMs = interruptedAtRef.current
+            ? Date.now() - interruptedAtRef.current
+            : 0;
+          if (stuckMs < INTERRUPT_WAIT_MAX_MS) {
+            reconnectTimerRef.current = setTimeout(attempt, RECONNECT_COOLDOWN_MS);
+            return;
+          }
+          console.log("[recover] 中断が長引いたため待たずに作り直す", stuckMs, "ms");
+          interruptedRef.current = false;
+          interruptedAtRef.current = 0;
         }
         console.log("[recover] remount attempt");
         setLiveKey((k) => k + 1); // 同一 broadcastId/共有コードへ作り直し＝再接続
@@ -1337,12 +1356,14 @@ export function BroadcastScreen() {
         // recover loop が中断中に作り直しを待つための判定にのみ使う。
         if (endedRef.current) return;
         interruptedRef.current = true;
+        if (!interruptedAtRef.current) interruptedAtRef.current = Date.now();
         wasInterruptedRef.current = true;
       } else if (state === "resumed") {
         // 中断解除。一過性(RTMP維持)なら何もしない＝分割を防ぐ。
         // 既に再接続中(=RTMPが実際に切れていた)なら、解除後に作り直しを促す。
         if (endedRef.current) return;
         interruptedRef.current = false;
+        interruptedAtRef.current = 0;
         if (remountingRef.current) {
           if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
           reconnectTimerRef.current = setTimeout(
@@ -1794,7 +1815,7 @@ export function BroadcastScreen() {
               ) : null}
               <Text style={styles.preShareBody}>
                 配信中にLINEを開くと端末が熱くなり、映像が乱れる原因になります。
-                Android では映像が一時的に途切れます。開始前の共有がおすすめです。
+                端末によっては映像が一時的に途切れることがあります。開始前の共有がおすすめです。
               </Text>
               <Pressable
                 style={styles.preShareBtn}
