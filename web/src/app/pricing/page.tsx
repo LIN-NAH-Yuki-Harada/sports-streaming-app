@@ -23,9 +23,43 @@ type PromoState =
 
 export default function PricingPage() {
   return (
-    <Suspense fallback={<div className="px-5 py-10 text-sm text-gray-500">読み込み中...</div>}>
-      <PricingPageInner />
-    </Suspense>
+    <>
+      <Suspense fallback={<div className="px-5 py-10 text-sm text-gray-500">読み込み中...</div>}>
+        <PricingPageInner />
+      </Suspense>
+      <LegalLinks />
+    </>
+  );
+}
+
+/**
+ * 法定表示・規約へのリンク。
+ *
+ * ★Suspense の「外」に置くのが要点。PricingPageInner は useSearchParams() を使うため
+ * ページ全体がクライアント描画になり、サーバーが返す HTML はフォールバック
+ * （「読み込み中...」）だけになる。特定商取引法は申込みの最終確認画面から表示に
+ * アクセスできることを求めており、Apple のガイドライン 3.1.2 もサブスク購入画面から
+ * 規約・プライバシーポリシーへの機能するリンクを要件にしているので、
+ * JS の実行状況に関わらず必ず出るようにここへ置く。
+ */
+function LegalLinks() {
+  return (
+    <div className="px-5 md:px-8 lg:px-10 pb-24">
+      <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-gray-400">
+        <a href="/terms" className="hover:text-white underline underline-offset-2 transition">
+          利用規約
+        </a>
+        <a href="/privacy" className="hover:text-white underline underline-offset-2 transition">
+          プライバシーポリシー
+        </a>
+        <a href="/tokusho" className="hover:text-white underline underline-offset-2 transition">
+          特定商取引法に基づく表示
+        </a>
+      </div>
+      <p className="mt-3 text-center text-[11px] text-gray-500 leading-relaxed">
+        プランにお申し込みいただいた時点で、利用規約およびプライバシーポリシーに同意したものとみなします。
+      </p>
+    </div>
   );
 }
 
@@ -205,7 +239,8 @@ function PricingPageInner() {
         <h1 className="mt-2 text-sm font-bold text-gray-400">料金プラン</h1>
       </header>
 
-      <div className="px-5 md:px-8 lg:px-10 pt-8 md:pt-12 pb-24">
+      {/* 下端の余白は LegalLinks 側が持つ（下部ナビとの被り回避） */}
+      <div className="px-5 md:px-8 lg:px-10 pt-8 md:pt-12 pb-8">
         {/* ── 有効なプロモコードがある場合の "クーポン誘導" ヒーロー ─────────────────── */}
         {hasValidPromo ? (
           <div className="mb-8 rounded-2xl border border-[#e63946]/40 bg-gradient-to-br from-[#e63946]/20 via-[#e63946]/5 to-transparent p-6 md:p-8">
@@ -553,22 +588,6 @@ function PricingPageInner() {
             <li>解約後も当該月末までは引き続きご利用いただけます。</li>
           </ul>
         </div>
-
-        {/* 法定表示・規約へのリンク（特定商取引法／Apple ガイドライン 3.1.2 で購入画面からの導線が必要） */}
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-gray-400">
-          <a href="/terms" className="hover:text-white underline underline-offset-2 transition">
-            利用規約
-          </a>
-          <a href="/privacy" className="hover:text-white underline underline-offset-2 transition">
-            プライバシーポリシー
-          </a>
-          <a href="/tokusho" className="hover:text-white underline underline-offset-2 transition">
-            特定商取引法に基づく表示
-          </a>
-        </div>
-        <p className="mt-3 text-center text-[11px] text-gray-500 leading-relaxed">
-          プランにお申し込みいただいた時点で、利用規約およびプライバシーポリシーに同意したものとみなします。
-        </p>
       </div>
     </div>
   );
