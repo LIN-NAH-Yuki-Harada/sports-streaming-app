@@ -513,7 +513,7 @@ function PricingPageInner() {
               <li>✓ 試合スケジュール管理</li>
               <li>✓ 共有コードのチーム自動配布</li>
               <li className="text-gray-200 flex items-center gap-1.5 flex-wrap">
-                <span>✓ YouTube Live 同時配信（YouTube にもリアルタイム push）</span>
+                <span>✓ 試合後に YouTube へ自動アーカイブ（ご自身のチャンネルに保存）</span>
                 <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
               </li>
               <li className="text-gray-200 flex items-center gap-1.5 flex-wrap">

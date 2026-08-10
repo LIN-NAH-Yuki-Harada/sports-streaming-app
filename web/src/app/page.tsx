@@ -14,7 +14,7 @@ const PLAY_STORE_URL =
 const FAQ_ITEMS = [
   {
     q: "子どもの顔が映るのが心配です。大丈夫ですか？",
-    a: "LIVE SPOtCH のプレイヤーでの配信は、共有コードを知る人だけが視聴できる限定公開です。検索や一覧には表示されません。なお、チームプランで「YouTube Live 同時配信」または「YouTube 自動アーカイブ」をONにした場合は、配信者ご自身のYouTubeチャンネルにも「限定公開」で映像が流れます。YouTubeの限定公開はURLを知っている人なら視聴できる状態のため、共有コードとは保護の仕組みが異なります。YouTube連携は初期状態ではOFFで、配信者ご自身が設定しない限り有効になりません。",
+    a: "LIVE SPOtCH のプレイヤーでの配信は、共有コードを知る人だけが視聴できる限定公開です。検索や一覧には表示されません。なお、チームプランで「YouTube 自動アーカイブ」をONにした場合は、配信者ご自身のYouTubeチャンネルにも「限定公開」で映像が流れます。YouTubeの限定公開はURLを知っている人なら視聴できる状態のため、共有コードとは保護の仕組みが異なります。YouTube連携は初期状態ではOFFで、配信者ご自身が設定しない限り有効になりません。",
   },
   {
     q: "配信の画質はどれくらいですか？",
@@ -26,7 +26,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "配信者プランとチームプランの違いは？",
-    a: "配信者プラン（¥300/月）は個人保護者向けの「ライブ配信専用プラン」です。自社プレイヤーで試合をリアルタイムに家族へ届ける用途に最適（アーカイブ保存はありません）。チームプラン（¥500/月）は記録運用向けで、自社プレイヤー配信に加えて YouTube Live 同時配信・YouTube への自動アーカイブ・チーム管理・スケジュール管理・リモコン操作（開発中）・AIハイライト（開発中）が追加されます。なお YouTube 関連の機能をご利用いただくには、マイページでご自身の YouTube アカウントを連携する設定が必要です（初期状態はOFF）。",
+    a: "配信者プラン（¥300/月）は個人保護者向けの「ライブ配信専用プラン」です。自社プレイヤーで試合をリアルタイムに家族へ届ける用途に最適（アーカイブ保存はありません）。チームプラン（¥500/月）は記録運用向けで、自社プレイヤー配信に加えて YouTube への自動アーカイブ（試合後に保存）・チーム管理・スケジュール管理・リモコン操作（開発中）・AIハイライト（開発中）が追加されます。なお YouTube 関連の機能をご利用いただくには、マイページでご自身の YouTube アカウントを連携する設定が必要です（初期状態はOFF）。",
   },
   {
     q: "チームプランのアーカイブ（録画）は、何もしなくても残りますか？",
@@ -143,7 +143,7 @@ const SOFTWARE_APP_JSONLD = {
       price: "500",
       priceCurrency: "JPY",
       description:
-        "配信者プランの全機能 + YouTube Live 同時配信（ベータ公開中） + YouTube 自動アーカイブ（ベータ公開中） + チーム・スケジュール管理（月額¥500）",
+        "配信者プランの全機能 + YouTube 自動アーカイブ（試合後に自動保存・ベータ公開中） + チーム・スケジュール管理（月額¥500）",
     },
   ],
   featureList: [
@@ -272,7 +272,7 @@ export default function LandingPage() {
                   <span aria-hidden="true">📺</span> TV中継品質のスコアボード
                 </span>
                 <span className="inline-flex items-center gap-1.5 bg-[#e63946]/10 ring-1 ring-[#e63946]/30 rounded-full px-3 py-1 text-[11px] text-white">
-                  <span aria-hidden="true">📡</span> YouTube Live 同時配信
+                  <span aria-hidden="true">📼</span> YouTube 自動アーカイブ
                   <span className="bg-[#e63946] text-white text-[8px] font-black px-1 py-0.5 rounded ml-0.5">NEW</span>
                 </span>
               </div>
@@ -586,7 +586,7 @@ export default function LandingPage() {
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> 試合スケジュール管理</li>
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> 共有コードのチーム自動配布</li>
               <li className="flex items-center gap-1.5 flex-wrap text-white">
-                <span className="flex gap-1.5"><span className="text-[#e63946]">✓</span> YouTube Live 同時配信（リアルタイム拡散）</span>
+                <span className="flex gap-1.5"><span className="text-[#e63946]">✓</span> YouTube へ自動アーカイブ（試合後に保存）</span>
                 <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
               </li>
               <li className="flex items-center gap-1.5 flex-wrap text-white">
