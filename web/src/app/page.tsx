@@ -551,6 +551,9 @@ export default function LandingPage() {
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> ライブ視聴（登録不要）</li>
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> アーカイブ視聴（配信者がYouTube連携をONにしたチームプラン配信のみ）</li>
             </ul>
+            <p className="mt-5 text-[11px] text-gray-400 text-center">
+              視聴する方のお申し込みは不要です
+            </p>
           </div>
           <div className="rounded-2xl ring-1 ring-white/10 bg-white/[0.02] p-5 sm:p-6">
             <p className="text-xs text-gray-400 mb-1">配信者プラン</p>
@@ -561,8 +564,14 @@ export default function LandingPage() {
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> スコアボード・オーバーレイ</li>
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> LINE共有（ワンタップ）</li>
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> 限定公開の共有コード</li>
-              <li className="text-gray-600">※ アーカイブ保存はチームプラン限定</li>
+              <li className="text-gray-400">※ アーカイブ保存はチームプラン限定</li>
             </ul>
+            <a
+              href="/pricing"
+              className="mt-5 block w-full text-center rounded-full bg-white/10 hover:bg-white/20 text-white text-xs sm:text-sm font-semibold px-4 py-2.5 transition"
+            >
+              このプランに加入 →
+            </a>
           </div>
           <div className="relative rounded-2xl ring-2 ring-[#e63946]/60 bg-gradient-to-b from-[#e63946]/10 to-white/[0.02] p-5 sm:p-6 shadow-xl shadow-[#e63946]/10">
             <span className="absolute -top-2.5 left-5 bg-[#e63946] text-white text-[10px] font-black px-2.5 py-0.5 rounded-full tracking-wider">人気</span>
@@ -600,8 +609,19 @@ export default function LandingPage() {
                 ・数分で完了）。
               </p>
             </div>
+            <a
+              href="/pricing"
+              className="mt-5 block w-full text-center rounded-full bg-[#e63946] hover:bg-[#d62836] text-white text-xs sm:text-sm font-bold px-4 py-2.5 transition shadow-lg shadow-[#e63946]/25"
+            >
+              このプランに加入 →
+            </a>
           </div>
         </div>
+        <p className="mt-6 text-center text-xs text-gray-400">
+          <a href="/pricing" className="underline underline-offset-2 hover:text-white transition">
+            料金プランの詳細・お申し込みはこちら
+          </a>
+        </p>
       </section>
 
       {/* FAQ */}
