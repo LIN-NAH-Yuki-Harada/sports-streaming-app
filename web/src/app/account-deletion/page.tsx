@@ -28,12 +28,12 @@ export default function AccountDeletionPage() {
         <div className="mt-8 space-y-8 text-sm md:text-[15px] text-gray-300 leading-relaxed">
           <section>
             <p>
-              LIVE SPOtCH運営事務局（以下「当事務局」）が提供する「LIVE
+              LIN-NAH株式会社（以下「当社」）が提供する「LIVE
               SPOtCH」のアカウント削除（退会）方法と、削除によって消去されるデータ・保持されるデータについてご案内します。アプリを削除済みの場合や、ログインできない場合でも、本ページの手順でアカウント削除をご依頼いただけます。
             </p>
             <p className="mt-3 text-xs text-gray-500">
               This page explains how to delete your LIVE SPOtCH account (operated
-              by LIVE SPOtCH運営事務局 / LIN-NAH株式会社). You can request
+              by LIN-NAH Inc. / LIN-NAH株式会社). You can request
               deletion from within the app, from the website, or — if you cannot
               sign in — by email using the contact details below.
             </p>
@@ -49,7 +49,7 @@ export default function AccountDeletionPage() {
               <strong className="text-gray-300">
                 アカウントを削除してもサブスクリプションは自動的には解約されません
               </strong>
-              。課金は各ストア（Apple / Google）が管理しているため、当事務局側でアカウントを削除しても、ストアの定期購入は継続し課金が発生し続けます。追加の課金を防ぐため、アカウント削除の前に、必ずご自身でストアの解約手続きを行ってください。
+              。課金は各ストア（Apple / Google）が管理しているため、当社側でアカウントを削除しても、ストアの定期購入は継続し課金が発生し続けます。追加の課金を防ぐため、アカウント削除の前に、必ずご自身でストアの解約手続きを行ってください。
             </p>
             <div className="mt-3 bg-[#111] border border-[#e63946]/40 rounded-md px-4 py-3">
               <p className="text-xs text-gray-400">
@@ -131,7 +131,7 @@ export default function AccountDeletionPage() {
               に対応し、完了後にメールでご連絡します。
             </p>
             <div className="mt-2 bg-[#111] border border-white/5 rounded-md px-4 py-3">
-              <p className="text-xs text-gray-400">LIVE SPOtCH運営事務局</p>
+              <p className="text-xs text-gray-400">LIN-NAH株式会社</p>
               <p className="text-xs text-gray-500 mt-1">
                 メール: lin.nah.yuki@gmail.com
               </p>
@@ -157,7 +157,7 @@ export default function AccountDeletionPage() {
               削除でなくなるもの（削除されるデータ）
             </h2>
             <p className="text-gray-400">
-              アカウントを削除すると、当事務局のデータベースから、あなたのアカウントおよび関連する以下のデータが完全に削除されます。
+              アカウントを削除すると、当社のデータベースから、あなたのアカウントおよび関連する以下のデータが完全に削除されます。
             </p>
             <ul className="list-disc list-inside mt-2 space-y-1 text-gray-400">
               <li>
@@ -203,14 +203,14 @@ export default function AccountDeletionPage() {
             <ul className="list-disc list-inside mt-2 space-y-2 text-gray-400">
               <li>
                 <strong className="text-gray-300">決済・取引記録</strong>:
-                クレジットカードでのお支払い履歴等は、当事務局のデータベースからは削除されますが、決済代行事業者（Stripe）およびApple /
+                クレジットカードでのお支払い履歴等は、当社のデータベースからは削除されますが、決済代行事業者（Stripe）およびApple /
                 Google側には、各社のポリシーおよび日本の税法・会計法令に基づき取引記録が保持されます。税務関連の帳簿・証憑は
                 <strong className="text-gray-300">最長7年間</strong>
                 （欠損金の繰越控除に関わる場合は最長10年間）保存されることがあります。これは法令上の義務であり、削除できません。
               </li>
               <li>
                 <strong className="text-gray-300">アクセスログ等</strong>:
-                セキュリティ・不正防止・障害対応の目的で、アクセスログ・IPアドレス・デバイス情報が、当事務局および委託先（Vercel /
+                セキュリティ・不正防止・障害対応の目的で、アクセスログ・IPアドレス・デバイス情報が、当社および委託先（Vercel /
                 Supabase / LiveKit）のサーバーログとして
                 <strong className="text-gray-300">
                   一定期間（一般に最大1年程度）
@@ -298,7 +298,7 @@ export default function AccountDeletionPage() {
         </div>
 
         <div className="mt-12 pt-6 border-t border-white/5">
-          <p className="text-[10px] text-gray-600">LIVE SPOtCH運営事務局</p>
+          <p className="text-[10px] text-gray-600">LIN-NAH株式会社</p>
           <a
             href="/"
             className="inline-block mt-4 text-xs text-gray-400 hover:text-white transition"
