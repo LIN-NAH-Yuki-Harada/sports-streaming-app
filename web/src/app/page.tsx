@@ -497,8 +497,13 @@ export default function LandingPage() {
 
       {/* 保護者の声 */}
       <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-16 sm:py-24 border-t border-white/5">
-        <SectionKicker label="利用者の声" />
-        <h2 className="text-xl sm:text-3xl font-bold tracking-tight mb-8 sm:mb-12">保護者・コーチの声</h2>
+        <SectionKicker label="目指す体験" />
+        <h2 className="text-xl sm:text-3xl font-bold tracking-tight mb-3">こんな体験を目指しています</h2>
+        {/* ★実在ユーザーの推薦文ではない。景表法（優良誤認）・ステマ規制の観点から、
+            打ち消し表示はカードの「上」に、本文と同じ読める大きさ・コントラストで置く。 */}
+        <p className="mb-8 sm:mb-10 text-xs sm:text-sm text-gray-400 leading-relaxed">
+          以下は<strong className="text-gray-200">当社が想定する利用シーンを文章にしたもの</strong>で、実在の利用者の発言ではありません。実際にいただいたお客様の声は、許諾を得たうえで改めて掲載します。
+        </p>
         <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-3">
           {[
             {
@@ -521,15 +526,14 @@ export default function LandingPage() {
               <div className="text-[#e63946] text-2xl leading-none mb-3 font-serif" aria-hidden="true">“</div>
               <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">{v.voice}</p>
               <div className="mt-4 pt-4 border-t border-white/5">
-                <p className="text-[11px] font-semibold text-gray-400">{v.name}</p>
-                <p className="text-[10px] text-gray-600 mt-0.5">{v.role}</p>
+                <p className="text-[11px] font-semibold text-gray-400">
+                  想定ユーザー: {v.name}
+                </p>
+                <p className="text-[10px] text-gray-400 mt-0.5">{v.role}</p>
               </div>
             </div>
           ))}
         </div>
-        <p className="mt-6 text-[10px] text-gray-600 text-center">
-          ※ 想定される利用シーンの声です。実際のユーザーの声は随時掲載予定です。
-        </p>
       </section>
 
       {/* 料金 */}
