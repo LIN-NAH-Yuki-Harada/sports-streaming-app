@@ -1,6 +1,8 @@
 package expo.modules.rtmppublisher
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.hardware.display.DisplayManager
 import android.media.AudioManager
@@ -203,7 +205,14 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
         mainHandler.post { if (streamingRequested) emit("error", "camera disconnected") }
       }
       override fun onCameraError(error: String) {
-        mainHandler.post { if (streamingRequested) emit("error", error) }
+        // ★2026-08-10: 素の文字列（例 "Open camera 0 failed"）だけだと
+        //   「権限が無い」のか「他がカメラを掴んでいる」のか「ライブラリと端末の相性」なのか
+        //   区別できず、実機ログの取れない現場で切り分けができなかった。
+        //   権限の状態を必ず添えて、画面のスクリーンショット1枚で判定できるようにする。
+        val detail = "$error [cam=${permLabel(Manifest.permission.CAMERA)}" +
+          " mic=${permLabel(Manifest.permission.RECORD_AUDIO)}" +
+          " sdk=${Build.VERSION.SDK_INT}]"
+        mainHandler.post { if (streamingRequested) emit("error", detail) }
       }
     })
     var mic = MicrophoneSource(pickAudioSource())
@@ -399,6 +408,10 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
       } catch (_: Exception) {}
     }
   }
+
+  /** 権限の状態を短い文字列で返す（エラー表示に添えて現場で切り分けるため）。 */
+  private fun permLabel(permission: String): String =
+    if (context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) "ok" else "NG"
 
   companion object {
     // アダプティブ降格の下限（これ未満は映像が用をなさないため足切り）。

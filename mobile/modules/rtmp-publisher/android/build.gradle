@@ -27,5 +27,14 @@ dependencies {
   //      surfaceTexture タイムスタンプ非使用で両方の地雷を回避できる最新版。
   //   → アプリ全体の Kotlin を 2.2.x に上げたら 2.7.5+ へ更新するのが正道。
   //   本モジュールが使う API は 2.6.7 / 2.7.0 / 2.7.5 で同一（ソース突合済み）。
-  implementation 'com.github.pedroSG94.RootEncoder:library:2.6.7'
+  // ★2026-08-10: 2.6.7 → 2.8.0。
+  // 2.6.7 は 2025-12-29 リリースで、2026年の端末（Samsung/Android 15-16）で
+  // Camera2 の openCamera が "Open camera 0 failed" で失敗する事象が実機で発生した。
+  // 権限は許可済み・アプリ完全終了後も再現・LiveKit経路では同じ端末で撮影できていたため、
+  // ライブラリと端末の相性が最有力。
+  // 2.7.4 の "Camera2Source use fps range fixed to avoid dynamic range" は
+  // 7/19 に踏んだ29分フリーズ（動的fpsレンジ）の upstream 修正そのものなので、
+  // 2.8.0 はその修正も含む。過去に「2.7.4+ は Kotlin 2.3 製で使えない」と判断したが、
+  // 根拠が確認できなかったため実ビルドで検証する。
+  implementation 'com.github.pedroSG94.RootEncoder:library:2.8.0'
 }
