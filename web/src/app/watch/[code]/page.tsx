@@ -28,6 +28,15 @@ const SITE_URL =
 //   なので遅延させない（HLS分岐のみ delayedBroadcast を渡す）。
 const OVERLAY_DELAY_MS = 7000;
 
+// 配信終了画面のアプリ誘導（配信はネイティブアプリが最も安定するため・2026-07-26）
+const APP_STORE_URL = "https://apps.apple.com/jp/app/live-spotch/id6785001863";
+const PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=com.linnah.livespotch";
+
+// 開始前共有のリンクを配信開始前に開いた人を待たせる設定。
+const WAIT_FOR_START_POLL_MS = 10_000; // 10秒ごとに配信を探す
+const WAIT_FOR_START_MAX_MS = 60 * 60_000; // 60分で打ち切り
+
 // broadcast を delayMs ぶん遅らせて返す（スコア表示を映像に同期させるため）。
 function useDelayedBroadcast(
   broadcast: Broadcast | null,
@@ -65,6 +74,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
   const [loadingBroadcast, setLoadingBroadcast] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // 開始前共有（アプリの ready 画面から配信開始**前**にリンクを配れる導線・2026-08-03）の受け皿。
+  // 未作成コードは「まだ始まっていない」可能性が高いので、すぐ「見つかりません」で終端せず待つ。
+  // 打ち切り後だけ従来の「見つかりません」に切り替える。
+  const [waitTimedOut, setWaitTimedOut] = useState(false);
   const [viewerToken, setViewerToken] = useState<string | null>(null);
   const [isWatching, setIsWatching] = useState(false);
   // 自前配信サーバー(MediaMTX)の HLS 視聴 URL。set されていれば HLS プレイヤーで直接再生
@@ -76,6 +89,31 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   const [viewerUserId, setViewerUserId] = useState<string | null>(null);
   const [showNoticePanel, setShowNoticePanel] = useState(false);
   const [noticeDraft, setNoticeDraft] = useState("");
+
+  // お知らせが変わった瞬間だけ数秒だけ大きく強調する（2026-08-02 オーナー決定）。
+  // 常設の細い帯は見逃されやすい、という課題への対応。強調が解けたら帯に戻る。
+  // ページを開いた瞬間は強調しない（初回に prev を埋めて「変化」だけを拾う）。
+  const [noticeEmphasis, setNoticeEmphasis] = useState(false);
+  const prevNoticeRef = useRef<string | null | undefined>(undefined);
+  const noticeText = broadcast?.notice?.trim() || null;
+  const broadcastId = broadcast?.id ?? null;
+  // 依存は「配信が読めたか(broadcastId)」と「お知らせ本文」だけにする。
+  // broadcast オブジェクト全体に依存させると、スコア更新のたびに effect が再実行され
+  // cleanup が強調解除タイマーを破棄してしまい、強調が消えなくなる。
+  useEffect(() => {
+    if (!broadcastId) return;
+    if (prevNoticeRef.current === undefined) {
+      prevNoticeRef.current = noticeText;
+      return;
+    }
+    if (noticeText === prevNoticeRef.current) return;
+    prevNoticeRef.current = noticeText;
+    // 消した時（null 化）は強調不要。
+    if (!noticeText) return;
+    setNoticeEmphasis(true);
+    const timer = setTimeout(() => setNoticeEmphasis(false), 4000);
+    return () => clearTimeout(timer);
+  }, [broadcastId, noticeText]);
 
   // ログイン中ユーザーを一度だけ取得（配信者本人ならお知らせ編集 UI を出す。未ログインなら null のまま）
   useEffect(() => {
@@ -97,7 +135,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     useStageFullscreen<HTMLDivElement>({
       allowVideoFallback: scoreboardBurnedIn,
       // Android 視聴者は端末を横にしたら自動で没入横画面に（iOS は既存挙動を維持）。
-      autoLandscapeFullscreen: isWatching,
+      // ★ 2026-08-04: LiveKit 経路（isWatching）だけ true で、**HLS経路＝iPhone配信を
+      //   見ているときに効いていなかった**。配信者の端末によって挙動が変わるのはおかしい。
+      autoLandscapeFullscreen:
+        isWatching || (broadcast?.status === "live" && !!hlsUrl),
     });
 
   // ステージ内の <video> 要素の一時停止状態を追従。
@@ -186,6 +227,29 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     fetchBroadcast();
   }, [code]);
 
+  // 未作成コードの待機ポーリング。配信が始まったら自動で映像に切り替わる。
+  // 上限 60 分（無期限に叩き続けない）。broadcast が取れた時点で停止する。
+  useEffect(() => {
+    if (loadingBroadcast || broadcast || waitTimedOut) return;
+    const startedAt = Date.now();
+    const id = setInterval(async () => {
+      if (Date.now() - startedAt > WAIT_FOR_START_MAX_MS) {
+        clearInterval(id);
+        setWaitTimedOut(true);
+        return;
+      }
+      const data = await getBroadcastByCode(code).catch(() => null);
+      if (data) {
+        setNotFound(false);
+        setBroadcast(data);
+        if (data.status === "live") {
+          getStreamPlaybackUrl(code).then(setHlsUrl).catch(() => {});
+        }
+      }
+    }, WAIT_FOR_START_POLL_MS);
+    return () => clearInterval(id);
+  }, [loadingBroadcast, broadcast, waitTimedOut, code]);
+
   // スコア表示の出し分け（発熱対策 Phase 1-A・2026-06-08）:
   // - 焼き込みあり配信（scoreboard_burned_in=true・従来/¥500）: スコアは映像に焼き込み済み
   //   → 視聴側オーバーレイ不要。
@@ -245,9 +309,21 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
       const updated = await getBroadcastByCode(shareCodeRef.current);
       if (updated) {
         setBroadcast(updated);
-        // 配信開始がページ読み込み後の場合に備え、HLS URL も追従取得
+        // 配信開始がページ読み込み後の場合に備え、HLS URL も追従取得。
+        // ★ string が取れなかったときは降格しない（mobile 側と同じガード）。
+        //   null をそのまま setHlsUrl すると `isLive && hlsUrl` の分岐が外れて
+        //   HlsPlayer がアンマウントされ、LiveKit 経路（自前RTMP配信にはパブリッシャーが
+        //   いない）に落ちて 5〜10 秒の黒画面になる。Supabase の一時的な 5xx や電波瞬断で
+        //   毎回これが起きるのは割に合わない。
+        //   なお緊急ロールバック（stream_playback_url を VPS 直へ書き戻す）は string で
+        //   返るので、この経路でちゃんと追従する。
         if (updated.status === "live") {
-          getStreamPlaybackUrl(updated.share_code).then(setHlsUrl).catch(() => {});
+          const url = await getStreamPlaybackUrl(updated.share_code).catch(
+            () => null,
+          );
+          if (typeof url === "string") {
+            setHlsUrl((prev) => (prev === url ? prev : url));
+          }
         }
         if (updated.status === "ended") {
           clearInterval(interval);
@@ -289,6 +365,32 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     return (
       <div className="flex items-center justify-center py-32">
         <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // ===== まだ始まっていない（開始前共有のリンクを先に開いた場合）=====
+  // 打ち切り前は待機画面。打ち切り後は従来の「見つかりません」へ落とす。
+  if ((notFound || !broadcast) && !waitTimedOut) {
+    return (
+      <div>
+        <div className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md px-5 md:px-8 lg:px-10 pb-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
+          <div className="flex items-center justify-between">
+            <Logo />
+            <h1 className="text-sm font-bold text-gray-400">視聴</h1>
+          </div>
+        </div>
+        <div className="mx-auto max-w-sm px-5 py-20 text-center">
+          <div className="w-16 h-16 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-6">
+            <div className="w-6 h-6 border-2 border-[#e63946] border-t-transparent rounded-full animate-spin" />
+          </div>
+          <h1 className="text-base font-bold">配信はまだ始まっていません</h1>
+          <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+            共有コード「{code.toUpperCase()}」<br />
+            この画面のままお待ちください。<br />
+            始まると自動で映像に切り替わります。
+          </p>
+        </div>
       </div>
     );
   }
@@ -365,6 +467,22 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
     (broadcast.live_status === "ended"
       ? broadcast.live_youtube_broadcast_id
       : null);
+
+  // 配信終了直後〜YouTube アーカイブ完成までの「準備中」状態。この間はアーカイブ動画IDが
+  // まだ無く、視聴者に「終了しました＋料金カード」を出すと『課金しないと見られない』と誤読
+  // される（2026-07-22 後援会 FB）。処理中(pending/recording/uploading)、または終了直後で
+  // まだ順番待ち(null かつ 終了から2時間以内)なら、料金カードを出さず準備中メッセージにする。
+  // ※ 終了から時間が経った null（＝アーカイブ対象外の可能性）は準備中にせず誤った期待を避ける。
+  const endedRecently =
+    broadcast.ended_at != null &&
+    Date.now() - new Date(broadcast.ended_at).getTime() < 2 * 60 * 60 * 1000;
+  const archivePreparing =
+    !isLive &&
+    !archiveYoutubeId &&
+    (broadcast.youtube_upload_status === "pending" ||
+      broadcast.youtube_upload_status === "recording" ||
+      broadcast.youtube_upload_status === "uploading" ||
+      (broadcast.youtube_upload_status === null && endedRecently));
 
   return (
     <div className="min-h-screen bg-black flex flex-col">
@@ -468,6 +586,37 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               <AdSlot placement="archive_pre" sport={broadcast.sport} />
             </div>
           </div>
+        ) : archivePreparing ? (
+          // 配信終了直後〜YouTube アーカイブ完成まで（準備中）。
+          // 料金カードは出さない（「課金しないと見られない」誤読を防ぐ・2026-07-22 後援会 FB）。
+          <div className="text-center px-6 max-w-md">
+            <div className="w-14 h-14 mx-auto rounded-full bg-[#1a0608] border border-[#e63946]/40 flex items-center justify-center mb-4">
+              <svg className="w-6 h-6 text-[#e63946]" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+              </svg>
+            </div>
+            <p className="text-sm font-semibold text-white">この配信は終了しました</p>
+            <p className="mt-2 text-xs text-gray-400 leading-relaxed">
+              この試合の見逃し配信（アーカイブ）を準備しています。
+              <br />
+              YouTube へのアップロードが終わると、この画面からご覧いただけます。
+              <br />
+              数分〜十数分ほどで反映されます。少し時間をおいて、もう一度このページを開いてください。
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-5 w-full bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold py-3 rounded-md transition"
+            >
+              🔄 更新する
+            </button>
+            <Link
+              href="/"
+              className="block w-full mt-2 bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold py-3 rounded-md text-center transition"
+            >
+              ← ホームへ戻る
+            </Link>
+            <p className="mt-4 text-[10px] text-gray-500">※ 試合の視聴は無料です。</p>
+          </div>
         ) : (
           <div className="text-center px-6 max-w-md">
             <p className="text-sm text-gray-400">この配信は終了しました</p>
@@ -481,12 +630,17 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             {/* 明示的な「ホームへ戻る」ボタン（LP 宣伝の前に配置して戻り導線を分かりやすく） */}
             <Link
               href="/"
-              className="block w-full bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold py-3 rounded-md text-center transition mb-6"
+              className="block w-full bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold py-3 rounded-md text-center transition mb-3"
             >
               ← ホームへ戻る
             </Link>
 
-            {/* LIVE SPOtCH 宣伝 */}
+            {/* 視聴が無料であることを明示（「課金しないと見られない」誤読を防ぐ・2026-07-22 後援会 FB）。 */}
+            <p className="text-[11px] text-gray-500 mb-6">
+              ※ 試合の視聴は無料です。以下は「配信する方」へのご案内です。
+            </p>
+
+            {/* LIVE SPOtCH 宣伝（配信者募集） */}
             <div className="bg-[#111] border border-white/10 rounded-xl p-5 text-left">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-8 h-8 rounded-full bg-[#e63946] flex items-center justify-center">
@@ -501,14 +655,45 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
               </div>
               <p className="text-xs text-gray-400 leading-relaxed">
                 お子さんの試合、あなたも配信しませんか？スマホ1台でTV中継風のスコアボード付きライブ配信ができます。
+                配信は専用アプリ（iOS / Android）が最も安定しておすすめです。
               </p>
+              {/* 主導線=アプリDL（Web配信ページ誘導から変更・2026-07-26 オーナー指示。
+                  配信はネイティブアプリの方が安定するため、終了画面の宣伝はアプリへ寄せる） */}
               <div className="mt-4 space-y-2">
-                <a
-                  href="/broadcast"
-                  className="block w-full bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold py-2.5 rounded-md text-center transition"
-                >
-                  配信をはじめる（初回10分間無料）
-                </a>
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  <a
+                    href={APP_STORE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block hover:opacity-80 transition"
+                    aria-label="App Store で LIVE SPOtCH をダウンロード"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src="/appstore-badge-ja.svg"
+                      alt="App Store でダウンロード"
+                      width={136}
+                      height={50}
+                      className="h-[40px] w-auto"
+                    />
+                  </a>
+                  <a
+                    href={PLAY_STORE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block hover:opacity-80 transition"
+                    aria-label="Google Play で LIVE SPOtCH をダウンロード"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src="/google-play-badge-ja.png"
+                      alt="Google Play で手に入れよう"
+                      width={147}
+                      height={57}
+                      className="h-[52px] w-auto"
+                    />
+                  </a>
+                </div>
                 <a
                   href="/"
                   className="block w-full border border-white/10 text-gray-300 text-xs font-semibold py-2.5 rounded-md text-center hover:bg-white/5 transition"
@@ -539,8 +724,21 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
             焼き込みあり/なし・LiveKit/HLS のどの経路でも CSS オーバーレイとして重ねる。 */}
         {isLive && broadcast.notice && (
           <div
-            className="absolute left-1/2 -translate-x-1/2 z-[2] max-w-[60%] bg-black/70 backdrop-blur-sm border border-[#e63946]/60 rounded-md px-3 py-1.5 text-[11px] sm:text-xs text-white text-center leading-snug"
-            style={{ top: "calc(env(safe-area-inset-top, 0px) + 8px)" }}
+            className={`absolute left-1/2 -translate-x-1/2 z-[3] text-white text-center leading-snug rounded-md transition-all duration-300 ease-out ${
+              noticeEmphasis
+                ? // 変わった瞬間の強調（数秒）。赤地＋拡大で必ず目に入るようにする。
+                  "max-w-[80%] bg-[#e63946]/95 border border-[#e63946] px-5 py-3 text-sm sm:text-base font-bold scale-100 shadow-lg"
+                : // 通常の常設テロップ（配信者が消すまで出続ける）
+                  "max-w-[60%] bg-black/70 backdrop-blur-sm border border-[#e63946]/60 px-3 py-1.5 text-[11px] sm:text-xs"
+            }`}
+            style={{
+              top: "calc(env(safe-area-inset-top, 0px) + 8px)",
+              // ★ 2026-08-04: 表示専用なのにタップを吸っていた。テロップが出ている間だけ
+              //   その位置の再生/一時停止操作が効かなくなるため透過させる。
+              pointerEvents: "none",
+            }}
+            role="status"
+            aria-live="polite"
           >
             <span className="mr-1">📢</span>
             {broadcast.notice}

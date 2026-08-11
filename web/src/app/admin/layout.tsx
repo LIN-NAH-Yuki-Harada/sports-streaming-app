@@ -11,6 +11,7 @@ const NAV: { href: string; label: string }[] = [
   { href: "/admin/reports", label: "通報対応" },
   { href: "/admin/broadcasts", label: "配信" },
   { href: "/admin/users", label: "ユーザー" },
+  { href: "/admin/server", label: "サーバー" },
   { href: "/admin/ads", label: "広告(CM)" },
 ];
 
@@ -37,7 +38,13 @@ export default async function AdminLayout({
           ))}
         </nav>
       </header>
-      <main className="p-4 md:p-6 max-w-5xl mx-auto">{children}</main>
+      {/* ★ pb-24 は必須: BottomNav が `fixed bottom-0 z-50`（app/layout.tsx で
+          MainContainer の外に描画）なので、余白が無いと**ページ末尾がナビの裏に隠れる**。
+          2026-08-06 に「サーバー」タブの最後のグラフが切れて発覚。他ページも pb-20〜24 で
+          同じ対処をしている（discover / broadcast / contact 等）。
+          ★ <main> ではなく <div>: MainContainer が既に <main> を出しているため、
+          ここで <main> を使うと入れ子になる（1ページに1つが正しい）。 */}
+      <div className="p-4 md:p-6 pb-24 max-w-5xl mx-auto">{children}</div>
     </div>
   );
 }

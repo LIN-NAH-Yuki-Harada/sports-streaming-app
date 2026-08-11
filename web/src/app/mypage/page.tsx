@@ -462,6 +462,20 @@ function MyPageInner() {
                 <li>・チャンネルが育ち、チームの記録が資産に</li>
                 <li>・限定公開のため、URLを知る人のみ視聴可能</li>
               </ul>
+              <p className="mt-3 text-[11px] text-amber-400/90 leading-relaxed">
+                ⚠️ ご利用には YouTube 側で「ライブ配信の有効化」が必要です。初回の有効化は反映まで
+                <span className="font-semibold">24時間</span>
+                かかるため、<span className="font-semibold">試合前日までに</span>
+                <a
+                  href="https://www.youtube.com/features"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-amber-300"
+                >
+                  YouTube の機能設定
+                </a>
+                でご確認ください。
+              </p>
               {profile?.youtube_channel_id ? (
                 <div className="mt-3 pt-3 border-t border-white/5">
                   <p className="text-[11px] text-gray-500">

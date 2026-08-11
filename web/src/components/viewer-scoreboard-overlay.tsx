@@ -94,6 +94,24 @@ export function ViewerScoreboardOverlay({ broadcast }: { broadcast: Broadcast })
             <RunnerDiamond runners={broadcast.runners} />
           </div>
         )}
+
+        {/* テニス系: ゲーム内ポイント（0/15/30/40/Ad・タイブレーク/ファイナルのカウント）。
+            配信側エンジンが確定した表示用文字列 game_points をそのまま描く（ルール知識不要・
+            テニス以外では常に null なので競技判定も不要） */}
+        {broadcast.game_points && (
+          <div className="mt-[0.4em] inline-flex items-center gap-[0.45em] bg-black/80 backdrop-blur-sm rounded px-[0.7em] py-[0.3em] shadow-lg">
+            <span className="text-[0.7em] text-white/60 font-bold">
+              {broadcast.game_points.tb
+                ? broadcast.sport === "ソフトテニス"
+                  ? "ファイナル"
+                  : "TB"
+                : "ポイント"}
+            </span>
+            <span className="font-black tabular-nums">{broadcast.game_points.home}</span>
+            <span className="text-[0.6em] text-white/60">-</span>
+            <span className="font-black tabular-nums">{broadcast.game_points.away}</span>
+          </div>
+        )}
       </div>
 
       {/* 右上: 大会名 / 試合名（競技名はフォールバック）。

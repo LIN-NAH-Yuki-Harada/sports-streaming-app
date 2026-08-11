@@ -3,7 +3,7 @@ import { getAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 
-const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
+const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "テニス", "ソフトテニス", "陸上", "その他"];
 const PLACEMENTS = ["postroll", "archive_pre", "preroll", "waiting"];
 
 // キャンペーン一覧（管理者のみ）。

@@ -23,6 +23,70 @@ const MAX_RETRY = 5;
 // 終了からこの時間を過ぎても録画が無ければ録画OFF時代/取りこぼしと判断して即 failed。
 const RECORDING_WAIT_MS = 30 * 60 * 1000;
 
+// ===== 画質/運用チューニング（2026-07-12 v2・env で上書き可）=====
+// 中間エンコード（焼き込み/連結）の CRF。17 は視覚的にほぼ無劣化域＝
+// 「本気の圧縮は最終 canonicalize の1回だけ」にして世代劣化を解消する。
+const CRF_INTERMEDIATE = process.env.CRF_INTERMEDIATE || "17";
+// 最終 canonicalize の CRF（旧23→20。YouTubeに渡す原盤の質を引き上げ）。
+const CRF_FINAL = process.env.CRF_FINAL || "20";
+// この秒数未満の配信はアーカイブしない（誤スタートのゴミ動画がYouTubeに残る対策）。
+// env 誤設定（例 "300"）で実試合を捨てないよう上限60にクランプする。
+const MIN_ARCHIVE_SEC = Math.min(
+  Number(process.env.MIN_ARCHIVE_SEC || 30) || 30,
+  60,
+);
+// "1" で最終出力を 1920x1080 にアップスケール（YouTube の割当ビットレートが上がる）。
+// 処理時間 +10〜15分/試合のため既定 OFF。数試合検証後に .env で点灯する。
+const UPSCALE_1080 = process.env.UPSCALE_1080 === "1";
+// ffmpeg の -threads（libx264 のエンコードスレッドのみ制限・filter系は対象外＝効果は
+// 部分的）。CPU 保護の主防御は systemd の CPUSchedulingPolicy=idle 側。既定は未指定。
+const FFMPEG_THREADS = process.env.FFMPEG_THREADS || "";
+// stale uploading のリクレーム閾値。**必ず service の TimeoutStartSec(10800s=3h) より
+// 長くする**（Timeout kill 前の正常走行中ジョブをリクレームしないため。4h=余裕込み）。
+const STALE_UPLOADING_MS = 4 * 60 * 60 * 1000;
+// SIGKILL 時は finally が走らず中間ファイルが残るため、古い作業dirを起動時に掃除する。
+const ORPHAN_WORKDIR_MS = 24 * 60 * 60 * 1000;
+
+// ===== ライブ並走バックオフ（live-aware backoff・2026-07-22 / レビュー反映版）=====
+// 進行中ライブがある tick は、重い ffprobe/ffmpeg/YouTubeアップロードを次tick(5分後)へ
+// 見送り、MediaMTX の HLS 分割・視聴 egress・上り帯域・ディスクIO をライブに明け渡す。
+// 【rollout】未実測事項(ライブ中に stream_playback_url が set 済みか)が残るため既定 OFF。
+// VPS の .env で明示 "1" にして数日観測してから本採用する（＝opt-in / 攻めすぎ回避）。
+const LIVE_BACKOFF_ENABLED = process.env.LIVE_BACKOFF_ENABLED === "1";
+// starvation 回避の猶予。ended_at からこの時間以上待たされたら、ライブ並走でも強制処理する
+// (遅延の絶対上限を保証する安全弁)。既定 45分。
+const LIVE_BACKOFF_MAX_DEFER_MS =
+  Number(process.env.LIVE_BACKOFF_MAX_DEFER_MS) || 45 * 60 * 1000;
+// 「生きているライブ」と数える started_at の新しさ上限。心拍(last_seen)列が無いための近似。
+// web cron cleanup の 2h とは密結合させず独立に既定 3h（2h超の実試合でも保護を切らさない）。
+const LIVE_ACTIVE_MAX_AGE_MS =
+  Number(process.env.LIVE_ACTIVE_MAX_AGE_MS) || 3 * 60 * 60 * 1000;
+
+// ===== ゴースト掃除（MediaMTX 実体照合・ghost sweep・2026-07-25）=====
+// DB が status='live' なのに MediaMTX に映像が来ていない配信（アプリ異常終了・電池切れ・
+// 発熱シャットダウン等のゴースト）を検知して ended にする。判定は「サーバーに実際に
+// publish が居るか」（localhost の MediaMTX API・外部通信なし）なので実配信を誤爆しない。
+// 誤爆防止の三重保険:
+//   (1) 開始 GHOST_MIN_AGE_MS(既定10分) 未満は対象外（provision〜publish 開始の猶予）
+//   (2) 掃除は GHOST_SWEEP_INTERVAL_MS(既定20分) 毎にしか走らない（tick は5分毎でも間引く）
+//   (3) 「2回連続で不在」のときだけ ended（一瞬の切断→再接続を救う）＝確定まで実効40〜50分
+// MediaMTX API 到達不能・DB エラー時は何もしない（フェイルオープン＝終了させない側へ倒す）。
+const GHOST_SWEEP_ENABLED = process.env.GHOST_SWEEP_ENABLED === "1";
+const GHOST_SWEEP_INTERVAL_MS =
+  Number(process.env.GHOST_SWEEP_INTERVAL_MS) || 20 * 60 * 1000;
+const GHOST_MIN_AGE_MS = Number(process.env.GHOST_MIN_AGE_MS) || 10 * 60 * 1000;
+const MEDIAMTX_API_BASE = process.env.MEDIAMTX_API_BASE || "http://127.0.0.1:9997";
+const GHOST_SWEEP_STATE_PATH = "/var/tmp/archive-worker-ghost-sweep.json";
+
+// ===== サーバー稼働メトリクス（admin「サーバー」タブ用・2026-07-26）=====
+// tick(5分)毎に自分の健康状態を計測し Supabase の server_metrics へ push する
+// 「押し込み方式」。外部からの問い合わせ口を一切開けない（攻撃面ゼロ）。
+// ディスクI/O・NW帯域は /proc の累積カウンタを状態ファイルに保存し、前tickとの
+// 差分から平均レートを算出（単位は全て kbps=キロビット/秒。表示側で換算）。
+const METRICS_ENABLED = process.env.METRICS_ENABLED === "1";
+const METRICS_STATE_PATH = "/var/tmp/archive-worker-metrics.json";
+const METRICS_RETENTION_DAYS = 30;
+
 if (
   !SUPABASE_URL ||
   !SUPABASE_SERVICE_ROLE_KEY ||
@@ -65,6 +129,118 @@ function findRecordings(shareCode) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// ★ アーカイブされないと確定した録画を、その場で削除する（2026-08-06 追加）
+//
+// なぜ: MediaMTX は**プランに関係なく全配信を録画する**。しかしアーカイブ対象外
+//   （¥300/無料/YouTube未連携/自動アーカイブOFF）や短すぎる配信の録画は、
+//   **一度も使われないまま recordDeleteAfter(48h) を待って消えるだけ**だった。
+//   実測（2026-07-22〜08-06 の92本）: **58%(53本)が対象外で、15日間に 23.1GB が
+//   無駄にディスクを通過**していた。大会日（ピーク21.4GB/日）の圧迫の主因はここ。
+//   アップロード成功時は既に削除しているので、消し忘れていたのは「上げない」側だけ。
+//
+// ★安全弁（これが無いと生の試合を消しうる）:
+//   `/api/cron/cleanup` は**心拍を打たないアプリ配信を「開始から2時間」で ended にする**
+//   （心拍を打つのは Web 配信のみ）。つまり **まだ配信中の行がここに来ることがある**。
+//   その録画を消すと進行中の試合が失われるので、**直近まで書き込みがあったファイルは消さない**。
+const DROP_UNARCHIVED_RECORDINGS =
+  process.env.DROP_UNARCHIVED_RECORDINGS !== "0"; // 既定ON。"0" で従来どおり48h保持
+const DROP_MIN_IDLE_MS =
+  Number(process.env.DROP_MIN_IDLE_MS) || 10 * 60 * 1000; // 10分以内に書かれたものは触らない
+
+// ===========================================================================
+// 処理順: 尺の短い配信を優先する（2026-08-08 追加）
+//
+// ワーカーは1tickにつき1本しか処理しない。それまでは「終了が古い順」だったため、
+// **長い配信1本が後続の全員を何時間も塞いでいた**。実測: 1時間42分(2.5GB)の変換が
+// 57分かかり、その裏で 67秒の配信が40分近く待たされた。
+// 短い配信は数十秒で終わるので、先に流したほうが全体の待ち時間が劇的に減る
+// （スケジューリングで言う shortest-job-first）。
+//
+// ★飢餓（starvation）防止: 短い配信が次々来ると長い配信が永久に後回しになる。
+//   終了から ARCHIVE_STARVATION_MS を超えて待っている配信は、尺に関係なく最優先にする。
+// ===========================================================================
+const QUEUE_LOOKAHEAD = Number(process.env.QUEUE_LOOKAHEAD) || 10;
+const ARCHIVE_STARVATION_MS =
+  Number(process.env.ARCHIVE_STARVATION_MS) || 3 * 60 * 60 * 1000; // 既定3時間
+
+function pickNext(rows) {
+  const now = Date.now();
+  const items = rows.map((r) => {
+    const s = Date.parse(r.started_at);
+    const e = Date.parse(r.ended_at);
+    const sec = (e - s) / 1000;
+    return {
+      r,
+      // 尺が測れない行（日付が壊れている等）は 0 扱いにして**先に**処理する。
+      // 後回しにすると永久に選ばれない行が生まれるため（飢餓を作らない側に倒す）。
+      sec: Number.isFinite(sec) && sec > 0 ? sec : 0,
+      waited: Number.isFinite(e) ? now - e : 0,
+    };
+  });
+
+  // ①長く待たされている配信があれば、尺に関係なくそれを最優先（待ち時間の長い順）。
+  const starving = items.filter((x) => x.waited >= ARCHIVE_STARVATION_MS);
+  if (starving.length > 0) {
+    starving.sort((a, b) => b.waited - a.waited);
+    log(
+      `starvation guard: ${starving[0].r.share_code} (${Math.round(starving[0].waited / 60000)}分待ち)`,
+    );
+    return starving[0].r;
+  }
+
+  // ②通常は尺の短い順。同尺なら「待ちが長い＝終了が古い」順（従来の挙動に一致）。
+  items.sort((a, b) => a.sec - b.sec || b.waited - a.waited);
+  return items[0].r;
+}
+
+function dropRecordings(shareCode, reason) {
+  if (!DROP_UNARCHIVED_RECORDINGS) return;
+  let recs;
+  try {
+    recs = findRecordings(shareCode);
+  } catch {
+    return;
+  }
+  if (!recs || recs.length === 0) return;
+  const now = Date.now();
+  let dropped = 0;
+  let skipped = 0;
+  let bytes = 0;
+  for (const r of recs) {
+    let mtimeMs = 0;
+    try {
+      mtimeMs = fs.statSync(r.p).mtimeMs;
+    } catch {
+      continue; // 既に無い
+    }
+    if (now - mtimeMs < DROP_MIN_IDLE_MS) {
+      skipped++; // まだ書き込まれている可能性 → 触らない（48hの自動削除に任せる）
+      continue;
+    }
+    try {
+      fs.unlinkSync(r.p);
+      dropped++;
+      bytes += r.size || 0;
+    } catch {
+      /* 既に無い等は無視 */
+    }
+  }
+  // 1つでも残したならディレクトリは畳まない（rmdir は空でなければ失敗するので実質同じだが明示）
+  if (skipped === 0) {
+    try {
+      fs.rmdirSync(path.join(RECORDINGS_DIR, "live", shareCode));
+    } catch {
+      /* not empty → keep */
+    }
+  }
+  if (dropped > 0 || skipped > 0) {
+    log(
+      `dropped recordings (${reason}): ${shareCode} ${dropped} file(s) ${Math.round(bytes / 1048576)}MB` +
+        (skipped ? ` [skipped ${skipped} still-writing]` : ""),
+    );
+  }
+}
+
 async function getOAuthClient(refreshToken, accessToken, profileId) {
   const oauth = new google.auth.OAuth2(
     YOUTUBE_CLIENT_ID,
@@ -79,6 +255,69 @@ async function getOAuthClient(refreshToken, accessToken, profileId) {
       .eq("id", profileId);
   }
   return oauth;
+}
+
+// ★ アップロード前ゲート（2026-08-05 追加）
+//
+// YouTube は「15分を超える動画」をチャンネル単位で制限している（電話番号の確認で解放）。
+// ★最悪なのは、制限を超えた動画でも **insert 自体は成功する**こと。YouTube は一旦受け取り、
+//   後から（数分〜数時間後に）削除する。つまり **insert の結果では検知できない**。
+//   従来は videoId が返った時点で completed にし、その直後に元録画を削除していたため、
+//   失敗が記録されないまま元データも消えていた。
+//   実損5本: 2026-08/02 103.6分・08/01 99.3分・07/30 59.0分・07/22 46.6分・07/22 35.7分
+//
+// 事後に生存確認する案も検討したが、**それでは「消えたことを後から知る」だけで試合記録は救えない**
+// （電話番号未確認のチャンネルでは何度リトライしても必ず消えるため）。事前に弾くのが唯一の解。
+//
+// コスト: channels.list は 1 ユニット。videos.insert の投稿枠とは別プールから引くので実質無料。
+// 権限: youtube.readonly は最初から要求済み → **既存の refresh_token でそのまま動く**（再連携不要）。
+//
+// ★制限はチャンネル単位で、しかも**変化する**（実データで、あるチャンネルが1日で
+//   allowed になった例を確認）。キャッシュせず毎回取る。
+const LONG_UPLOAD_LIMIT_SEC = 15 * 60; // これを超えると longUploadsStatus の確認が要る
+const YOUTUBE_MAX_UPLOAD_SEC = 12 * 60 * 60; // YouTube の絶対上限
+
+async function checkLongUploadGate(oauth, durationSec) {
+  if (durationSec > YOUTUBE_MAX_UPLOAD_SEC) {
+    return {
+      ok: false,
+      message:
+        `この録画は約${Math.round(durationSec / 3600)}時間で、YouTubeの上限（12時間）を超えています。\n` +
+        `アップロードしても削除されるため、中止しました。元の録画はサーバーに48時間だけ残ります。`,
+    };
+  }
+  if (durationSec <= LONG_UPLOAD_LIMIT_SEC) return { ok: true };
+
+  let longStatus = null;
+  try {
+    const youtube = google.youtube({ version: "v3", auth: oauth });
+    const res = await youtube.channels.list({ part: ["status"], mine: true });
+    const item = res.data && res.data.items && res.data.items[0];
+    longStatus = item && item.status && item.status.longUploadsStatus;
+  } catch (e) {
+    // ★フェイルオープン。判定できないことを理由にアーカイブを止めない。
+    //   ここで閉じると「APIが一時的に不調 → 全部のアーカイブが失敗」になる。
+    log("longUploadsStatus check failed (fail-open):", String(e).slice(0, 200));
+    return { ok: true };
+  }
+  // 値は allowed / eligible / disallowed / longUploadsUnspecified。allowed 以外は上げない。
+  // 取得できなかった場合（null）もフェイルオープン。
+  if (!longStatus || longStatus === "allowed") return { ok: true };
+
+  return {
+    ok: false,
+    message:
+      `この録画は約${Math.round(durationSec / 60)}分ですが、YouTubeチャンネルが「15分を超える動画」を\n` +
+      `アップロードできる状態になっていません（longUploadsStatus=${longStatus}）。\n` +
+      `このままアップロードすると、YouTubeが一旦受け取ったあとで削除してしまうため中止しました。\n` +
+      `\n` +
+      `【対処】配信者ご本人が https://www.youtube.com/verify で電話番号の確認を行ってください\n` +
+      `（数分で完了・身分証は不要です）。反映まで最大24時間かかることがあります。\n` +
+      `確認後、この配信の youtube_upload_status を 'pending'、youtube_retry_count を 0 に\n` +
+      `戻せば自動で再実行されます。\n` +
+      `\n` +
+      `※ 元の録画はサーバーに48時間だけ残ります。それを過ぎると復旧できません。`,
+  };
 }
 
 async function uploadToYouTube(filePath, b, oauth) {
@@ -130,6 +369,29 @@ function classify(err) {
   ) {
     return { type: "token-revoked", msg };
   }
+  // YouTube API 日次クォータ超過。
+  // ★2026-08-05 訂正: videos.insert は「1600ユニット」ではなく**投稿本数の専用枠（1日100本）**で、
+  //   標準の10,000ユニットプールとは別勘定（旧コメントの「≒6本/日」は誤り）。
+  //   ユニットを消費するのは channels.list(1) や videos.list(1) などの読み取り側。
+  // 403 で届くため auth-refresh より先に判定する。クォータは翌日16時JSTに復活する
+  // ので retry を消費せず pending 維持で翌日自動再開させる（従来は25分で永久failed化）。
+  const reason =
+    (e.errors && e.errors[0] && e.errors[0].reason) ||
+    (e.response &&
+      e.response.data &&
+      e.response.data.error &&
+      e.response.data.error.errors &&
+      e.response.data.error.errors[0] &&
+      e.response.data.error.errors[0].reason) ||
+    "";
+  if (
+    reason === "quotaExceeded" ||
+    reason === "uploadLimitExceeded" ||
+    msg.includes("quotaExceeded") ||
+    msg.includes("uploadLimitExceeded")
+  ) {
+    return { type: "quota", msg };
+  }
   if (status === 401 || status === 403) return { type: "auth-refresh", msg };
   if (status === 429 || (status >= 500 && status < 600))
     return { type: "retry", msg };
@@ -171,6 +433,15 @@ function spawnP(cmd, args) {
   });
 }
 
+// ffmpeg 実行ヘルパー。FFMPEG_THREADS 設定時のみ、出力パス（最終引数）の直前に
+// -threads を挿入する（全呼び出しで出力パスが末尾に来る前提＝本ファイル内の4箇所で確認済）。
+function ffmpegP(args) {
+  if (FFMPEG_THREADS) {
+    args = [...args.slice(0, -1), "-threads", FFMPEG_THREADS, args[args.length - 1]];
+  }
+  return spawnP("ffmpeg", args);
+}
+
 async function ffprobeDurationSec(p) {
   try {
     const out = await spawnP("ffprobe", [
@@ -207,6 +478,24 @@ async function ffprobeHasAudio(p) {
     const out = await spawnP("ffprobe", [
       "-v", "error",
       "-select_streams", "a",
+      "-show_entries", "stream=index",
+      "-of", "csv=p=0",
+      p,
+    ]);
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// 映像トラックの有無を返す。4G再接続では「音声だけで映像が無い」断片ができることが
+// あり（2026-07-12 実発生・16秒audio-only断片）、これが混ざると連結の [i:v:0] が
+// "matches no streams" で全失敗＝アーカイブ0本になる。断片選別で除外するための判定。
+async function ffprobeHasVideo(p) {
+  try {
+    const out = await spawnP("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v",
       "-show_entries", "stream=index",
       "-of", "csv=p=0",
       p,
@@ -313,7 +602,7 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
     "-map", "0:a?",
     "-c:v", "libx264",
     "-preset", "veryfast",
-    "-crf", "23",
+    "-crf", CRF_INTERMEDIATE,
     "-pix_fmt", "yuv420p",
     // 固定フレームレート(CFR 30)に正規化。配信側アダプティブが可変fpsにすると
     // 再生不可/尺崩れになるため、ここで30fps一定に焼き直す。音声も再エンコード＋
@@ -330,16 +619,16 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
     `seg${idx}: burning scoreboard SVG (${segs.length} score segments, ${w}x${h}, dur ${Math.round(durationMs / 1000)}s)`,
   );
   try {
-    await spawnP("ffmpeg", args);
+    await ffmpegP(args);
     return { path: outPath, scored: true };
   } catch (e) {
     // 焼き込み失敗（短い断片のPNG生成失敗等）でも、生のまま返さず必ず canonical に正規化する。
     // 生(元params)のまま連結に渡すと、焼き込み済(libx264)セグメントとparam不一致で連結が
     // 境界で打ち切られる（seg1を落として2秒になる事象）。オーバーレイ無しで同一paramsに揃える。
     log(`seg${idx}: burn failed -> normalize without overlay: ${String(e).slice(0, 120)}`);
-    await spawnP("ffmpeg", [
+    await ffmpegP([
       "-y", "-i", recPath,
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", CRF_INTERMEDIATE,
       "-pix_fmt", "yuv420p", "-r", "30",
       "-af", "aresample=async=1:first_pts=0",
       "-c:a", "aac", "-ar", "48000", "-ac", "2",
@@ -368,9 +657,27 @@ async function concatSegments(paths, workDir) {
     meta.push({
       p,
       hasAudio: await ffprobeHasAudio(p),
+      hasVideo: await ffprobeHasVideo(p),
       dur: await ffprobeDurationSec(p),
     });
   }
+  // ★ 二重防御: 映像の無い入力は連結から除外する（[i:v:0] が "matches no streams"
+  //   で全失敗するため）。呼び出し側(3-2)で除外済みのはずだが、焼き込みのフォール
+  //   バック等で audio-only の中間ファイルが紛れる経路に備える。
+  const noVideo = meta.filter((m) => !m.hasVideo);
+  if (noVideo.length > 0) {
+    log(`concat: dropping ${noVideo.length} input(s) without video stream`);
+  }
+  const usable = meta.filter((m) => m.hasVideo);
+  if (usable.length === 0) {
+    throw new Error("concat: no input has a video stream");
+  }
+  if (usable.length === 1) {
+    return usable[0].p; // 1本だけ残ったら連結不要
+  }
+  meta.length = 0;
+  meta.push(...usable);
+  paths = usable.map((m) => m.p);
 
   const inputs = [];
   meta.forEach((m) => inputs.push("-i", m.p)); // 入力 0..N-1 = 実セグメント
@@ -398,7 +705,7 @@ async function concatSegments(paths, workDir) {
   });
   const cat = paths.map((_, i) => `[v${i}][a${i}]`).join("");
   fc += `${cat}concat=n=${paths.length}:v=1:a=1[v][a]`;
-  await spawnP("ffmpeg", [
+  await ffmpegP([
     "-y",
     ...inputs,
     "-filter_complex", fc,
@@ -406,7 +713,8 @@ async function concatSegments(paths, workDir) {
     "-map", "[a]",
     "-c:v", "libx264",
     "-preset", "veryfast",
-    "-crf", "23",
+    // 連結は中間工程＝ほぼ無劣化で通し、圧縮は最終 canonicalize に一任する。
+    "-crf", CRF_INTERMEDIATE,
     "-pix_fmt", "yuv420p",
     "-r", "30",
     "-c:a", "aac",
@@ -424,18 +732,31 @@ async function concatSegments(paths, workDir) {
 // 音声が無い録画でも落ちないよう、音声トラックがある時だけ音声処理を付ける。
 async function canonicalize(inputPath, outPath) {
   const hasAudio = await ffprobeHasAudio(inputPath);
+  // UPSCALE_1080: 入力（burn/concat 出力または raw）が正確に 1280x720 と実測できた
+  // ときだけ 1920x1080 へアップスケール（YouTube の 1080p ティアは 720p より割当
+  // ビットレートが高く、再圧縮後の見た目が改善する既知のテクニック）。固定寸法＋
+  // setsar=1 なので level 4.1 の幅制限・SAR・偶数化の辺縁ケースは発生しない。
+  // probe 失敗（フォールバック値でも w/h は 1280x720 になるが、その場合は実測
+  // 720p と区別できないだけで拡大しても無害）や 720p 以外は既存の偶数化 vf を維持。
+  let vf = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+  if (UPSCALE_1080) {
+    const { w, h } = await ffprobeWH(inputPath);
+    if (w === 1280 && h === 720) {
+      vf = "scale=1920:1080:flags=lanczos,setsar=1";
+    }
+  }
   const args = [
     "-y",
     "-fflags", "+genpts", // 非単調/欠落PTSを再生成（RTMP再接続録画対策）
     "-i", inputPath,
     "-map", "0:v:0",
-    // 奇数寸法を偶数化（yuv420p要件・"width not divisible by 2"でのffmpeg失敗を防ぐ防御）。
-    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+    // 既定 vf: 奇数寸法を偶数化（yuv420p要件・"width not divisible by 2"失敗防止）。
+    "-vf", vf,
     "-vsync", "cfr", // 出力を固定フレームレート化（可変fpsをYouTube処理可能に）
     "-r", "30",
     "-c:v", "libx264",
     "-preset", "veryfast",
-    "-crf", "23",
+    "-crf", CRF_FINAL,
     "-profile:v", "high",
     "-level", "4.1",
     "-pix_fmt", "yuv420p",
@@ -450,7 +771,7 @@ async function canonicalize(inputPath, outPath) {
     );
   }
   args.push("-max_muxing_queue_size", "1024", "-movflags", "+faststart", outPath);
-  await spawnP("ffmpeg", args);
+  await ffmpegP(args);
   return outPath;
 }
 
@@ -458,7 +779,377 @@ async function setStatus(id, fields) {
   await admin.from("broadcasts").update(fields).eq("id", id);
 }
 
+// SIGKILL（Timeout等）で finally が走らなかった過去実行の残骸を掃除する。
+// 中間ファイルは1件5〜10GBになり得るため、放置すると /var/tmp を食い潰して
+// MediaMTX の録画書き込み（同一FS）まで巻き込む。更新が古い spotch_* のみ削除。
+function sweepOrphanWorkDirs() {
+  const base = process.env.WORK_DIR || "/var/tmp";
+  let names;
+  try {
+    names = fs.readdirSync(base).filter((n) => n.startsWith("spotch_"));
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - ORPHAN_WORKDIR_MS;
+  for (const n of names) {
+    const p = path.join(base, n);
+    try {
+      if (fs.statSync(p).mtimeMs < cutoff) {
+        fs.rmSync(p, { recursive: true, force: true });
+        log("swept orphan workdir:", n);
+      }
+    } catch {
+      /* 消せない残骸は次回に回す */
+    }
+  }
+}
+
+// SIGKILL で catch が走らず "uploading" のまま残った行を復旧する。
+// 閾値 STALE_UPLOADING_MS(4h) は service の TimeoutStartSec(3h) より必ず長いこと
+// （oneshot は単一インスタンスなので、4h 前に claim した実行は既に kill 済みと保証できる）。
+// retry を必ず消費させる：増分なしだと「3hかけて kill → リクレーム → また3h」の
+// 永久ループでライブ配信の CPU を恒常的に奪い続ける。
+async function reclaimStaleUploading() {
+  const cutoffIso = new Date(Date.now() - STALE_UPLOADING_MS).toISOString();
+  const { data: stale } = await admin
+    .from("broadcasts")
+    .select("id, share_code, youtube_retry_count")
+    .eq("youtube_upload_status", "uploading")
+    .lt("youtube_upload_started_at", cutoffIso);
+  for (const s of stale || []) {
+    const retry = s.youtube_retry_count || 0;
+    const exhausted = retry >= MAX_RETRY - 1;
+    await admin
+      .from("broadcasts")
+      .update({
+        youtube_upload_status: exhausted ? "failed" : "pending",
+        youtube_retry_count: retry + 1,
+        youtube_upload_error:
+          "reclaimed after stale uploading（タイムアウト等で中断。重複動画の可能性があれば YouTube Studio を確認）",
+      })
+      .eq("id", s.id)
+      .eq("youtube_upload_status", "uploading"); // CAS: 同時実行への保険
+    log(
+      `reclaimed stale uploading: ${s.share_code} -> ${exhausted ? "failed" : "pending"} (retry ${retry + 1})`,
+    );
+  }
+}
+
+// 進行中ライブのうち、この VPS(MediaMTX)に負荷をかけるものだけを数える。
+// status='live' かつ stream_playback_url IS NOT NULL(=MediaMTX経由。LiveKit経路は除外)
+// かつ started_at が LIVE_ACTIVE_MAX_AGE_MS 以内(ゴースト残骸を近似除外)。
+// 判定不能(DBエラー)は「ライブ無し」にフェイルオープン＝アーカイブを止めない側へ倒す。
+async function countActiveMediaMtxLive() {
+  const freshIso = new Date(Date.now() - LIVE_ACTIVE_MAX_AGE_MS).toISOString();
+  const { data, error } = await admin
+    .from("broadcasts")
+    .select("id")
+    .eq("status", "live")
+    .not("stream_playback_url", "is", null)
+    .gte("started_at", freshIso)
+    .limit(5);
+  if (error) {
+    log("active-live check failed (assuming none):", error.message.slice(0, 120));
+    return 0;
+  }
+  return (data || []).length;
+}
+
+// DB=live なのに MediaMTX に publisher が居ない配信を ended にする（ゴースト掃除）。
+// 実行間隔・猶予・2回連続確認はファイル冒頭の GHOST_* 設定を参照。
+async function sweepGhostBroadcasts() {
+  // 実行間隔ゲート（worker tick は5分毎だが、掃除自体は GHOST_SWEEP_INTERVAL_MS 毎）
+  let state = { lastRunMs: 0, suspects: {} };
+  try {
+    const raw = JSON.parse(fs.readFileSync(GHOST_SWEEP_STATE_PATH, "utf8"));
+    if (raw && typeof raw === "object") state = raw;
+  } catch {
+    /* 初回・破損時は初期値のまま */
+  }
+  if (!state.suspects || typeof state.suspects !== "object") state.suspects = {};
+  if (Date.now() - (Number(state.lastRunMs) || 0) < GHOST_SWEEP_INTERVAL_MS) return;
+
+  // MediaMTX に現在 publish されている（ready な）パス名一覧。localhost のみ・外部通信なし。
+  // ready は MediaMTX v1.17.0 で deprecated（後継 available/online）のため両方を見る。
+  // 「HTTP 200 だがスキーマが変質」も skip 側へ倒す（将来の MediaMTX 更新で全ライブを
+  // 一斉誤爆しないための構造ガード）。
+  let activePaths;
+  try {
+    const res = await fetch(`${MEDIAMTX_API_BASE}/v3/paths/list?itemsPerPage=100`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`http ${res.status}`);
+    const body = await res.json();
+    const items = Array.isArray(body.items) ? body.items : [];
+    if ((Number(body.pageCount) || 1) > 1) {
+      log("ghost sweep: paths > 1 page (unsupported, skip)");
+      return;
+    }
+    const flagged = items.filter(
+      (p) =>
+        p &&
+        (typeof p.ready === "boolean" ||
+          typeof p.available === "boolean" ||
+          typeof p.online === "boolean"),
+    );
+    if (items.length > 0 && flagged.length === 0) {
+      log("ghost sweep: api schema changed? no ready/available/online flags (skip)");
+      return; // スキーマ変質＝判定不能として何もしない
+    }
+    activePaths = new Set(
+      items
+        .filter((p) => p && (p.ready === true || p.available === true || p.online === true))
+        .map((p) => String(p.name)),
+    );
+  } catch (e) {
+    log("ghost sweep: mediamtx api unreachable (skip, no action):", String(e).slice(0, 100));
+    return; // フェイルオープン: 実体を確認できないときは絶対に終了させない
+  }
+
+  const minAgeIso = new Date(Date.now() - GHOST_MIN_AGE_MS).toISOString();
+  const { data, error } = await admin
+    .from("broadcasts")
+    .select("id, share_code, started_at")
+    .eq("status", "live")
+    .not("stream_playback_url", "is", null)
+    .lt("started_at", minAgeIso)
+    .limit(20);
+  if (error) {
+    log("ghost sweep: db read failed (skip):", error.message.slice(0, 100));
+    return;
+  }
+
+  const candidates = data || [];
+  const absent = candidates.filter((b) => !activePaths.has(`live/${b.share_code}`));
+  // 回路遮断（精密版・7/25実測反映）: 候補複数が全滅＋activeパス0本は「APIの意味が壊れた」
+  // 疑いがある。ただし発熱日は1セッションから複数ゴーストが同時発生するのが実態
+  // （7/25実測: 3本同時）なので、無条件skipにせずディスクの録画 mtime を実体証拠に使う:
+  //   いずれかの候補の最新録画が5分以内に更新中 → 実はpublish中(API不整合)とみなし skip
+  //   全候補の録画が5分以上停止 → 本当に全滅している → 掃除を続行（連鎖ゴーストを掃除）
+  if (candidates.length >= 2 && absent.length === candidates.length && activePaths.size === 0) {
+    const freshMs = 5 * 60 * 1000;
+    const anyFresh = candidates.some((b) => {
+      const recs = findRecordings(b.share_code);
+      if (recs.length === 0) return false;
+      try {
+        return Date.now() - fs.statSync(recs[recs.length - 1].p).mtimeMs < freshMs;
+      } catch {
+        return false;
+      }
+    });
+    if (anyFresh) {
+      log(`ghost sweep: all ${candidates.length} absent but fresh recording exists (api mismatch?, skip)`);
+      return;
+    }
+    log(`ghost sweep: all ${candidates.length} absent & recordings stale -> proceed (correlated ghosts)`);
+  }
+
+  const nextSuspects = {};
+  for (const b of candidates) {
+    if (activePaths.has(`live/${b.share_code}`)) continue; // 実配信 → 容疑解除
+    // 一度も MediaMTX に publish していない行（provision 後に LiveKit へフォールバック
+    // した実ライブ等）は録画実体を持たない → 対象外（strike も付けない）。
+    // 本物のゴースト＝一度は publish した配信は必ず録画ファイルを持つ。
+    const recs = findRecordings(b.share_code);
+    if (recs.length === 0) continue;
+    const strikes = (Number(state.suspects[b.id]) || 0) + 1;
+    if (strikes >= 2) {
+      // 2回連続不在 → ゴースト確定。status='live' の CAS 条件で実終了処理と競合しない。
+      // ended_at は掃除時刻でなく最終録画ファイルの mtime（≒実際の切断時刻）を使う。
+      // （掃除時刻だと壁時計とみなされ、極短配信の cancel 判定が壊れるため）
+      let endedAtIso = new Date().toISOString();
+      try {
+        const lastRec = recs[recs.length - 1];
+        const mtimeMs = fs.statSync(lastRec.p).mtimeMs;
+        if (Number.isFinite(mtimeMs) && mtimeMs > 0) {
+          endedAtIso = new Date(mtimeMs).toISOString();
+        }
+      } catch {
+        /* mtime 取得失敗時は現在時刻のまま */
+      }
+      const { error: upErr } = await admin
+        .from("broadcasts")
+        .update({ status: "ended", ended_at: endedAtIso })
+        .eq("id", b.id)
+        .eq("status", "live");
+      if (upErr) {
+        log(`ghost sweep: end failed ${b.share_code}:`, upErr.message.slice(0, 100));
+        nextSuspects[b.id] = strikes; // 次回リトライ
+      } else {
+        log(
+          `ghost sweep: ended ghost ${b.share_code} (no publisher x${strikes}, started ${b.started_at}, ended_at=${endedAtIso})`,
+        );
+      }
+    } else {
+      nextSuspects[b.id] = strikes;
+      log(
+        `ghost sweep: suspect ${b.share_code} (no publisher x${strikes}, recheck in ~${Math.round(GHOST_SWEEP_INTERVAL_MS / 60000)}min)`,
+      );
+    }
+  }
+
+  try {
+    fs.writeFileSync(
+      GHOST_SWEEP_STATE_PATH,
+      JSON.stringify({ lastRunMs: Date.now(), suspects: nextSuspects }),
+    );
+  } catch (e) {
+    log("ghost sweep: state save failed (ignored):", String(e).slice(0, 100));
+  }
+}
+
+// サーバー稼働メトリクスを1行計測して server_metrics へ push（失敗は全て無視＝本処理へ影響ゼロ）
+async function collectServerMetrics() {
+  // CPU: 1分ロードアベレージ/コア数・メモリ: os情報から
+  const cpuLoadPct =
+    Math.round((os.loadavg()[0] / Math.max(1, os.cpus().length)) * 1000) / 10;
+  const memUsedPct =
+    Math.round(((os.totalmem() - os.freemem()) / os.totalmem()) * 1000) / 10;
+
+  // ディスク使用率: df -B1 /
+  let diskUsedPct = null;
+  try {
+    const out = await new Promise((resolve) => {
+      const p = spawn("df", ["-B1", "/"]);
+      let s = "";
+      p.stdout.on("data", (d) => (s += d));
+      p.on("close", () => resolve(s));
+      p.on("error", () => resolve(""));
+    });
+    const cols = String(out).trim().split("\n").pop().split(/\s+/);
+    const size = Number(cols[1]);
+    const used = Number(cols[2]);
+    if (size > 0) diskUsedPct = Math.round((used / size) * 1000) / 10;
+  } catch {
+    /* noop */
+  }
+
+  // ディスクI/O・NW帯域: /proc 累積カウンタの前tickとの差分（kbps）
+  let diskReadKbps = null,
+    diskWriteKbps = null,
+    netRxKbps = null,
+    netTxKbps = null;
+  try {
+    const cur = { t: Date.now(), dr: 0, dw: 0, rx: 0, tx: 0 };
+    for (const l of fs.readFileSync("/proc/diskstats", "utf8").split("\n")) {
+      const f = l.trim().split(/\s+/);
+      if (f.length < 14) continue;
+      // 物理デバイスのみ（パーティション・loopを除外）
+      if (!/^(sd[a-z]|vd[a-z]|xvd[a-z]|nvme\d+n\d+)$/.test(f[2])) continue;
+      cur.dr += Number(f[5]) * 512; // 読了セクタ(512B)
+      cur.dw += Number(f[9]) * 512; // 書込セクタ(512B)
+    }
+    for (const l of fs.readFileSync("/proc/net/dev", "utf8").split("\n")) {
+      const m = l.match(/^\s*([^:\s]+):\s*(.+)$/);
+      if (!m || m[1] === "lo") continue;
+      const f = m[2].trim().split(/\s+/);
+      cur.rx += Number(f[0]);
+      cur.tx += Number(f[8]);
+    }
+    let prev = null;
+    try {
+      prev = JSON.parse(fs.readFileSync(METRICS_STATE_PATH, "utf8"));
+    } catch {
+      /* 初回 */
+    }
+    if (prev && prev.t && cur.t > prev.t && cur.t - prev.t < 30 * 60 * 1000) {
+      const dt = (cur.t - prev.t) / 1000;
+      const kbps = (bytes) =>
+        Math.max(0, Math.round(((bytes * 8) / 1000 / dt) * 10) / 10);
+      diskReadKbps = kbps(cur.dr - prev.dr);
+      diskWriteKbps = kbps(cur.dw - prev.dw);
+      netRxKbps = kbps(cur.rx - prev.rx);
+      netTxKbps = kbps(cur.tx - prev.tx);
+    }
+    fs.writeFileSync(METRICS_STATE_PATH, JSON.stringify(cur));
+  } catch {
+    /* noop */
+  }
+
+  // MediaMTX の配信中パス数（ghost sweep と同じ localhost API・不達は null）
+  let livePaths = null;
+  try {
+    const res = await fetch(`${MEDIAMTX_API_BASE}/v3/paths/list?itemsPerPage=100`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const body = await res.json();
+      livePaths = (Array.isArray(body.items) ? body.items : []).filter(
+        (p) => p && (p.ready === true || p.available === true || p.online === true),
+      ).length;
+    }
+  } catch {
+    /* noop */
+  }
+
+  // アーカイブ待ち件数（ended かつ 未処理）
+  let archiveQueue = null;
+  try {
+    const { count } = await admin
+      .from("broadcasts")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "ended")
+      .not("stream_playback_url", "is", null)
+      .or("youtube_upload_status.is.null,youtube_upload_status.eq.pending");
+    archiveQueue = count ?? null;
+  } catch {
+    /* noop */
+  }
+
+  const { error } = await admin.from("server_metrics").insert({
+    host: "vps-main",
+    cpu_load_pct: cpuLoadPct,
+    mem_used_pct: memUsedPct,
+    disk_used_pct: diskUsedPct,
+    disk_read_kbps: diskReadKbps,
+    disk_write_kbps: diskWriteKbps,
+    net_rx_kbps: netRxKbps,
+    net_tx_kbps: netTxKbps,
+    live_paths: livePaths,
+    archive_queue: archiveQueue,
+  });
+  if (error) {
+    log("metrics insert failed (ignored):", error.message.slice(0, 100));
+    return;
+  }
+  // 保持期間より古い行の掃除（indexed delete・通常は数行）
+  await admin
+    .from("server_metrics")
+    .delete()
+    .lt(
+      "created_at",
+      new Date(Date.now() - METRICS_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+    )
+    .then(undefined, () => {});
+}
+
 async function main() {
+  // 0. 保守: 残骸workDir掃除 + stale uploadingの復旧（どちらも失敗しても本処理は続行）
+  try {
+    sweepOrphanWorkDirs();
+  } catch (e) {
+    log("orphan sweep failed (ignored):", String(e).slice(0, 120));
+  }
+  try {
+    await reclaimStaleUploading();
+  } catch (e) {
+    log("stale reclaim failed (ignored):", String(e).slice(0, 120));
+  }
+  if (GHOST_SWEEP_ENABLED) {
+    try {
+      await sweepGhostBroadcasts();
+    } catch (e) {
+      log("ghost sweep failed (ignored):", String(e).slice(0, 120));
+    }
+  }
+  if (METRICS_ENABLED) {
+    try {
+      await collectServerMetrics();
+    } catch (e) {
+      log("metrics failed (ignored):", String(e).slice(0, 120));
+    }
+  }
+
   // 1. 対象 = 終了した自前配信(stream_playback_url 有)で未処理(null/pending)・retry 未超過
   const { data: rows, error } = await admin
     .from("broadcasts")
@@ -470,7 +1161,7 @@ async function main() {
     .or("youtube_upload_status.is.null,youtube_upload_status.eq.pending")
     .lt("youtube_retry_count", MAX_RETRY)
     .order("ended_at", { ascending: true })
-    .limit(1);
+    .limit(QUEUE_LOOKAHEAD);
   if (error) {
     console.error("[archive] select failed:", error.message);
     process.exit(1);
@@ -479,7 +1170,7 @@ async function main() {
     log("no pending");
     return;
   }
-  const b = rows[0];
+  const b = pickNext(rows);
   const retry = b.youtube_retry_count || 0;
 
   // 2. 適格性（¥500チーム + 自動アーカイブON + YouTube連携済み）
@@ -501,11 +1192,17 @@ async function main() {
       youtube_upload_error: "not eligible (plan/auto_archive/youtube link)",
     });
     log("cancelled (not eligible):", b.share_code);
+    // この録画は永久にアップロードされない＝保持する意味がゼロ。ここで消す。
+    dropRecordings(b.share_code, "not eligible");
     return;
   }
 
   // 3. 録画ファイル（4G再接続で複数セグメントに分割されている場合がある → 全部取る）
   let recs = findRecordings(b.share_code);
+  // completed 時の後始末は「この時点で列挙できたファイルだけ」を個別削除する
+  // （ディレクトリ丸ごと削除だと、処理中に publisher が復帰して書き始めた
+  //  進行中録画まで消してしまうため）。
+  const enumeratedRecs = recs.slice();
   if (recs.length === 0) {
     const endedMs = b.ended_at ? Date.parse(b.ended_at) : 0;
     const ageMs = endedMs ? Date.now() - endedMs : Infinity;
@@ -530,23 +1227,146 @@ async function main() {
     return;
   }
 
-  // 3-2. 極小セグメント(数秒)を除外。4G再接続でできる断片はキーフレーム前から始まり壊れている
-  //      ことがあり、連結を破壊する（filter_complexで stream 不在 / demuxerで尺打ち切り）。
-  //      5秒未満は捨てる。全部短い極端ケースは最長1本だけ残す（空にしない）。
+  // 3-1b. ライブ並走バックオフ。非適格(step2 cancel)・録画なし(step3 fail)という
+  //   「負荷ゼロで即キューから外れる」終端遷移はここより前で先に流す。守るのは直後(3-2)
+  //   から始まる重い ffprobe/ffmpeg/アップロードだけ。見送り時は行を一切 UPDATE しない
+  //   (pending/null のまま・retry 非消費)＝次tickへ持越し。
+  if (LIVE_BACKOFF_ENABLED) {
+    const endedMs = b.ended_at ? Date.parse(b.ended_at) : NaN;
+    // ended_at 不明は待ち時間不明＝Infinity 扱いで「猶予超過(処理する側)」に倒す。
+    const waitedMs = Number.isFinite(endedMs) ? Date.now() - endedMs : Infinity;
+    if (waitedMs <= LIVE_BACKOFF_MAX_DEFER_MS) {
+      const activeLive = await countActiveMediaMtxLive();
+      if (activeLive > 0) {
+        log(
+          `deferring (live-aware backoff): ${b.share_code} activeLive=${activeLive} waited=${Math.round(waitedMs / 60000)}min < grace ${Math.round(LIVE_BACKOFF_MAX_DEFER_MS / 60000)}min`,
+        );
+        return; // 行は無変更のまま次tickへ
+      }
+    } else {
+      log(
+        `starvation override: ${b.share_code} waited=${Math.round(waitedMs / 60000)}min >= grace -> processing despite any live`,
+      );
+    }
+  }
+
+  // 3-2. 使えないセグメントを除外。4G再接続でできる断片は
+  //      (a) 極小（キーフレーム前から始まり壊れている・5秒未満）
+  //      (b) 映像トラックなし（音声だけ・2026-07-12に16秒audio-only断片が実発生）
+  //      のことがあり、混ざると連結が「stream 不在 / 尺打ち切り」で全失敗する。
+  //      全部除外される極端ケースは「映像がある最長の1本」だけ残す（空にしない）。
+  //      映像のある断片がゼロなら、アーカイブ不能として明確に failed にする。
+  // 「映像ありの全断片（除外分も含む）の合計尺」を極短判定(3-3)用に持ち出す。
+  // kept だけの合計だと、細切れ断片（例 4秒×8本=実映像32秒）を誤って極短扱いしてしまう。
+  let videoTotalSec = 0;
   {
     const MIN_SEG_SEC = 5;
-    const withDur = [];
+    const withMeta = [];
     for (const r of recs) {
-      withDur.push({ r, d: await ffprobeDurationSec(r.p).catch(() => 0) });
+      withMeta.push({
+        r,
+        d: await ffprobeDurationSec(r.p).catch(() => 0),
+        hasVideo: await ffprobeHasVideo(r.p),
+      });
     }
-    let kept = withDur.filter((x) => x.d >= MIN_SEG_SEC).map((x) => x.r);
-    if (kept.length === 0 && withDur.length > 0) {
-      kept = [withDur.sort((a, b) => b.d - a.d)[0].r];
+    videoTotalSec = withMeta
+      .filter((x) => x.hasVideo)
+      .reduce((s, x) => s + (x.d > 0 ? x.d : 0), 0);
+    let kept = withMeta
+      .filter((x) => x.d >= MIN_SEG_SEC && x.hasVideo)
+      .map((x) => x.r);
+    if (kept.length === 0) {
+      const longestWithVideo = withMeta
+        .filter((x) => x.hasVideo)
+        .sort((a, b) => b.d - a.d)[0];
+      if (longestWithVideo) kept = [longestWithVideo.r];
+    }
+    if (kept.length === 0) {
+      // 映像のある録画が1本も無い＝アーカイブしようがない。リトライループに
+      // 落とさず明確に失敗させる（元録画ファイルは消さないので調査は可能）。
+      await setStatus(b.id, {
+        youtube_upload_status: "failed",
+        youtube_upload_error: "no video stream in any recording segment",
+        youtube_retry_count: retry,
+      });
+      log("failed (no video in recordings):", b.share_code);
+      return;
     }
     if (kept.length !== recs.length) {
-      log(`dropped ${recs.length - kept.length} tiny segment(s) (<${MIN_SEG_SEC}s)`);
+      const droppedMeta = withMeta.filter((x) => !kept.includes(x.r));
+      const reasons = droppedMeta
+        .map((x) => `${Math.round(x.d)}s${x.hasVideo ? "" : "/no-video"}`)
+        .join(", ");
+      log(`dropped ${recs.length - kept.length} unusable segment(s): ${reasons}`);
     }
     recs = kept;
+  }
+
+  // 3-3. 極短配信（誤スタート等）はアーカイブしない。ゴミ動画が配信者のYouTube
+  //      チャンネルに積み上がる問題（2026-07-11 実発生・0〜1分動画が5本）への対策。
+  //      誤cancel（＝実試合を取り逃す）が最悪なので、正方向の三重チェックが
+  //      すべて真のときだけ cancel する（null/NaN はいずれも「cancelしない」に倒れる）:
+  //        ①映像断片の合計尺が有限かつ MIN_ARCHIVE_SEC 未満
+  //        ②配信の実時間(ended_at−started_at)も有限かつ MIN_ARCHIVE_SEC+15秒 未満
+  //          （ffprobe が全滅して d=0 でも、実時間が長い配信は誤cancelしない保険）
+  //        ③ended_at が10分以上前（MediaMTX のファイナライズ中＝moov未確定の録画を
+  //          「短い」と誤measureする窓を排除。RECORDING_WAIT_MS と同思想）
+  //      ※録画ファイルは削除しない（fail-closed 原則。ディスク上の数十MBは許容）。
+  {
+    const startedMs = b.started_at ? Date.parse(b.started_at) : NaN;
+    const endedMs = b.ended_at ? Date.parse(b.ended_at) : NaN;
+    const wallSec = (endedMs - startedMs) / 1000; // NaN なら以降の比較は必ず false
+    const finalized =
+      Number.isFinite(endedMs) && Date.now() - endedMs > 10 * 60 * 1000;
+    const tooShort =
+      Number.isFinite(videoTotalSec) &&
+      videoTotalSec > 0 &&
+      videoTotalSec < MIN_ARCHIVE_SEC &&
+      Number.isFinite(wallSec) &&
+      wallSec < MIN_ARCHIVE_SEC + 15 &&
+      finalized;
+    if (tooShort) {
+      await admin
+        .from("broadcasts")
+        .update({
+          youtube_upload_status: "cancelled",
+          youtube_upload_error: `too short (<${MIN_ARCHIVE_SEC}s) — not archived`,
+        })
+        .eq("id", b.id)
+        .or("youtube_upload_status.is.null,youtube_upload_status.eq.pending");
+      log(
+        `cancelled (too short): ${b.share_code} video=${Math.round(videoTotalSec)}s wall=${Math.round(wallSec)}s`,
+      );
+      // 短すぎてアーカイブしないと確定した録画も保持する意味がない。
+      dropRecordings(b.share_code, "too short");
+      return;
+    }
+  }
+
+  // 3-4. ended なのに MediaMTX に publisher が復帰している（ゴースト誤終了→再接続、
+  //      web cron が終了させたが実は配信継続中 等）なら、進行中の録画を変換しないよう
+  //      行無変更で次tickへ見送る。API 不達はフェイルオープン＝従来どおり続行。
+  if (GHOST_SWEEP_ENABLED) {
+    try {
+      const res = await fetch(`${MEDIAMTX_API_BASE}/v3/paths/list?itemsPerPage=100`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const body = await res.json();
+        const stillPublishing = (Array.isArray(body.items) ? body.items : []).some(
+          (p) =>
+            p &&
+            String(p.name) === `live/${b.share_code}` &&
+            (p.ready === true || p.available === true || p.online === true),
+        );
+        if (stillPublishing) {
+          log(`deferring (publisher active on mediamtx): ${b.share_code}`);
+          return; // 行無変更＝retry 非消費で持ち越し
+        }
+      }
+    } catch {
+      /* API 不達は従来挙動のまま続行（フェイルオープン） */
+    }
   }
 
   // 4. 楽観排他で uploading
@@ -572,14 +1392,58 @@ async function main() {
     `${recs.length} segment(s)`,
     `${totalMB.toFixed(0)}MB`,
   );
-  // 中間生成物（PNG/焼き込みセグメント/concat結果）は os.tmpdir 配下に作って確実に消す。
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), `spotch_${b.id}_`));
+  // 中間生成物（PNG/焼き込みセグメント/concat結果）の作業ディレクトリ。
+  // ★ os.tmpdir()(=/tmp) は使わない：Ubuntu 24.04+ の /tmp は tmpfs(RAMディスク・
+  //   容量=メモリの半分程度)で、45分級の連結/正規化出力(1.5GB超)が書き込み中に溢れて
+  //   72〜85%地点で ffmpeg が死ぬ（2026-07-12 実発生・exit 228）。ディスク実体の
+  //   /var/tmp を既定にする（WORK_DIR で上書き可）。処理後は finally で確実に消す。
+  const workBase = process.env.WORK_DIR || "/var/tmp";
+  const workDir = fs.mkdtempSync(path.join(workBase, `spotch_${b.id}_`));
   try {
     const oauth = await getOAuthClient(
       prof.youtube_refresh_token,
       prof.youtube_access_token,
       prof.id,
     );
+
+    // ★ 15分ゲート（事前判定）: 重いエンコードを始める**前**に、そもそも上げられるかを確かめる。
+    //
+    // 2026-08-08 の実測でこの位置に移した。それまでは canonicalize の**後**にだけ
+    // 置いていたため、1時間42分(2.5GB)の配信で **57分ぶんのCPUを使い切ってから**
+    // 「アップロードできません」と判定していた。ワーカーは1tickにつき1本しか処理しない
+    // ので、**その57分のあいだ後続の配信が全員待たされる**（同日、67秒の配信が
+    // 40分近く待たされた）。尺は録画から既に測れている（videoTotalSec）ので、
+    // 判定は最初にできる。
+    //
+    // ★ videoTotalSec が 0/NaN（ffprobe 全滅）のときは checkLongUploadGate が
+    //   「上限以下」と見なして ok を返す＝**フェイルオープン**。誤って止めない。
+    // ★ エンコード後のゲート（下方・finalDur 基準）は**残す**。事前測定が実尺を
+    //   過小評価した場合の保険で、短い配信ではAPIを叩かないので追加コストはない。
+    {
+      const preGate = await checkLongUploadGate(oauth, videoTotalSec);
+      if (!preGate.ok) {
+        log(
+          "long-upload gate blocked (pre-encode)",
+          b.share_code,
+          `${Math.round(videoTotalSec)}s`,
+        );
+        await setStatus(b.id, {
+          youtube_upload_status: "failed",
+          youtube_upload_error: preGate.message.slice(0, 500),
+          youtube_retry_count: retry,
+        });
+        // この関数には finally が無く、早期 return では作業ディレクトリが残る。
+        // 下方のゲートと同じく明示的に消す（この時点では空だが /var/tmp に溜めない）。
+        try {
+          fs.rmSync(workDir, { recursive: true, force: true });
+        } catch {
+          /* noop */
+        }
+        // ★元録画は残す（48時間以内なら、電話番号確認を済ませてから再実行で救える）。
+        return;
+      }
+    }
+
     // 配信全体のスコアイベントを一度だけ取得（区間は各セグメントの開始時刻で切る）。
     const { data: events } = await admin
       .from("broadcast_score_events")
@@ -636,6 +1500,25 @@ async function main() {
     }
     log(`canonicalized & verified: ${Math.round(finalDur)}s -> uploading`);
 
+    // ★ 15分ゲート: 上げても後から消される動画は、そもそも上げない（上の関数のコメント参照）。
+    //   ここで止めれば元録画は残るので、配信者が電話番号確認を済ませてから再実行できる。
+    const gate = await checkLongUploadGate(oauth, finalDur);
+    if (!gate.ok) {
+      log("long-upload gate blocked", b.share_code, `${Math.round(finalDur)}s`);
+      await setStatus(b.id, {
+        youtube_upload_status: "failed",
+        youtube_upload_error: gate.message.slice(0, 500),
+        youtube_retry_count: retry,
+      });
+      // 中間生成物だけ掃除。★元録画は残す（48時間以内なら再実行で救える）。
+      try {
+        fs.rmSync(workDir, { recursive: true, force: true });
+      } catch {
+        /* noop */
+      }
+      return;
+    }
+
     const videoId = await uploadToYouTube(uploadPath, b, oauth);
     await setStatus(b.id, {
       youtube_upload_status: "completed",
@@ -650,10 +1533,20 @@ async function main() {
       /* noop */
     }
     try {
-      fs.rmSync(path.join(RECORDINGS_DIR, "live", b.share_code), {
-        recursive: true,
-        force: true,
-      });
+      // 処理開始時に列挙したファイルのみ個別削除（進行中の新規録画は残す）。
+      for (const r of enumeratedRecs) {
+        try {
+          fs.unlinkSync(r.p);
+        } catch {
+          /* 既に無い等は無視 */
+        }
+      }
+      // 空になった場合だけディレクトリを畳む（中身が残っていれば失敗して残る＝意図どおり）
+      try {
+        fs.rmdirSync(path.join(RECORDINGS_DIR, "live", b.share_code));
+      } catch {
+        /* not empty → keep */
+      }
     } catch (e) {
       log("local cleanup failed (ignored):", String(e));
     }
@@ -667,6 +1560,16 @@ async function main() {
     }
     const c = classify(err);
     log("upload failed", b.share_code, c.type, c.msg);
+    if (c.type === "quota") {
+      // YouTube 日次クォータ超過は「明日になれば必ず直る」ので retry を消費せず
+      // pending 維持（翌16時JSTのクォータ復活後に自動再開。永久failed化を防ぐ）。
+      await setStatus(b.id, {
+        youtube_upload_status: "pending",
+        youtube_upload_error:
+          "YouTube APIの1日のアップロード上限に達しました。翌日16時以降に自動で再開します。",
+      });
+      return;
+    }
     const retryable = c.type === "retry" || c.type === "auth-refresh";
     if (retryable && retry < MAX_RETRY - 1) {
       await setStatus(b.id, {

@@ -5,7 +5,7 @@ import { useToast } from "@/components/toaster";
 import { createClient } from "@/lib/supabase";
 import type { TeamSchedule } from "@/lib/database";
 
-const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "陸上", "その他"];
+const SPORTS = ["サッカー", "野球", "バスケ", "バレー", "テニス", "ソフトテニス", "陸上", "その他"];
 
 export type ScheduleFormTeam = {
   id: string;
