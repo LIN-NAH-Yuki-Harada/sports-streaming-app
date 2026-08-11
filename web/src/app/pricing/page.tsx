@@ -23,9 +23,43 @@ type PromoState =
 
 export default function PricingPage() {
   return (
-    <Suspense fallback={<div className="px-5 py-10 text-sm text-gray-500">読み込み中...</div>}>
-      <PricingPageInner />
-    </Suspense>
+    <>
+      <Suspense fallback={<div className="px-5 py-10 text-sm text-gray-500">読み込み中...</div>}>
+        <PricingPageInner />
+      </Suspense>
+      <LegalLinks />
+    </>
+  );
+}
+
+/**
+ * 法定表示・規約へのリンク。
+ *
+ * ★Suspense の「外」に置くのが要点。PricingPageInner は useSearchParams() を使うため
+ * ページ全体がクライアント描画になり、サーバーが返す HTML はフォールバック
+ * （「読み込み中...」）だけになる。特定商取引法は申込みの最終確認画面から表示に
+ * アクセスできることを求めており、Apple のガイドライン 3.1.2 もサブスク購入画面から
+ * 規約・プライバシーポリシーへの機能するリンクを要件にしているので、
+ * JS の実行状況に関わらず必ず出るようにここへ置く。
+ */
+function LegalLinks() {
+  return (
+    <div className="px-5 md:px-8 lg:px-10 pb-24">
+      <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-gray-400">
+        <a href="/terms" className="hover:text-white underline underline-offset-2 transition">
+          利用規約
+        </a>
+        <a href="/privacy" className="hover:text-white underline underline-offset-2 transition">
+          プライバシーポリシー
+        </a>
+        <a href="/tokusho" className="hover:text-white underline underline-offset-2 transition">
+          特定商取引法に基づく表示
+        </a>
+      </div>
+      <p className="mt-3 text-center text-[11px] text-gray-500 leading-relaxed">
+        プランにお申し込みいただいた時点で、利用規約およびプライバシーポリシーに同意したものとみなします。
+      </p>
+    </div>
   );
 }
 
@@ -35,6 +69,9 @@ function PricingPageInner() {
   const { user, profile, loading: authLoading } = useAuth();
   const [loadingPlan, setLoadingPlan] = useState<Plan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // アプリ内課金（App Store / Google Play）で登録した人は Stripe の顧客IDを持たないため、
+  // カスタマーポータルを開けない。その場合にストア側の解約手順を案内する。
+  const [showStoreCancelHelp, setShowStoreCancelHelp] = useState(false);
   // 未ログインで「加入」を押したらログイン/登録フォームを出す（クーポン有無に関わらず）。
   const [showAuth, setShowAuth] = useState(false);
 
@@ -155,6 +192,8 @@ function PricingPageInner() {
   const handleManage = async () => {
     if (!user) return;
     setLoadingPlan(currentPlan as Plan);
+    setError(null);
+    setShowStoreCancelHelp(false);
     try {
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
@@ -166,10 +205,17 @@ function PricingPageInner() {
       const data = await res.json();
       if (res.ok) {
         window.location.href = data.url;
+        return;
+      }
+      // 404 = Stripe の顧客が存在しない = アプリ内課金（App Store / Google Play）で
+      // ご登録の方。API の英語メッセージをそのまま出すと日本語画面に
+      // 「No Stripe customer found」と表示され、解約したい人が行き止まりになる。
+      if (res.status === 404) {
+        setShowStoreCancelHelp(true);
       } else {
         setError(data.error ?? "カスタマーポータルを開けませんでした");
-        setLoadingPlan(null);
       }
+      setLoadingPlan(null);
     } catch {
       setError("通信エラーが発生しました");
       setLoadingPlan(null);
@@ -193,7 +239,8 @@ function PricingPageInner() {
         <h1 className="mt-2 text-sm font-bold text-gray-400">料金プラン</h1>
       </header>
 
-      <div className="px-5 md:px-8 lg:px-10 pt-8 md:pt-12 pb-24">
+      {/* 下端の余白は LegalLinks 側が持つ（下部ナビとの被り回避） */}
+      <div className="px-5 md:px-8 lg:px-10 pt-8 md:pt-12 pb-8">
         {/* ── 有効なプロモコードがある場合の "クーポン誘導" ヒーロー ─────────────────── */}
         {hasValidPromo ? (
           <div className="mb-8 rounded-2xl border border-[#e63946]/40 bg-gradient-to-br from-[#e63946]/20 via-[#e63946]/5 to-transparent p-6 md:p-8">
@@ -305,6 +352,33 @@ function PricingPageInner() {
           </div>
         )}
 
+        {/* アプリ内課金でご登録の方へ（カスタマーポータルが開けない場合の解約案内） */}
+        {showStoreCancelHelp && (
+          <div className="mb-4 rounded-lg bg-[#111] border border-white/15 px-4 py-4 text-sm">
+            <p className="font-semibold text-white">
+              アプリ内課金でご登録の方は、ストア側でお手続きください
+            </p>
+            <p className="mt-2 text-xs text-gray-400 leading-relaxed">
+              このアカウントは iPhone / Android アプリ内（App Store / Google Play）でご登録いただいているため、
+              このページからは解約・支払い方法の変更ができません。ストア決済の仕様によるものです。
+            </p>
+            <ul className="mt-3 space-y-2 text-xs text-gray-300 list-disc list-outside pl-5">
+              <li>
+                <strong className="text-white">iPhone / iPad</strong>：「設定」→ 一番上のお名前（Apple ID）→「サブスクリプション」→ LIVE SPOtCH →「サブスクリプションをキャンセル」
+              </li>
+              <li>
+                <strong className="text-white">Android</strong>：「Google Play ストア」→ 右上のアイコン →「お支払いと定期購入」→「定期購入」→ LIVE SPOtCH →「定期購入を解約」
+              </li>
+            </ul>
+            <p className="mt-3 text-xs text-gray-400 leading-relaxed">
+              解約後も、課金済みの期間の末日までは引き続きご利用いただけます。
+              うまくいかない場合は
+              <a href="/contact" className="text-[#e63946] hover:underline mx-1">お問い合わせ</a>
+              よりご連絡ください。
+            </p>
+          </div>
+        )}
+
         {/* ── クーポンコード入力（手動入力用・営業 DM 未経由の人向け） ──────────── */}
         {!hasValidPromo && (
           <div className="mb-6 rounded-lg bg-[#111] border border-white/5 px-4 py-4">
@@ -361,9 +435,9 @@ function PricingPageInner() {
             <p className="text-xs text-gray-500 mt-3 leading-relaxed">
               共有コードで配信・アーカイブを視聴。
             </p>
-            <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-500 flex-1">
+            <ul className="mt-3 space-y-1.5 text-[11px] md:text-xs text-gray-400 flex-1">
               <li>✓ ライブ視聴（登録不要）</li>
-              <li>✓ アーカイブ視聴（チームプラン配信のYouTube限定公開）</li>
+              <li>✓ アーカイブ視聴（配信者がYouTube連携をONにしたチームプラン配信のみ）</li>
             </ul>
             <button
               disabled
@@ -439,16 +513,34 @@ function PricingPageInner() {
               <li>✓ 試合スケジュール管理</li>
               <li>✓ 共有コードのチーム自動配布</li>
               <li className="text-gray-200 flex items-center gap-1.5 flex-wrap">
-                <span>✓ YouTube Live 同時配信（YouTube にもリアルタイム push）</span>
+                <span>✓ 試合後に YouTube へ自動アーカイブ（ご自身のチャンネルに保存）</span>
                 <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
               </li>
               <li className="text-gray-200 flex items-center gap-1.5 flex-wrap">
                 <span>✓ YouTube に自動アーカイブ（ご自身のチャンネルに長期保存）</span>
                 <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
               </li>
-              <li className="text-gray-500">🔜 リモコンでスコア操作（別端末から）</li>
-              <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
+              <li className="text-gray-400">🔜 リモコンでスコア操作（別端末から）</li>
+              <li className="text-gray-400">🔜 AI ハイライト自動生成</li>
             </ul>
+            {/* アーカイブが「残らない」二大原因。加入前に必ず見える位置に出す。 */}
+            <div className="mt-3 pt-3 border-t border-white/10 space-y-1.5 text-[11px] text-gray-400 leading-relaxed">
+              <p>
+                ※ YouTube 関連の機能には、マイページでのご自身の YouTube アカウント連携が必要です（初期状態はOFF）。
+              </p>
+              <p>
+                ※ 15分を超える録画の保存には、YouTube チャンネルの電話番号確認（
+                <a
+                  href="https://www.youtube.com/verify"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#e63946] hover:underline"
+                >
+                  youtube.com/verify
+                </a>
+                ・数分で完了・身分証不要）が必要です。未確認のチャンネルでは保存されません。
+              </p>
+            </div>
             {currentPlan === "team" ? (
               <button
                 onClick={handleManage}
@@ -489,7 +581,10 @@ function PricingPageInner() {
               </li>
             )}
             <li>決済は Stripe を通じて安全に処理されます。カード情報は当社では一切保持しません。</li>
-            <li>解約はマイページまたは「プラン管理」からいつでも可能です。</li>
+            <li>
+              解約はいつでも可能です。このページ（Web）からクレジットカードでご登録の場合はマイページの「プラン管理」から、
+              iPhone / Android のアプリ内でご登録の場合は各ストアのサブスクリプション管理画面からお手続きください。
+            </li>
             <li>解約後も当該月末までは引き続きご利用いただけます。</li>
           </ul>
         </div>

@@ -14,11 +14,11 @@ const PLAY_STORE_URL =
 const FAQ_ITEMS = [
   {
     q: "子どもの顔が映るのが心配です。大丈夫ですか？",
-    a: "共有コードを知る人だけが視聴できる限定公開なので、ご家族・チーム関係者以外には配信は届きません。アーカイブは配信者ご自身のYouTubeチャンネルに「限定公開」で保存され、リンクを知る人だけが視聴できます。",
+    a: "LIVE SPOtCH のプレイヤーでの配信は、共有コードを知る人だけが視聴できる限定公開です。検索や一覧には表示されません。なお、チームプランで「YouTube 自動アーカイブ」をONにした場合は、配信者ご自身のYouTubeチャンネルにも「限定公開」で映像が流れます。YouTubeの限定公開はURLを知っている人なら視聴できる状態のため、共有コードとは保護の仕組みが異なります。YouTube連携は初期状態ではOFFで、配信者ご自身が設定しない限り有効になりません。",
   },
   {
     q: "配信の画質はどれくらいですか？",
-    a: "HD画質（720p）で配信しています。一般的なLTE回線・WiFi環境で安定して視聴できます。",
+    a: "HD画質（720p）を上限に配信します。通信状況に応じて画質は自動で調整されるため、電波の弱い会場では一時的に画質が下がることがあります。安定したWiFi・LTE環境では、HD画質でご覧いただけます。",
   },
   {
     q: "10分の無料お試し時間が終わったらどうなりますか？",
@@ -26,7 +26,11 @@ const FAQ_ITEMS = [
   },
   {
     q: "配信者プランとチームプランの違いは？",
-    a: "配信者プラン（¥300/月）は個人保護者向けの「ライブ配信専用プラン」です。自社プレイヤーで試合をリアルタイムに家族へ届ける用途に最適（アーカイブ保存はありません）。チームプラン（¥500/月）は記録運用向けで、自社プレイヤー配信に加えて YouTube Live 同時配信・YouTube への自動アーカイブ・チーム管理・スケジュール管理・リモコン操作（開発中）・AIハイライト（開発中）が追加されます。",
+    a: "配信者プラン（¥300/月）は個人保護者向けの「ライブ配信専用プラン」です。自社プレイヤーで試合をリアルタイムに家族へ届ける用途に最適（アーカイブ保存はありません）。チームプラン（¥500/月）は記録運用向けで、自社プレイヤー配信に加えて YouTube への自動アーカイブ（試合後に保存）・チーム管理・スケジュール管理・リモコン操作（開発中）・AIハイライト（開発中）が追加されます。なお YouTube 関連の機能をご利用いただくには、マイページでご自身の YouTube アカウントを連携する設定が必要です（初期状態はOFF）。",
+  },
+  {
+    q: "チームプランのアーカイブ（録画）は、何もしなくても残りますか？",
+    a: "2つの準備が必要です。①マイページでご自身の YouTube アカウントを連携してください（初期状態はOFFのため、未設定のままだと録画は保存されません）。②15分を超える試合を保存する場合は、その YouTube チャンネルで電話番号の確認（youtube.com/verify・数分で完了・身分証不要）を済ませてください。未確認のチャンネルは YouTube 側が15分超の動画を受け付けないため、アップロードを中止します。サッカー・バレーなど多くの試合は15分を超えるため、初回配信の前にこの2つをご確認ください。",
   },
   {
     q: "複数の家族・親戚が同時に視聴できますか？",
@@ -42,7 +46,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "解約はかんたんにできますか？",
-    a: "マイページの「プラン管理」からいつでも解約できます。解約後も当該月末まではご利用可能です。",
+    a: "はい。ただしお手続きの場所は、お申し込みいただいた経路によって異なります。Webサイト（クレジットカード決済）でご登録の方は、マイページの「プラン管理」からいつでも解約できます。iPhone / Android のアプリ内でご登録の方は、iPhone / iPad は「設定」→ Apple ID →「サブスクリプション」から、Android は「Google Play ストア」→「お支払いと定期購入」→「定期購入」から解約してください（ストア決済の仕様上、当社のマイページからは解約できません）。いずれの場合も、解約後は当該月末までご利用いただけます。",
   },
   {
     q: "サッカー・野球・バスケ以外のスポーツにも対応していますか？",
@@ -139,7 +143,7 @@ const SOFTWARE_APP_JSONLD = {
       price: "500",
       priceCurrency: "JPY",
       description:
-        "配信者プランの全機能 + YouTube Live 同時配信（ベータ公開中） + YouTube 自動アーカイブ（ベータ公開中） + チーム・スケジュール管理（月額¥500）",
+        "配信者プランの全機能 + YouTube 自動アーカイブ（試合後に自動保存・ベータ公開中） + チーム・スケジュール管理（月額¥500）",
     },
   ],
   featureList: [
@@ -268,7 +272,7 @@ export default function LandingPage() {
                   <span aria-hidden="true">📺</span> TV中継品質のスコアボード
                 </span>
                 <span className="inline-flex items-center gap-1.5 bg-[#e63946]/10 ring-1 ring-[#e63946]/30 rounded-full px-3 py-1 text-[11px] text-white">
-                  <span aria-hidden="true">📡</span> YouTube Live 同時配信
+                  <span aria-hidden="true">📼</span> YouTube 自動アーカイブ
                   <span className="bg-[#e63946] text-white text-[8px] font-black px-1 py-0.5 rounded ml-0.5">NEW</span>
                 </span>
               </div>
@@ -280,7 +284,7 @@ export default function LandingPage() {
                 >
                   まずは10分間、無料で試す
                 </a>
-                <span className="text-sm text-gray-600 px-2 sm:px-4 py-1 sm:py-3">
+                <span className="text-sm text-gray-400 px-2 sm:px-4 py-1 sm:py-3">
                   Webブラウザで今すぐ使えます
                 </span>
               </div>
@@ -320,7 +324,7 @@ export default function LandingPage() {
                     className="h-[57px] w-auto"
                   />
                 </a>
-                <span className="text-[11px] text-gray-600 leading-relaxed">
+                <span className="text-[11px] text-gray-400 leading-relaxed">
                   iOS / Android
                   <br />
                   アプリ配信中
@@ -368,7 +372,9 @@ export default function LandingPage() {
               {/* 左下: 共有コード */}
               <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-black/70 backdrop-blur-sm rounded px-2.5 py-1.5">
                 <span className="text-[8px] text-gray-400">コード</span>
-                <span className="text-[10px] font-black tracking-widest">A8C3</span>
+                {/* 実物は 8 文字（database.ts の generateShareCode）。見本も 8 文字に揃える。
+                    紛らわしい I/O/0/1 を除いた文字種から構成。 */}
+                <span className="text-[10px] font-black tracking-wider">A8C3KRWP</span>
               </div>
             </div>
           </div>
@@ -421,7 +427,7 @@ export default function LandingPage() {
               {s.emoji} {s.name}
             </span>
           ))}
-          <span className="text-xs sm:text-sm text-gray-600 px-3 sm:px-4 py-1.5 sm:py-2">...その他すべてのスポーツ</span>
+          <span className="text-xs sm:text-sm text-gray-400 px-3 sm:px-4 py-1.5 sm:py-2">...その他すべてのスポーツ</span>
         </div>
       </section>
 
@@ -453,7 +459,7 @@ export default function LandingPage() {
           {[
             { title: "試合に行けない日に", desc: "仕事で応援に行けなくても、スマホでリアルタイム観戦。お子さまの活躍を見逃しません。", image: "/lp-scenes-office-dad.jpg", alt: "仕事中の父親がオフィスからスマホで子どもの試合をライブ観戦" },
             { title: "おじいちゃん、おばあちゃんに", desc: "遠方に住む祖父母にもコードを送るだけ。孫の試合を一緒に応援。", image: "/lp-scenes-grandparents.jpg", alt: "離れた地域の祖父母がタブレットで孫の試合を観戦" },
-            { title: "チームの振り返りに", desc: "チームプランのアーカイブ自動保存で、試合後の反省会や戦術確認に。コーチも選手も使えます。", image: "/lp-scenes-coach-review.jpg", alt: "スポーツ少年団のコーチが試合アーカイブで戦術を振り返る様子" },
+            { title: "チームの振り返りに", desc: "チームプランのアーカイブ自動保存（YouTube連携が必要）で、試合後の反省会や戦術確認に。コーチも選手も使えます。", image: "/lp-scenes-coach-review.jpg", alt: "スポーツ少年団のコーチが試合アーカイブで戦術を振り返る様子" },
             { title: "大会・講演会の中継に", desc: "スポーツに限らず、学校行事や講演会の限定配信にも対応。", image: "/lp-scenes-school-event.jpg", alt: "学校行事や地域大会をライブ配信して関係者に届ける様子" },
           ].map((item) => (
             <div key={item.title} className="group rounded-2xl ring-1 ring-white/10 overflow-hidden bg-white/[0.02] hover:ring-[#e63946]/40 hover:-translate-y-1 transition duration-300">
@@ -493,8 +499,13 @@ export default function LandingPage() {
 
       {/* 保護者の声 */}
       <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-16 sm:py-24 border-t border-white/5">
-        <SectionKicker label="利用者の声" />
-        <h2 className="text-xl sm:text-3xl font-bold tracking-tight mb-8 sm:mb-12">保護者・コーチの声</h2>
+        <SectionKicker label="目指す体験" />
+        <h2 className="text-xl sm:text-3xl font-bold tracking-tight mb-3">こんな体験を目指しています</h2>
+        {/* ★実在ユーザーの推薦文ではない。景表法（優良誤認）・ステマ規制の観点から、
+            打ち消し表示はカードの「上」に、本文と同じ読める大きさ・コントラストで置く。 */}
+        <p className="mb-8 sm:mb-10 text-xs sm:text-sm text-gray-400 leading-relaxed">
+          以下は<strong className="text-gray-200">当社が想定する利用シーンを文章にしたもの</strong>で、実在の利用者の発言ではありません。実際にいただいたお客様の声は、許諾を得たうえで改めて掲載します。
+        </p>
         <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-3">
           {[
             {
@@ -517,15 +528,14 @@ export default function LandingPage() {
               <div className="text-[#e63946] text-2xl leading-none mb-3 font-serif" aria-hidden="true">“</div>
               <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">{v.voice}</p>
               <div className="mt-4 pt-4 border-t border-white/5">
-                <p className="text-[11px] font-semibold text-gray-400">{v.name}</p>
-                <p className="text-[10px] text-gray-600 mt-0.5">{v.role}</p>
+                <p className="text-[11px] font-semibold text-gray-400">
+                  想定ユーザー: {v.name}
+                </p>
+                <p className="text-[10px] text-gray-400 mt-0.5">{v.role}</p>
               </div>
             </div>
           ))}
         </div>
-        <p className="mt-6 text-[10px] text-gray-600 text-center">
-          ※ 想定される利用シーンの声です。実際のユーザーの声は随時掲載予定です。
-        </p>
       </section>
 
       {/* 料金 */}
@@ -536,13 +546,16 @@ export default function LandingPage() {
           <div className="rounded-2xl ring-1 ring-white/10 bg-white/[0.02] p-5 sm:p-6">
             <p className="text-xs text-gray-500 mb-1">視聴する人</p>
             <p className="text-2xl sm:text-3xl font-black">無料</p>
-            <p className="text-xs text-gray-500 mt-3 leading-relaxed">
-              共有コードでライブ視聴。登録不要。チームプラン配信はYouTubeアーカイブも視聴可。
+            <p className="text-xs text-gray-400 mt-3 leading-relaxed">
+              共有コードでライブ視聴。登録不要。配信者がYouTube連携をONにしていれば、アーカイブも視聴できます。
             </p>
             <ul className="mt-4 space-y-2 text-[11px] sm:text-xs text-gray-400">
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> ライブ視聴（登録不要）</li>
-              <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> アーカイブ視聴（チームプラン配信のYouTube限定公開）</li>
+              <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> アーカイブ視聴（配信者がYouTube連携をONにしたチームプラン配信のみ）</li>
             </ul>
+            <p className="mt-5 text-[11px] text-gray-400 text-center">
+              視聴する方のお申し込みは不要です
+            </p>
           </div>
           <div className="rounded-2xl ring-1 ring-white/10 bg-white/[0.02] p-5 sm:p-6">
             <p className="text-xs text-gray-400 mb-1">配信者プラン</p>
@@ -553,8 +566,14 @@ export default function LandingPage() {
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> スコアボード・オーバーレイ</li>
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> LINE共有（ワンタップ）</li>
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> 限定公開の共有コード</li>
-              <li className="text-gray-600">※ アーカイブ保存はチームプラン限定</li>
+              <li className="text-gray-400">※ アーカイブ保存はチームプラン限定</li>
             </ul>
+            <a
+              href="/pricing"
+              className="mt-5 block w-full text-center rounded-full bg-white/10 hover:bg-white/20 text-white text-xs sm:text-sm font-semibold px-4 py-2.5 transition"
+            >
+              このプランに加入 →
+            </a>
           </div>
           <div className="relative rounded-2xl ring-2 ring-[#e63946]/60 bg-gradient-to-b from-[#e63946]/10 to-white/[0.02] p-5 sm:p-6 shadow-xl shadow-[#e63946]/10">
             <span className="absolute -top-2.5 left-5 bg-[#e63946] text-white text-[10px] font-black px-2.5 py-0.5 rounded-full tracking-wider">人気</span>
@@ -567,18 +586,44 @@ export default function LandingPage() {
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> 試合スケジュール管理</li>
               <li className="flex gap-1.5"><span className="text-[#e63946]">✓</span> 共有コードのチーム自動配布</li>
               <li className="flex items-center gap-1.5 flex-wrap text-white">
-                <span className="flex gap-1.5"><span className="text-[#e63946]">✓</span> YouTube Live 同時配信（リアルタイム拡散）</span>
+                <span className="flex gap-1.5"><span className="text-[#e63946]">✓</span> YouTube へ自動アーカイブ（試合後に保存）</span>
                 <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
               </li>
               <li className="flex items-center gap-1.5 flex-wrap text-white">
                 <span className="flex gap-1.5"><span className="text-[#e63946]">✓</span> YouTube に自動アーカイブ（長期保存）</span>
                 <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
               </li>
-              <li className="text-gray-500">🔜 リモコンでスコア操作（別端末から）</li>
-              <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
+              <li className="text-gray-400">🔜 リモコンでスコア操作（別端末から）</li>
+              <li className="text-gray-400">🔜 AI ハイライト自動生成</li>
             </ul>
+            <div className="mt-4 pt-3 border-t border-white/10 space-y-1.5 text-[11px] text-gray-400 leading-relaxed">
+              <p>※ YouTube 関連の機能には、マイページでのご自身の YouTube アカウント連携が必要です（初期状態はOFF）。</p>
+              <p>
+                ※ 15分を超える録画の保存には、YouTube チャンネルの電話番号確認が必要です（
+                <a
+                  href="https://www.youtube.com/verify"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#e63946] hover:underline"
+                >
+                  youtube.com/verify
+                </a>
+                ・数分で完了）。
+              </p>
+            </div>
+            <a
+              href="/pricing"
+              className="mt-5 block w-full text-center rounded-full bg-[#e63946] hover:bg-[#d62836] text-white text-xs sm:text-sm font-bold px-4 py-2.5 transition shadow-lg shadow-[#e63946]/25"
+            >
+              このプランに加入 →
+            </a>
           </div>
         </div>
+        <p className="mt-6 text-center text-xs text-gray-400">
+          <a href="/pricing" className="underline underline-offset-2 hover:text-white transition">
+            料金プランの詳細・お申し込みはこちら
+          </a>
+        </p>
       </section>
 
       {/* FAQ */}
@@ -679,7 +724,7 @@ export default function LandingPage() {
       {/* フッター */}
       <footer className="border-t border-white/5 py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-6xl">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-600">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-400">
             <p>© 2026 LIVE SPOtCH / LIN-NAH株式会社</p>
             <div className="flex flex-wrap gap-4 sm:gap-6 justify-center">
               <a
@@ -701,11 +746,12 @@ export default function LandingPage() {
               <a href="/terms" className="hover:text-gray-400 transition">利用規約</a>
               <a href="/privacy" className="hover:text-gray-400 transition">プライバシーポリシー</a>
               <a href="/tokusho" className="hover:text-gray-400 transition">特定商取引法に基づく表示</a>
+              <a href="/account-deletion" className="hover:text-gray-400 transition">アカウント削除</a>
               <a href="/contact" className="hover:text-gray-400 transition">お問い合わせ</a>
             </div>
           </div>
           {/* ストアバッジ利用に伴う帰属表記（Google Play ブランドガイドライン準拠） */}
-          <p className="mt-4 text-[10px] text-gray-700 text-center sm:text-right leading-relaxed">
+          <p className="mt-4 text-[11px] text-gray-400 text-center sm:text-right leading-relaxed">
             Google Play および Google Play のロゴは Google LLC の商標です。App Store は Apple Inc. のサービスマークです。
           </p>
         </div>

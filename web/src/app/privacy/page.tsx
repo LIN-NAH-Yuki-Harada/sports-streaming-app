@@ -1,4 +1,13 @@
+import type { Metadata } from "next";
 import { Logo } from "@/components/logo";
+
+export const metadata: Metadata = {
+  title: "プライバシーポリシー",
+  description:
+    "LIVE SPOtCH（LIN-NAH株式会社）のプライバシーポリシー。収集する情報、利用目的、外部サービスへの委託、Cookie・アクセス解析、データの保管とユーザーの権利について説明しています。",
+  alternates: { canonical: "/privacy" },
+  robots: { index: true, follow: true },
+};
 
 export default function PrivacyPage() {
   return (
@@ -8,24 +17,24 @@ export default function PrivacyPage() {
       </div>
       <div className="mx-auto max-w-3xl px-5 md:px-8 py-10 md:py-14 pb-20">
       <h1 className="text-xl md:text-2xl font-bold">プライバシーポリシー</h1>
-      <p className="mt-2 text-[10px] text-gray-600">最終更新日: 2026年4月11日</p>
+      <p className="mt-2 text-xs text-gray-400">最終更新日: 2026年8月11日</p>
 
       <div className="mt-8 space-y-8 text-sm md:text-[15px] text-gray-300 leading-relaxed">
         <section>
           <p>
-            LIVE SPOtCH運営事務局（以下「当事務局」）は、ライブ配信サービス「LIVE SPOtCH」（以下「本サービス」）におけるユーザーの個人情報の取り扱いについて、以下のとおりプライバシーポリシー（以下「本ポリシー」）を定めます。
+            LIN-NAH株式会社（以下「当社」）は、ライブ配信サービス「LIVE SPOtCH」（以下「本サービス」）におけるユーザーの個人情報の取り扱いについて、以下のとおりプライバシーポリシー（以下「本ポリシー」）を定めます。
           </p>
         </section>
 
         <section>
           <h2 className="text-base font-semibold text-white mb-3">1. 収集する情報</h2>
-          <p>当事務局は、本サービスの提供にあたり、以下の情報を収集します。</p>
+          <p>当社は、本サービスの提供にあたり、以下の情報を収集します。</p>
           <ul className="list-disc list-inside mt-2 space-y-1 text-gray-400">
             <li><strong className="text-gray-300">アカウント情報</strong>: メールアドレス、パスワード（暗号化して保存）、表示名</li>
             <li><strong className="text-gray-300">ソーシャルログイン情報</strong>: Google、LINE、Facebookアカウントの公開プロフィール情報（名前、メールアドレス、プロフィール画像）</li>
             <li><strong className="text-gray-300">配信データ</strong>: チーム名、スコア、大会名、会場名、配信映像</li>
             <li><strong className="text-gray-300">利用情報</strong>: アクセスログ、デバイス情報、IPアドレス</li>
-            <li><strong className="text-gray-300">決済情報</strong>: クレジットカード情報（決済代行サービスが管理し、当事務局は直接保持しません）</li>
+            <li><strong className="text-gray-300">決済情報</strong>: クレジットカード情報（決済代行サービスが管理し、当社は直接保持しません）</li>
           </ul>
         </section>
 
@@ -44,28 +53,52 @@ export default function PrivacyPage() {
 
         <section>
           <h2 className="text-base font-semibold text-white mb-3">3. 第三者への提供</h2>
-          <p>当事務局は、以下の場合を除き、ユーザーの個人情報を第三者に提供しません。</p>
+          <p>当社は、以下の場合を除き、ユーザーの個人情報を第三者に提供しません。</p>
           <ol className="list-decimal list-inside mt-2 space-y-2 text-gray-400">
             <li>ユーザーの同意がある場合</li>
             <li>法令に基づく場合</li>
             <li>
               本サービスの提供に必要な範囲で、以下の外部サービスプロバイダーに委託する場合
-              <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-gray-500">
+              <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-gray-400">
                 <li>Supabase（データベース・認証基盤）</li>
                 <li>LiveKit（映像配信基盤）</li>
-                <li>Vercel（ホスティング）</li>
+                <li>Vercel（ホスティング／アクセス解析・表示速度計測）</li>
+                <li>Amazon Web Services - Amazon CloudFront（映像配信のCDN・視聴者のIPアドレスおよびアクセスログ）</li>
+                <li>当社が管理する配信サーバー（配信映像そのものの中継・一時保存）</li>
+                <li>Google LLC - YouTube（チームプランで連携された場合に限り、配信映像およびYouTubeアカウント情報）</li>
                 <li>Stripe（決済処理）</li>
                 <li>Apple App Store / Google Play・RevenueCat（アプリ内課金の決済・購読管理）</li>
+                <li>Resend（お知らせ等のメール配信・メールアドレス／米国事業者）</li>
               </ul>
+              <p className="ml-4 mt-2 text-xs text-gray-400">
+                これらの一部は日本国外（米国等）のサーバーで情報を取り扱います。
+              </p>
             </li>
           </ol>
         </section>
 
         <section>
-          <h2 className="text-base font-semibold text-white mb-3">4. Cookieの使用</h2>
+          <h2 className="text-base font-semibold text-white mb-3">4. Cookie・アクセス解析と情報の外部送信</h2>
           <p className="text-gray-400">
-            本サービスでは、認証状態の維持およびサービスの利便性向上のためにCookieを使用します。
+            本サービスでは、以下の目的でCookie等の識別子を使用し、一部の情報を外部事業者へ送信します。
+          </p>
+          <ul className="list-disc list-inside mt-2 space-y-1 text-gray-400">
+            <li>
+              <strong className="text-gray-300">認証状態の維持・利便性向上</strong>: ログイン状態を保持するために使用します。
+            </li>
+            <li>
+              <strong className="text-gray-300">アクセス解析・表示速度の計測</strong>: サービス改善のため、
+              Vercel Analytics および Vercel Speed Insights により、閲覧されたページ・参照元・
+              おおまかな地域・端末やブラウザの種類・表示速度に関する情報を取得します。
+              送信先は Vercel Inc.（米国）です。
+            </li>
+          </ul>
+          <p className="mt-2 text-gray-400">
             ブラウザの設定によりCookieを無効にすることができますが、一部の機能が利用できなくなる場合があります。
+          </p>
+          <p className="mt-2 text-gray-400">
+            今後、広告の配信・効果測定を目的とした情報の外部送信を開始する場合は、開始前に本ポリシーを改定し、
+            送信先および送信される情報を公表します。
           </p>
         </section>
 
@@ -73,7 +106,7 @@ export default function PrivacyPage() {
           <h2 className="text-base font-semibold text-white mb-3">5. データの保管・保護</h2>
           <ol className="list-decimal list-inside space-y-2 text-gray-400">
             <li>ユーザーの個人情報は、適切なセキュリティ対策を講じた上で保管します。</li>
-            <li>パスワードは暗号化して保存し、当事務局のスタッフを含め誰も閲覧できません。</li>
+            <li>パスワードは暗号化して保存し、当社のスタッフを含め誰も閲覧できません。</li>
             <li>配信映像データは、配信終了後一定期間保存した後、自動的に削除されます。</li>
             <li>通信はすべてSSL/TLSにより暗号化されています。</li>
           </ol>
@@ -82,7 +115,7 @@ export default function PrivacyPage() {
         <section>
           <h2 className="text-base font-semibold text-white mb-3">6. ユーザーの権利</h2>
           <p className="text-gray-400">
-            ユーザーは、当事務局に対して以下の請求を行うことができます。
+            ユーザーは、当社に対して以下の請求を行うことができます。
           </p>
           <ul className="list-disc list-inside mt-2 space-y-1 text-gray-400">
             <li>保有する個人情報の開示請求</li>
@@ -107,7 +140,7 @@ export default function PrivacyPage() {
         <section>
           <h2 className="text-base font-semibold text-white mb-3">8. ポリシーの変更</h2>
           <p className="text-gray-400">
-            当事務局は、必要に応じて本ポリシーを変更することがあります。
+            当社は、必要に応じて本ポリシーを変更することがあります。
             重要な変更がある場合は、本サービス上またはメールにてお知らせします。
             変更後のポリシーは、本サービス上に掲載した時点で効力を生じるものとします。
           </p>
@@ -119,7 +152,7 @@ export default function PrivacyPage() {
             個人情報の取り扱いに関するお問い合わせは、以下までご連絡ください。
           </p>
           <div className="mt-2 bg-[#111] border border-white/5 rounded-md px-4 py-3">
-            <p className="text-xs text-gray-400">LIVE SPOtCH運営事務局</p>
+            <p className="text-xs text-gray-400">LIN-NAH株式会社</p>
             <p className="text-xs text-gray-500 mt-1">
               メール: lin.nah.yuki@gmail.com
             </p>
@@ -131,7 +164,7 @@ export default function PrivacyPage() {
       </div>
 
       <div className="mt-12 pt-6 border-t border-white/5">
-        <p className="text-[10px] text-gray-600">LIVE SPOtCH運営事務局</p>
+        <p className="text-xs text-gray-400">LIN-NAH株式会社</p>
         <a href="/" className="inline-block mt-4 text-xs text-gray-400 hover:text-white transition">
           ← トップに戻る
         </a>

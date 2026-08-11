@@ -20,7 +20,7 @@ export default function TokushoPage() {
       </div>
       <div className="mx-auto max-w-3xl px-5 md:px-8 py-10 md:py-14 pb-20">
         <h1 className="text-xl md:text-2xl font-bold">特定商取引法に基づく表示</h1>
-        <p className="mt-2 text-[10px] text-gray-600">最終更新日: 2026年4月23日</p>
+        <p className="mt-2 text-xs text-gray-400">最終更新日: 2026年8月11日</p>
 
         <div className="mt-8 space-y-0 text-sm md:text-[15px] text-gray-300">
           <dl className="divide-y divide-white/5 border-y border-white/5">
@@ -100,13 +100,27 @@ export default function TokushoPage() {
 
             <Row label="解約・返品について">
               <p>
-                本サービスは月額課金制のデジタルサービスのため、**原則として返金はいたしかねます**。
+                本サービスは月額課金制のデジタルサービスのため、
+                <strong className="text-gray-100">原則として返金はいたしかねます</strong>。
               </p>
               <p className="mt-3">
-                解約はマイページ内「プラン管理」からいつでも行うことが可能です。解約後も、課金済みの当月末日までは引き続きご利用いただけます。日割りでの返金には対応しておりません。
+                解約のお手続き先は、<strong className="text-gray-100">お申し込みいただいた経路によって異なります</strong>。
               </p>
+              <ul className="mt-2 space-y-2 list-disc list-outside pl-5">
+                <li>
+                  <strong className="text-gray-100">アプリ内課金（App Store / Google Play）でご登録の場合</strong>
+                  ：iPhone / iPad では「設定」→ Apple ID →「サブスクリプション」から、Android では「Google Play ストア」→「お支払いと定期購入」→「定期購入」から解約いただけます。
+                  <span className="text-gray-400">
+                    ストア決済の仕様上、当社のマイページからは解約できません。
+                  </span>
+                </li>
+                <li>
+                  <strong className="text-gray-100">当ウェブサイト（クレジットカード決済）でご登録の場合</strong>
+                  ：マイページ内「プラン管理」からいつでも解約いただけます。
+                </li>
+              </ul>
               <p className="mt-3">
-                アプリ内課金（App Store / Google Play）でご登録の場合は、iPhone / iPad では「設定」→ Apple ID →「サブスクリプション」から、Android では「Google Play ストア」→「お支払いと定期購入」→「定期購入」から解約いただけます。
+                いずれの場合も、解約後は課金済みの当月末日までは引き続きご利用いただけます。日割りでの返金には対応しておりません。
               </p>
               <p className="mt-3">
                 無料トライアル期間中に解約された場合、課金は発生しません。トライアル終了日までは引き続きご利用いただけます。
