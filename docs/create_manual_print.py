@@ -1,13 +1,6 @@
-# LIVE SPOtCH 公式マニュアル A4 1枚 PDF v4.0 (2026-05-30 改訂)
-# LP（黒背景・赤アクセント）のトンマナに合わせる
-#
-# v3.0 → v4.0 変更点:
-# - 公式サイト URL を live-spotch.com に更新
-# - 料金プラン記述を v2 確定版に修正:
-#   * 配信者¥300 から「アーカイブ自動保存」削除 (ライブ専用に振り切り)
-#   * チーム¥500 に YouTube Live 同時配信 / アーカイブ自動保存 を明記
-# - 「超低遅延 0.25秒」訴求を「リアルタイム視聴」に変更（マーケ訴求軸の整理に伴う）
-# - ヒーロー部に初見者向けの「サービス概要 1 行」追加
+# LIVE SPOtCH 公式マニュアル A4 1枚 PDF v4.0 印刷用（白背景版）
+# 配布印刷向けにダーク版を白背景・濃色テキストに反転したバージョン
+# 文言・レイアウトはダーク版（create_manual.py）と同一を維持
 import os
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -19,19 +12,20 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
 JP = "HeiseiKakuGo-W5"
 
-# カラーパレット（LPに合わせる）
-BG     = HexColor("#0a0a0a")
-CARD   = HexColor("#161616")
-CARD2  = HexColor("#1f1414")
-ACCENT = HexColor("#e63946")
-WHITE  = HexColor("#ffffff")
-GRAY1  = HexColor("#a8a8a8")
-GRAY2  = HexColor("#6e6e6e")
-GRAY3  = HexColor("#4a4a4a")
-BORDER = HexColor("#2a2a2a")
-GREEN  = HexColor("#22c55e")
+# カラーパレット（印刷用・ホワイトベース）
+# 変数名はダーク版と同名を維持して差分を最小化（WHITE = メインテキスト色として使用）
+BG     = HexColor("#FFFFFF")  # 紙の白
+CARD   = HexColor("#F8F8FA")  # 薄いグレーの背景
+CARD2  = HexColor("#FCEEEF")  # 薄い赤の背景（無料カード／推奨プラン）
+ACCENT = HexColor("#E63946")  # ブランド赤（変更なし）
+WHITE  = HexColor("#1A1A2E")  # 旧 WHITE 位置のメイン文字色 → 濃紺
+GRAY1  = HexColor("#444455")  # 本文サブ
+GRAY2  = HexColor("#6E6E80")  # ラベル・補足
+GRAY3  = HexColor("#9999A8")  # コピーライト等の最小文字
+BORDER = HexColor("#E0E0E8")  # カード枠線
+GREEN  = HexColor("#16A34A")  # チェックマーク（印刷視認性のため少し濃く）
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LIVE_SPOtCH_公式マニュアル.pdf")
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LIVE_SPOtCH_公式マニュアル（印刷用）.pdf")
 
 W, H = A4
 c = canvas.Canvas(OUT, pagesize=A4)
@@ -60,7 +54,7 @@ y = H - 50
 
 c.setFillColor(ACCENT)
 c.roundRect(40, y - 8, 38, 16, 2, stroke=0, fill=1)
-c.setFillColor(WHITE)
+c.setFillColor(HexColor("#FFFFFF"))  # 赤バッジの中だけは白文字
 c.setFont("Helvetica-Bold", 9)
 c.drawCentredString(59, y - 4, "LIVE")
 
@@ -94,7 +88,7 @@ c.drawString(40, y - 86, "保護者の方がスマホで撮影してライブ配
 c.drawString(40, y - 100, "ご家族はアプリ不要・無料で観戦できます。")
 
 # 右上の無料カード
-c.setFillColor(HexColor("#1a0608"))
+c.setFillColor(CARD2)
 c.roundRect(W - 200, y - 85, 160, 75, 6, stroke=0, fill=1)
 c.setStrokeColor(ACCENT)
 c.setLineWidth(0.5)
@@ -204,7 +198,7 @@ py = y - p_h - 10
 for i, (name, price, unit, feats, hl) in enumerate(plans):
     x = 40 + i * (p_w + 8)
     if hl:
-        c.setFillColor(HexColor("#1a0608"))
+        c.setFillColor(CARD2)
         c.setStrokeColor(ACCENT)
     else:
         c.setFillColor(CARD)
@@ -315,7 +309,7 @@ c.setFont(JP, 7)
 c.drawRightString(W - 40, fy + 2, "© 2026 LIVE SPOtCH / LIN-NAH株式会社")
 c.drawRightString(W - 40, fy - 10, "その一瞬の感動を手のひらに。")
 
-# 最下部の赤ライン
+# 最下部の赤ライン（ブランド統一のため残す）
 c.setFillColor(ACCENT)
 c.rect(0, 0, W, 3, stroke=0, fill=1)
 
