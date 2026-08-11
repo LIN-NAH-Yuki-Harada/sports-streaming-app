@@ -55,11 +55,11 @@ export default function TermsPage() {
             <li><strong className="text-gray-300">無料プラン</strong>: 視聴のみ。ライブ視聴に加え、チームプラン配信者のアーカイブ（YouTube限定公開）を視聴できます。</li>
             <li><strong className="text-gray-300">配信者プラン（月額300円）</strong>: ライブ配信、スコアボード・オーバーレイ、共有コード発行が利用可能です。初回10分間は無料でお試しいただけます。</li>
             <li>
-              <strong className="text-gray-300">チームプラン（月額500円）</strong>: 配信者プランの全機能に加え、YouTube Live 同時配信、YouTube への自動アーカイブ保存、スケジュール管理、メンバー管理が利用可能です。
+              <strong className="text-gray-300">チームプラン（月額500円）</strong>: 配信者プランの全機能に加え、試合後に YouTube へ自動でアーカイブ保存、スケジュール管理、メンバー管理が利用可能です。
               <span className="block mt-1 text-gray-400">
                 YouTube 関連の機能は、ユーザーご自身の YouTube アカウントを連携した場合にのみ動作します（初期状態は連携なし）。
                 また、15分を超える録画の保存には、当該 YouTube チャンネルにおける電話番号確認が必要です。
-                これらは YouTube 側の仕様によるもので、未設定の場合にアーカイブが保存されないことについて当社は責任を負いかねます。
+                いずれも YouTube 側の仕様です。設定がお済みでない場合はマイページからご確認いただけます。
               </span>
             </li>
             <li>料金はクレジットカード決済またはアプリ内課金（App Store / Google Play）による月額課金制です。</li>

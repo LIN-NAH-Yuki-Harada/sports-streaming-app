@@ -397,7 +397,7 @@ export default async function DiscoverPage() {
                     チームの予定をまとめて管理
                   </p>
                   <p className="text-[11px] text-gray-500 leading-relaxed max-w-md mx-auto">
-                    チームプラン（¥500/月）で、試合の予定登録・チーム共有・YouTube Live 同時配信が使えます。
+                    チームプラン（¥500/月）で、試合の予定登録・チーム共有・試合後の YouTube 自動アーカイブが使えます。
                   </p>
                   <Link
                     href="/pricing"
@@ -513,7 +513,7 @@ export default async function DiscoverPage() {
                   <li>✓ チーム作成・メンバー招待</li>
                   <li>✓ 試合スケジュール管理</li>
                   <li>✓ 共有コードのチーム自動配布</li>
-                  <li className="text-gray-500">🔜 YouTube Live 同時配信</li>
+                  <li className="text-gray-500">🔜 試合後の YouTube 自動アーカイブ</li>
                   <li className="text-gray-500">🔜 YouTube 自動アーカイブ</li>
                   <li className="text-gray-500">🔜 リモコンでスコア操作</li>
                   <li className="text-gray-500">🔜 AI ハイライト自動生成</li>
