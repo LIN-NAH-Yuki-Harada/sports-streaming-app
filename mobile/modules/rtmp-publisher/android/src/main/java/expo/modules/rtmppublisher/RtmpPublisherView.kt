@@ -53,6 +53,12 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
   var scoreboardText: String = ""
   var scoreboardVisible: Boolean = true
 
+  // 配信前の映像チェックの厳格度（iOS と同一契約）。既定 "warn" ＝**絶対に配信を止めない**。
+  //   "off"   … 何もしない（緊急時の全停止スイッチ）
+  //   "warn"  … カメラが開けていなくても配信は開始し、JS へ novideo を通知して警告表示だけ出す
+  //   "block" … カメラが開けていなければ startStream しない（既定では使わない）
+  var preflightMode: String = "warn"
+
   private val onStatus by EventDispatcher()
   private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -68,6 +74,18 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
   private var appliedOrientation = 270 // prepareVideo(rotation=0) の初期向き＝通常 landscape
   private var textFilter: TextObjectFilterRender? = null
   private var appliedScoreboardKey: String? = null
+
+  // ★カメラが「実際に開いた」か（CameraDevice.StateCallback.onOpened 由来）。
+  //   権限が下りていても、他アプリが掴んでいる/端末の相性 等で開かないことがある。
+  //   実データ（2026-08-12）では、権限とは無関係に音声だけが publish された配信が
+  //   3回確認されている。「接続できた」は「映っている」の証明にならない。
+  private var cameraOpened = false
+  // 直近に novideo を通知済みか（同じ警告を連投しないための1回きりガード）
+  private var noVideoNotified = false
+  // 配信開始（startStream 呼び出し）時刻。ビットレート監視の助走に使う。
+  private var streamStartedAt = 0L
+  // 映像なしが疑われる状態が続いた秒数（onNewBitrate は毎秒来る）
+  private var lowBitrateSeconds = 0
 
   private val audioBitrate = 128_000
 
@@ -156,6 +174,52 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     if (surfaceReady && !s.isOnPreview) {
       try { s.startPreview(surfaceView) } catch (_: Exception) {}
     }
+    // ★配信前チェック: プレビューを開始できたなら、カメラが実際に開くのを待ってから publish する。
+    //   プレビューを開始できていない（surface 未生成など）ときは待たない
+    //   ＝ vc15 と完全に同じ挙動のまま（新しい失敗経路を作らない）。
+    val previewing = try { s.isOnPreview } catch (_: Exception) { false }
+    if (preflightMode == "off" || !previewing) {
+      beginStream(url)
+    } else {
+      waitCameraThenStream(url, 0)
+    }
+  }
+
+  /** カメラが開くのを待ってから publish する。上限（4秒）で必ず打ち切る。 */
+  private fun waitCameraThenStream(url: String, waitedMs: Int) {
+    if (destroyed || !streamingRequested) return
+    if (stream == null) return
+    if (!cameraOpened && waitedMs < CAMERA_OPEN_TIMEOUT_MS) {
+      mainHandler.postDelayed(
+        { waitCameraThenStream(url, waitedMs + CAMERA_OPEN_POLL_MS) },
+        CAMERA_OPEN_POLL_MS.toLong(),
+      )
+      return
+    }
+    if (cameraOpened) {
+      // カメラが開いたことを毎回はっきり通知する。JS はこれで警告表示を解除する
+      // （再接続で View を作り直したときも、正常なら必ずここを通る）。
+      noVideoNotified = false
+      emit("media", "camera-open")
+    } else {
+      if (preflightMode == "block") {
+        // ★このモードは既定では使わない（サーバー設定で段階的に点灯させる想定）。
+        streamingRequested = false
+        emit("error", "no-video: camera-open-timeout")
+        return
+      }
+      // 既定（warn）＝**配信は必ず開始する**。画面に警告を出すだけ。
+      noVideoNotified = true
+      emit("novideo", "camera-open-timeout")
+    }
+    beginStream(url)
+  }
+
+  private fun beginStream(url: String) {
+    if (destroyed || !streamingRequested) return
+    val s = stream ?: return
+    lowBitrateSeconds = 0
+    streamStartedAt = System.currentTimeMillis()
     try {
       s.startStream(url)
     } catch (e: Exception) {
@@ -166,6 +230,9 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
 
   private fun stop() {
     streamingRequested = false
+    streamStartedAt = 0L
+    lowBitrateSeconds = 0
+    noVideoNotified = false
     val s = stream ?: return
     try {
       if (s.isStreaming) {
@@ -196,13 +263,23 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     // ConnectChecker には一切通知されない。未登録のままだと RTMP 接続は生きたまま
     // フリーズ映像＋音声だけの配信が延々続くため、JS へ error を流して
     // 既存の remount 再接続ロジックに復旧を委ねる。
+    cameraOpened = false
     cam.setCameraCallback(object : CameraCallbacks {
       override fun onCameraChanged(facing: CameraHelper.Facing) {}
-      override fun onCameraOpened() {}
+      override fun onCameraOpened() {
+        // ★CameraDevice.StateCallback.onOpened 由来＝「本当にカメラが開いた」唯一の証拠。
+        //   これが来るまで startStream しないことで、映像なしの publish を防ぐ。
+        mainHandler.post { cameraOpened = true }
+      }
       override fun onCameraDisconnected() {
-        // カメラスレッドから呼ばれ得るため main へ寄せてから判定。配信要求中のみ通知
-        // （stop 後のプレビュー破棄等での誤 error を抑止）。
-        mainHandler.post { if (streamingRequested) emit("error", "camera disconnected") }
+        // カメラスレッドから呼ばれ得るため main へ寄せる。
+        // ★2026-08-12: 以前は `if (streamingRequested)` で握り潰していたため、
+        //   prepare/preview の段階（＝配信要求前）の失敗が完全に見えなかった。
+        //   まさにその段階の失敗が「音声だけの配信」を生むので、必ず外へ出す。
+        mainHandler.post {
+          cameraOpened = false
+          emit("error", "camera disconnected")
+        }
       }
       override fun onCameraError(error: String) {
         // ★2026-08-10: 素の文字列（例 "Open camera 0 failed"）だけだと
@@ -212,7 +289,11 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
         val detail = "$error [cam=${permLabel(Manifest.permission.CAMERA)}" +
           " mic=${permLabel(Manifest.permission.RECORD_AUDIO)}" +
           " sdk=${Build.VERSION.SDK_INT}]"
-        mainHandler.post { if (streamingRequested) emit("error", detail) }
+        // ★2026-08-12: `if (streamingRequested)` ガードを外した（上の onCameraDisconnected と同じ理由）。
+        mainHandler.post {
+          cameraOpened = false
+          emit("error", detail)
+        }
       }
     })
     var mic = MicrophoneSource(pickAudioSource())
@@ -406,6 +487,43 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
       try {
         bitrateAdapter.adaptBitrate(bitrate, s.getStreamClient().hasCongestion())
       } catch (_: Exception) {}
+      checkVideoAlive(bitrate)
+    }
+  }
+
+  /**
+   * 配信中に「映像が届いていない」ことを近似的に見張る（毎秒・警告のみ）。
+   *
+   * ★これは**近似指標**である。Android には iOS の FrameProbe に相当する
+   *   「合成後フレームの到着」を安く数える口が無いため、送信実測ビットレートで代用している。
+   *   映像トラックが本当に無ければ送信量は音声(128kbps)相当まで落ちるので、
+   *   閾値をそのすぐ上に置く。逆に言えば「試合が止まって絵が動かない」だけでは
+   *   ここまで落ちない（H.264 は静止画でも周期的に I フレームを送るため）。
+   *
+   * ★絶対に配信を止めない。20秒連続で閾値を下回ったときに JS へ通知するだけ。
+   *   閾値を上げると正常な配信に赤帯が出て、配信者が驚いて自分で止めてしまう
+   *   ＝人の手による配信停止事故になる。厳しくするより見逃す方を選ぶ。
+   */
+  private fun checkVideoAlive(bitrate: Long) {
+    if (preflightMode == "off") return
+    // 開始直後は助走中で低く出るため見ない。
+    if (streamStartedAt == 0L ||
+      System.currentTimeMillis() - streamStartedAt < NO_VIDEO_WARMUP_MS
+    ) {
+      return
+    }
+    if (bitrate < NO_VIDEO_BPS) {
+      lowBitrateSeconds += 1
+      if (lowBitrateSeconds >= NO_VIDEO_SECONDS && !noVideoNotified) {
+        noVideoNotified = true
+        emit("novideo", "low bitrate ${bitrate}bps")
+      }
+    } else {
+      lowBitrateSeconds = 0
+      if (noVideoNotified) {
+        noVideoNotified = false
+        emit("media", "${bitrate}bps")
+      }
     }
   }
 
@@ -417,5 +535,17 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     // アダプティブ降格の下限（これ未満は映像が用をなさないため足切り）。
     // BitrateAdapter.Listener の引数は Int(bps)。
     private const val MIN_VIDEO_BITRATE = 500_000
+
+    // カメラが開くのを待つ上限。ここを超えたら待たずに配信を始める
+    // （待たせ続ける＝試合が始まらない、が最悪の事故なので必ず打ち切る）。
+    private const val CAMERA_OPEN_TIMEOUT_MS = 4_000
+    private const val CAMERA_OPEN_POLL_MS = 100
+
+    // 「映像が届いていない」と見なす送信ビットレート。音声のみ(128kbps)＋余裕。
+    private const val NO_VIDEO_BPS = 180_000L
+    // 上を何秒連続で下回ったら通知するか（瞬間的な落ち込みで警告を出さない）。
+    private const val NO_VIDEO_SECONDS = 20
+    // 配信開始直後の助走期間（この間は判定しない）。
+    private const val NO_VIDEO_WARMUP_MS = 10_000L
   }
 }

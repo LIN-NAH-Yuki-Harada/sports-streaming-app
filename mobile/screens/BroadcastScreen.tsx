@@ -32,8 +32,13 @@ import {
 } from "@livekit/react-native";
 import { Track } from "livekit-client";
 import RtmpPublisherView, {
+  type RtmpPreflightMode,
   type RtmpStatusEvent,
 } from "../modules/rtmp-publisher/src/RtmpPublisherView";
+import {
+  getDeviceStatus,
+  requestDevicePermissions,
+} from "../modules/rtmp-publisher/src/permissions";
 import { supabase } from "../lib/supabase";
 import { LIVEKIT_URL, SITE_URL } from "../config";
 import {
@@ -157,6 +162,22 @@ function formatScoreboardLine(a: {
   return line;
 }
 
+// ネイティブから来る英語のエラー文字列を、配信者がその場で対処できる日本語に変える。
+// 未知のものは原文を残す（現場のスクリーンショット1枚で切り分けられるようにするため）。
+function rtmpErrorMessage(raw: string | null | undefined): string {
+  const m = raw ?? "接続に失敗しました";
+  if (m.includes("camera-denied")) {
+    return "カメラの使用が許可されていません。設定アプリで「LIVE SPOtCH」のカメラをオンにしてから、もう一度「配信開始」を押してください。";
+  }
+  if (m.includes("camera-not-found")) {
+    return "カメラが見つかりませんでした。他のアプリを終了してから、もう一度「配信開始」を押してください。";
+  }
+  if (m.includes("no-video") || m.includes("camera-attach-failed")) {
+    return "カメラの映像を取得できませんでした。他のカメラアプリ（写真・ビデオ通話など）を終了してから、もう一度「配信開始」を押してください。";
+  }
+  return "配信エラー: " + m;
+}
+
 // セッション継続性: 中断(電話/回線切替/背景)から「同じ配信」へ復帰するための再接続パラメータ。
 // 再接続コーディネータ(startRecovering)が、デッドラインまでクールダウン間隔で作り直しを再試行する。
 const BACKGROUND_GRACE_MS = 180_000; // 中断(電話/回線/背景)から復帰を待つ総デッドライン(3分)
@@ -245,6 +266,12 @@ export function BroadcastScreen() {
   const recoverDeadlineRef = useRef(0); // 再接続を諦める総デッドライン（この時刻を過ぎたら finishLive）
   const recoverAttemptRef = useRef<() => void>(() => {}); // 直近の「作り直し試行」関数（resumed で即時呼ぶ用）
   const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // open の安定確認タイマー
+  // ★映像が届いていない疑い（ネイティブの novideo 通知）。表示専用で、配信は止めない。
+  const [noVideo, setNoVideo] = useState(false);
+  // 配信前チェックの厳格度。サーバー（/api/stream/provision）が preflight を返せば従い、
+  // 返さなければ "warn"（＝警告のみ・絶対に止めない）。**アプリを出し直さずに
+  // サーバー側だけで無効化/強化できる**ようにするための受け口。
+  const [preflightMode, setPreflightMode] = useState<RtmpPreflightMode>("warn");
   // プラン＆無料トライアル
   const [plan, setPlan] = useState<Plan>("free");
   const [trialRemainingAtStart, setTrialRemainingAtStart] = useState(0);
@@ -532,6 +559,43 @@ export function BroadcastScreen() {
       }
     }
 
+    // ★2026-08-12: iOS にも同じ事前確認を入れる（これまで iOS には権限を確認する
+    //   コードが**1行も無かった**）。
+    //
+    // 【なぜ必要か】iOS では HaishinKit の attachVideo が権限拒否で失敗しても
+    //   例外が握り潰され、**音声だけの配信がそのまま成立していた**。
+    //   配信者の画面には「配信中」と出るので誰も気づけず、視聴者だけが真っ暗を見る。
+    //   実データで同じ配信者が3回（07/12・07/14・08/12）同じ壊れ方をしている。
+    //
+    // ★配信の行を作る**前**に置くこと（Android ブロックと同じ理由）。
+    // ★拒否されていたら必ず日本語の手順と設定アプリへの導線を出す。黙って return しない。
+    //   一度「許可しない」を押されると、アプリからは二度とダイアログを出せない。
+    if (Platform.OS === "ios") {
+      try {
+        let st = await getDeviceStatus();
+        if (st.camera === "undetermined" || st.mic === "undetermined") {
+          st = await requestDevicePermissions();
+        }
+        if (st.camera === "denied" || st.mic === "denied") {
+          const what =
+            st.camera === "denied" && st.mic === "denied"
+              ? "カメラとマイク"
+              : st.camera === "denied"
+                ? "カメラ"
+                : "マイク";
+          setMessage(
+            `${what}の使用が許可されていません。設定画面を開きますので、「LIVE SPOtCH」の${what}をオンにしてから、もう一度「配信開始」を押してください。`,
+          );
+          Linking.openSettings().catch(() => {});
+          setBusy(false);
+          return;
+        }
+      } catch {
+        // 状態が読めなかった場合は**通す**。ここで止めると、確認の仕組み自体の不具合で
+        // 試合が配信できなくなる。映像が来ていなければ後段のプリフライトが警告を出す。
+      }
+    }
+
     let createdCode: string | null = null;
 
     // 配信の行を作った**後**に失敗したときの後始末。
@@ -659,6 +723,11 @@ export function BroadcastScreen() {
         remountingRef.current = false;
         wasLiveRef.current = false;
         bgAtRef.current = 0;
+        setNoVideo(false);
+        // サーバーが指定してくれば従う（未指定なら "warn"＝止めない）。
+        // ★これがサーバー側キルスイッチ。万一この機能が誤爆したら、サーバーが
+        //   "off" を返すだけで**アプリの再提出なしに**全端末で即座に無効化できる。
+        setPreflightMode(stream.preflight ?? "warn");
         liveStartedAtRef.current = Date.now();
         setElapsed(0);
         // RtmpPublisher は AVCaptureSession で自前に音声を扱うため LiveKit の
@@ -1378,9 +1447,35 @@ export function BroadcastScreen() {
           return;
         }
         // 初回接続そのものが失敗（一度も live になっていない）→ 終了。
-        finishLive("配信エラー: " + (e.nativeEvent.message ?? "接続に失敗しました"));
+        finishLive(rtmpErrorMessage(e.nativeEvent.message));
+      } else if (state === "novideo") {
+        // ★映像が届いていない（音声だけ流れている疑い）。**配信は絶対に止めない**。
+        //   画面に赤帯を出して配信者に気づいてもらうだけ。「誰も気づけない」を潰すのが目的。
+        if (endedRef.current) return;
+        setNoVideo(true);
+      } else if (state === "media") {
+        // 映像が戻った。赤帯を消す。
+        if (endedRef.current) return;
+        setNoVideo(false);
       } else if (state === "closed") {
         if (endedRef.current) return; // 停止ボタン等で終了処理中の切断は無視
+        // ★2026-08-12: 「一度も open していない closed」では再接続を始めない。
+        //
+        // 【なぜ必要か】HaishinKit の readyState は AsyncStreamed 実装で、
+        //   **購読した瞬間に現在値を1回流す**。RTMPSession の初期値は .closed なので、
+        //   配信開始のたびに connect の前に closed が1回飛んでくることがある。
+        //   これが startRecovering を起動し、1.5 秒後に View を作り直す＝
+        //   **1本目の publish が張られた直後に2本目が来て自分自身を蹴る**。
+        //   実ログ（2026-08-12 07:26:04 publish → 07:26:06 "closing existing publisher"）
+        //   の2秒差はこれで説明がつく。open が 1.5 秒以内に返る通常時は
+        //   タイマーが解除されるため表面化せず、電波の悪い体育館でだけ起きていた。
+        //
+        // 初回接続が本当に失敗したときは同じ経路で error も飛び、
+        // 下の error 分岐が finishLive で正しく終わらせる（取りこぼしはない）。
+        if (!wasLiveRef.current && !remountingRef.current) {
+          console.log("[rtmp] ignore closed before first open");
+          return;
+        }
         if (remountingRef.current) {
           // 再接続中（安定確認中含む）の closed → 切らずに再試行継続。
           if (stableTimerRef.current) {
@@ -1434,6 +1529,8 @@ export function BroadcastScreen() {
         rtmpUrl={rtmpUrl}
         scoreboardText={scoreboardLine}
         onStatus={handleRtmpStatus}
+        preflightMode={preflightMode}
+        noVideo={noVideo}
         shareCode={shareCode}
         homeTeam={homeTeam}
         awayTeam={awayTeam}
@@ -2547,16 +2644,21 @@ function RtmpLiveView(
     rtmpUrl: string;
     scoreboardText: string;
     onStatus: (e: RtmpStatusEvent) => void;
+    preflightMode: RtmpPreflightMode;
+    /** 映像が届いていない疑い。赤帯を出すだけで配信は止めない。 */
+    noVideo: boolean;
   },
 ) {
   useKeepAwake();
-  const { rtmpUrl, scoreboardText, onStatus, ...controls } = props;
+  const { rtmpUrl, scoreboardText, onStatus, preflightMode, noVideo, ...controls } =
+    props;
   return (
     <View style={styles.liveRoot}>
       <RtmpPublisherView
         style={styles.video}
         streamUrl={rtmpUrl}
         active={true}
+        preflightMode={preflightMode}
         videoWidth={1280}
         videoHeight={720}
         // 4G/5G(セルラー)前提。上限3.5Mbpsから帯域に応じてネイティブ側がアダプティブに調整。
@@ -2571,12 +2673,36 @@ function RtmpLiveView(
         scoreboardVisible={false}
         onStatus={onStatus}
       />
+      {noVideo ? (
+        // ★配信は続いている。止めない。「気づけない」を潰すためだけの表示。
+        //   pointerEvents="none" でスコア操作の邪魔をしない。
+        <View style={styles.noVideoBanner} pointerEvents="none">
+          <Text style={styles.noVideoTitle}>映像が届いていません</Text>
+          <Text style={styles.noVideoBody}>
+            レンズが手や机で塞がれていないか確認してください。直らない場合は一度停止して、
+            もう一度「配信開始」を押してください。（音声だけが配信されている可能性があります）
+          </Text>
+        </View>
+      ) : null}
       <ScoreControls {...controls} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // 「映像が届いていません」の赤帯（配信中・画面上部）。表示専用。
+  noVideoBanner: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(200,20,30,0.92)",
+    paddingTop: 10,
+    paddingBottom: 10,
+    paddingHorizontal: 16,
+  },
+  noVideoTitle: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  noVideoBody: { color: "#ffe3e3", fontSize: 12, lineHeight: 17, marginTop: 3 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
   container: { flex: 1, backgroundColor: "#0a0a0a" },
   flex1: { flex: 1 },

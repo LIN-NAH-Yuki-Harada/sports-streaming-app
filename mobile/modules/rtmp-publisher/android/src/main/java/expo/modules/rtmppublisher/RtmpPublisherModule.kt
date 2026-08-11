@@ -1,5 +1,8 @@
 package expo.modules.rtmppublisher
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -10,6 +13,21 @@ import expo.modules.kotlin.modules.ModuleDefinition
 class RtmpPublisherModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("RtmpPublisher")
+
+    // ───────── 配信前チェック用の API（iOS 版と同一契約）─────────
+    // 戻り値: { camera: "granted"|"denied"|"undetermined", mic: 同じ }
+    //
+    // ★Android の「要求」（許可ダイアログ表示）は Activity が要るため JS 側の
+    //   PermissionsAndroid が行う（vc15 で実戦稼働済みの経路をそのまま使う）。
+    //   ここは**状態の読み取り専用**。requestDevicePermissions も現在値を返すだけで、
+    //   iOS と同じ形の戻り値にすることで JS 側の分岐を1本にする。
+    AsyncFunction("getDeviceStatus") {
+      currentStatus()
+    }
+
+    AsyncFunction("requestDevicePermissions") {
+      currentStatus()
+    }
 
     View(RtmpPublisherView::class) {
       Events("onStatus")
@@ -35,6 +53,10 @@ class RtmpPublisherModule : Module() {
       Prop("cameraPosition") { view: RtmpPublisherView, value: String ->
         view.cameraPosition = value
       }
+      // 配信前の映像チェックの厳格度（"off" | "warn" | "block"）。既定 warn＝止めない。
+      Prop("preflightMode") { view: RtmpPublisherView, value: String? ->
+        view.preflightMode = value ?: "warn"
+      }
       Prop("scoreboardText") { view: RtmpPublisherView, value: String? ->
         view.scoreboardText = value ?: ""
       }
@@ -51,4 +73,25 @@ class RtmpPublisherModule : Module() {
       }
     }
   }
+
+  /** カメラ／マイクの許可状態を iOS と同じ語彙で返す。 */
+  private fun currentStatus(): Map<String, String> {
+    val ctx = appContext.reactContext
+      ?: return mapOf("camera" to "undetermined", "mic" to "undetermined")
+    return mapOf(
+      "camera" to permState(ctx, Manifest.permission.CAMERA),
+      "mic" to permState(ctx, Manifest.permission.RECORD_AUDIO),
+    )
+  }
+
+  // ★Android は「まだ聞いていない」と「拒否された」を Context からは区別できない。
+  //   区別が要るのは JS 側（shouldShowRequestPermissionRationale を持つ PermissionsAndroid）なので、
+  //   ここでは granted / undetermined の2値に寄せる。undetermined を返せば JS は必ず
+  //   PermissionsAndroid で要求しに行く＝一番安全側（迷ったら聞く）に倒れる。
+  private fun permState(ctx: Context, permission: String): String =
+    if (ctx.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+      "granted"
+    } else {
+      "undetermined"
+    }
 }

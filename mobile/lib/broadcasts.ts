@@ -93,7 +93,14 @@ export async function startLiveStream(
 //   （broadcasts の status=ended は endBroadcast 側で記録）。
 export async function fetchStreamTarget(
   broadcastId: string,
-): Promise<{ rtmpUrl: string; playbackUrl: string } | null> {
+): Promise<{
+  rtmpUrl: string;
+  playbackUrl: string;
+  // 配信前の映像チェックの厳格度。サーバーが返さなければ undefined（＝呼び出し側で "warn"）。
+  // ★サーバー側だけで無効化/強化できるようにするための受け口。現時点でサーバーは
+  //   このフィールドを返さないが、返し始めたら**アプリを出し直さずに**効く。
+  preflight?: "off" | "warn" | "block";
+} | null> {
   // 弱4Gでも自前配信(provision)を取りに行く猶予を確保（短いとLiveKit旧経路に落ちる）。
   // ボタンが固まらないよう 30 秒で打ち切り。
   const ctrl = new AbortController();
@@ -116,9 +123,21 @@ export async function fetchStreamTarget(
     const json = (await res.json().catch(() => ({}))) as {
       rtmpUrl?: string;
       playbackUrl?: string;
+      preflight?: string;
     };
     if (!json.rtmpUrl) return null;
-    return { rtmpUrl: json.rtmpUrl, playbackUrl: json.playbackUrl ?? "" };
+    // 知らない値が来たら黙って無視する（＝呼び出し側の既定 "warn" になる）。
+    const preflight =
+      json.preflight === "off" ||
+      json.preflight === "warn" ||
+      json.preflight === "block"
+        ? json.preflight
+        : undefined;
+    return {
+      rtmpUrl: json.rtmpUrl,
+      playbackUrl: json.playbackUrl ?? "",
+      preflight,
+    };
   } catch {
     return null;
   } finally {

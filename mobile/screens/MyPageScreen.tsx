@@ -32,7 +32,7 @@ import {
 // ★ 退会（アカウント削除）は Apple 5.1.1(v) 対応でアプリ内から完結（/api/account/delete）。
 // ログアウトもアプリ内で完結（supabase.auth.signOut）。
 
-const APP_VERSION = "1.1.7";
+const APP_VERSION = "1.1.8";
 const IS_IOS = Platform.OS === "ios";
 
 export function MyPageScreen() {

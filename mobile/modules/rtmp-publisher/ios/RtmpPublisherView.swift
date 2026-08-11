@@ -2,6 +2,8 @@ import ExpoModulesCore
 import HaishinKit
 import RTMPHaishinKit
 import AVFoundation
+import CoreMedia
+import Foundation
 import UIKit
 
 // カメラ＋マイクを RTMP(TCP/バッファ型) で push する Expo ネイティブ View。
@@ -32,6 +34,16 @@ class RtmpPublisherView: ExpoView {
   var fps: Double = 60
   var cameraPosition: String = "back"
 
+  // 配信前の映像チェックの厳格度。JS から毎回渡す（既定は "warn"）。
+  //   "off"   … 何もしない（緊急時の全停止スイッチ）
+  //   "warn"  … 映像が来ていなくても **必ず配信は開始する**。JS に novideo を通知して
+  //             画面に警告を出すだけ（＝正常な配信者を絶対に止めない）
+  //   "block" … 映像が1枚も来ていなければ RTMP 接続そのものを張らない
+  // ★既定を "warn" にしているのは意図的。ここを厳しくしすぎると、端末が遅い・
+  //   体育館でカメラ起動が重い、といった正常系で全 iOS ユーザーが配信不能になる。
+  //   "block" はサーバー設定で段階的に点灯させる想定（app.json の再ビルド不要）。
+  var preflightMode: String = "warn"
+
   // スコアボード焼き込み（スパイク検証用）。
   // JS 側で整形した1行文字列を渡し、ネイティブ（GPU合成）で映像に焼き込む。
   // ＝ブラウザCanvas合成と違い発熱主因にならないかを実機で検証する。
@@ -40,6 +52,34 @@ class RtmpPublisherView: ExpoView {
 
   private var isMixerReady = false
   private var isStreaming = false
+
+  // ★映像が「本当に」流れているかを観測するための相乗りカウンタ（2026-08-12）。
+  //
+  // 【なぜ要るのか】2026-08-12 に MediaMTX の実ログで、RTMP publish が
+  //   `1 track (MPEG-4 Audio)` ＝**音声トラックだけ**で成立している配信を確認した。
+  //   配信者のアプリには「配信中」と出ており、視聴者だけが真っ暗を見ていた。
+  //   同じ配信者が 07/12・07/14・08/12 と3回とも同じ壊れ方をしている。
+  //   つまり「接続できた」は「映像が映っている」の証明に一切ならない。
+  //
+  // frameCounter は MediaMixer の映像出力に MTHKView と同じ資格で相乗りし、
+  // フレームが1枚来るたびに数える。カメラが開けていなければ永遠に 0 のまま。
+  private let frameCounter = VideoFrameCounter()
+  private var frameProbe: FrameProbe?
+  // カメラ attach に成功したか（権限拒否・他アプリ占有などで false）
+  private var videoAttached = false
+  // attach に失敗した理由（プリフライトのメッセージに載せて現場で切り分けるため）
+  private var videoAttachError: String?
+  // 配信中の映像生存監視（1秒 tick）の世代番号。停止時に +1 して古い tick を無効化する。
+  private var mediaWatchGeneration = 0
+  // 直近に novideo を通知したか（同じ状態を連投しないための1回きりガード）
+  private var noVideoNotified = false
+
+  // 配信開始前に「最初の1フレーム」を待つ上限。ここを超えても待ち続けない
+  // （待たせ続ける＝配信が始まらない、が最悪の事故なので必ず打ち切る）。
+  private static let preflightTimeoutMs = 4_000
+  private static let preflightPollMs = 100
+  // 配信中に何ミリ秒フレームが途切れたら「映像が届いていない」と見なすか。
+  private static let noVideoThresholdMs: Double = 5_000
 
   // 画面合成（offscreen）に載せるスコアボードのテキストオブジェクト。
   // TextScreenObject は @ScreenActor 隔離クラス＝Sendable なので MainActor 保持でも安全に受け渡せる。
@@ -163,19 +203,48 @@ class RtmpPublisherView: ExpoView {
   }
 
   private func setupMixer() async {
-    let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: devicePosition())
-    // ★iOS17+ は videoOrientation が無視される端末が多い（HaishinKit は videoOrientation のみ設定し、
-    //   isVideoOrientationSupported=false の端末では何もしない＝縦のまま）。そこで capture 接続に
-    //   iOS17+ の正API videoRotationAngle を直接設定して横向きにする。configuration ブロックは
-    //   session 追加前に実行され、HaishinKit は videoRotationAngle を一切触らないため上書きされない。
-    let initialAngle = landscapeRotationAngle(for: UIDevice.current.orientation) ?? 0
-    try? await mixer.attachVideo(camera, track: 0) { unit in
-      if #available(iOS 17.0, *) {
-        if let conn = unit.connection, conn.isVideoRotationAngleSupported(initialAngle) {
-          conn.videoRotationAngle = initialAngle
-        }
-        for c in unit.output?.connections ?? [] where c.isVideoRotationAngleSupported(initialAngle) {
-          c.videoRotationAngle = initialAngle
+    // ★カメラ権限を最初に確認する（2026-08-12 追加）。
+    //   これまで iOS 側には権限を確認するコードが**1行も無かった**。拒否されていても
+    //   attachVideo の失敗は下の `try?` に飲み込まれ、そのまま「音声だけの配信」が
+    //   成立していた（配信者は成功したと思い込み、視聴者だけが真っ暗を見る）。
+    //
+    // ★ここでは emit("error") しない。error は JS 側で「配信終了」に直結するため、
+    //   起動途中の一時的な失敗で試合を止めてしまう。判定は startStreaming の
+    //   プリフライト1箇所に集約し、preflightMode（既定 warn＝止めない）に従わせる。
+    let camAuth = AVCaptureDevice.authorizationStatus(for: .video)
+    if camAuth == .denied || camAuth == .restricted {
+      // attach を試みても意味がないので行わない。理由だけ残す。
+      videoAttached = false
+      videoAttachError = "camera-denied"
+    } else {
+      let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: devicePosition())
+      if camera == nil {
+        videoAttached = false
+        videoAttachError = "camera-not-found"
+      } else {
+        // ★iOS17+ は videoOrientation が無視される端末が多い（HaishinKit は videoOrientation のみ設定し、
+        //   isVideoOrientationSupported=false の端末では何もしない＝縦のまま）。そこで capture 接続に
+        //   iOS17+ の正API videoRotationAngle を直接設定して横向きにする。configuration ブロックは
+        //   session 追加前に実行され、HaishinKit は videoRotationAngle を一切触らないため上書きされない。
+        let initialAngle = landscapeRotationAngle(for: UIDevice.current.orientation) ?? 0
+        do {
+          // ★ここは以前 `try?` だった。**このアプリで唯一の「カメラが繋がらない」失敗点**
+          //   なのに、例外が黙って消えていた＝映像なし配信の直接原因。理由を必ず外へ出す。
+          try await mixer.attachVideo(camera, track: 0) { unit in
+            if #available(iOS 17.0, *) {
+              if let conn = unit.connection, conn.isVideoRotationAngleSupported(initialAngle) {
+                conn.videoRotationAngle = initialAngle
+              }
+              for c in unit.output?.connections ?? [] where c.isVideoRotationAngleSupported(initialAngle) {
+                c.videoRotationAngle = initialAngle
+              }
+            }
+          }
+          videoAttached = true
+          videoAttachError = nil
+        } catch {
+          videoAttached = false
+          videoAttachError = "camera-attach-failed: \(error)"
         }
       }
     }
@@ -184,6 +253,11 @@ class RtmpPublisherView: ExpoView {
     //   中断され映像も止まる。映像専用セッションは音声HWに依存しないので着信に巻き込まれない。
     //   音声は AVAudioEngine で別取得し mixer.append で供給する（HaishinKit Example の .audioEngine 構成）。
     await mixer.addOutput(mtView)
+    // ★映像フレームの実在を数える相乗り出力。MTHKView とまったく同じ資格
+    //   （videoTrackId = .max ＝合成後の映像出力）で受け取るだけで、映像には一切触らない。
+    let probe = FrameProbe(counter: frameCounter)
+    frameProbe = probe
+    await mixer.addOutput(probe)
     // 音声ソースを用意（self を @Sendable クロージャに捕えないよう mixer をローカルへ）。
     // ※ automaticallyConfiguresApplicationAudioSession は既定 true のまま（HaishinKit Example の
     //   .audioEngine 構成に合わせる）。AudioSession のカテゴリ/activate は startStreaming で行う。
@@ -277,12 +351,107 @@ class RtmpPublisherView: ExpoView {
     }
   }
 
+  /// 最初の映像フレームが来るまで待つ。来たら true、上限まで来なければ false。
+  ///
+  /// ★必ず上限（4秒）で打ち切る。ここで待ち続けると「配信開始を押しても始まらない」
+  ///   という、映像なし配信よりずっと重い事故になる。
+  /// ★mixer は View 生成時から動いているので、配信者が「配信開始」を押す頃には
+  ///   通常すでに数百フレーム溜まっている＝この待ちは実際にはほぼ 0ms で抜ける。
+  private func waitForFirstVideoFrame() async -> Bool {
+    if frameCounter.count > 0 { return true }
+    let tries = max(1, Self.preflightTimeoutMs / Self.preflightPollMs)
+    for _ in 0..<tries {
+      try? await Task.sleep(nanoseconds: UInt64(Self.preflightPollMs) * 1_000_000)
+      if frameCounter.count > 0 { return true }
+    }
+    return false
+  }
+
+  /// 配信中の映像生存監視（1秒 tick）。
+  /// 直近 noVideoThresholdMs フレームが来ていなければ novideo を1回だけ通知し、
+  /// 復帰したら media を通知する。**ここから配信を止めることは絶対にしない**（通知のみ）。
+  /// 監視の世代番号。停止/再開のたびに +1 して、古い tick を確実に無効化する
+  /// （タイマーオブジェクトを持ち回すより取り違えが起きにくい）。
+  private func startMediaWatch() {
+    mediaWatchGeneration &+= 1
+    scheduleMediaTick(generation: mediaWatchGeneration)
+  }
+
+  private func stopMediaWatch() {
+    mediaWatchGeneration &+= 1
+  }
+
+  private func scheduleMediaTick(generation: Int) {
+    // 既存の resumeAudioSession と同じ構成（main への asyncAfter 再帰）。
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+      self?.mediaTick(generation: generation)
+    }
+  }
+
+  private func mediaTick(generation: Int) {
+    guard generation == mediaWatchGeneration, isStreaming else { return }
+    let last = frameCounter.lastAt
+    let staleMs = last == 0
+      ? Double(Self.noVideoThresholdMs) + 1
+      : (CFAbsoluteTimeGetCurrent() - last) * 1000
+    if staleMs > Self.noVideoThresholdMs {
+      if !noVideoNotified {
+        noVideoNotified = true
+        emit("novideo", "no video for \(Int(min(staleMs, 999_999)))ms")
+      }
+    } else if noVideoNotified {
+      noVideoNotified = false
+      emit("media", "frames=\(frameCounter.count)")
+    }
+    scheduleMediaTick(generation: generation)
+  }
+
   private func startStreaming(_ urlStr: String) async {
     guard let url = URL(string: urlStr) else {
       emit("error", "invalid url")
       return
     }
     isStreaming = true
+
+    // ───────── 配信前チェック（毎回・RTMP を張る前） ─────────
+    // 「権限がある」＝「カメラが使える」ではない。実データで、権限とは無関係に
+    // 音声だけが publish された配信が3回確認されている。なので権限ではなく
+    // **実際にフレームが1枚でも来たか**で判定する。
+    if preflightMode != "off" {
+      let ok = await waitForFirstVideoFrame()
+      if ok {
+        // 映像が来ていることを毎回はっきり通知する。JS はこれで警告表示を解除する
+        // （再接続で View を作り直したときも、正常なら必ずここを通る）。
+        noVideoNotified = false
+        emit("media", "preflight ok frames=\(frameCounter.count)")
+      } else {
+        let detail = videoAttachError ?? "no-video-frames"
+        if preflightMode == "block" {
+          // ★このモードは既定では使わない。サーバー設定で段階的に点灯させる想定。
+          isStreaming = false
+          emit("error", "no-video: \(detail)")
+          return
+        }
+        // 既定（warn）＝**配信は必ず開始する**。画面に警告を出すだけ。
+        // 誤検知で試合を止めるくらいなら、映っていない配信を通したうえで
+        // 配信者に気づいてもらう方がはるかにマシ、という判断。
+        noVideoNotified = true
+        emit("novideo", detail)
+      }
+    }
+
+    // ★プリフライトは最大4秒このメソッドを中断させる。その間に配信者が「停止」を押すと
+    //   reconcile → stopStreaming が先に走り切ってしまうが、session はまだ nil なので
+    //   stopStreaming は何も閉じられない。そのままここへ戻ってくると
+    //   **停止した後に RTMP を張る＝誰も止められないゴースト配信**になる。
+    //   （通常は既にフレームがあり waitForFirstVideoFrame が即 return するのでここは通らない。
+    //     カメラが壊れている時だけ開く窓なので、まさに事故が起きる場面と重なる。）
+    //   active が false に戻っていたら、何もせず静かに降りる。
+    guard active, isStreaming else {
+      isStreaming = false
+      return
+    }
+
     do {
       let audioSession = AVAudioSession.sharedInstance()
       try? audioSession.setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker, .allowBluetoothHFP])
@@ -363,16 +532,21 @@ class RtmpPublisherView: ExpoView {
         }
       }
 
+      // 配信中も映像が生きているか見張り続ける（通知のみ・停止は絶対にしない）。
+      startMediaWatch()
+
       try await session.connect { [weak self] in
         self?.emit("error", "connection failed")
       }
     } catch {
       isStreaming = false
+      stopMediaWatch()
       emit("error", error.localizedDescription)
     }
   }
 
   private func stopStreaming() async {
+    stopMediaWatch()
     audioSource?.stop()
     readyStateTask?.cancel()
     readyStateTask = nil
@@ -398,6 +572,72 @@ class RtmpPublisherView: ExpoView {
     interruptTask?.cancel()
     audioSource?.dispose()
     NotificationCenter.default.removeObserver(self)
+    // ★2026-08-12: View が壊されても RTMP セッションは自前で生き続けるため、
+    //   ここで明示的に閉じないと**古い publisher のソケットが残る**。
+    //   再接続で View を作り直すと、新旧2本の RTMP 接続が同じパスへ来て
+    //   MediaMTX が "closing existing publisher" を出す（2026-08-12 の実ログ
+    //   07:26:04 publish → 07:26:06 closing existing publisher と一致）。
+    //   閉じる対象は **この View 自身の session だけ**。既に nil なら何もしない。
+    //   self は捕えず、session だけをローカルに移して閉じる（deinit で self 捕捉は不正）。
+    if let session = self.session {
+      Task { try? await session.close() }
+    }
+  }
+}
+
+/// 映像フレームの到着回数と最終到着時刻だけを持つ、スレッド安全な小さな箱。
+/// カメラのスレッドから毎フレーム bump され、UI 側（MainActor）から読まれる。
+final class VideoFrameCounter: @unchecked Sendable {
+  private let lock = NSLock()
+  private var _count: Int = 0
+  private var _lastAt: CFAbsoluteTime = 0
+
+  var count: Int {
+    lock.lock(); defer { lock.unlock() }
+    return _count
+  }
+
+  var lastAt: CFAbsoluteTime {
+    lock.lock(); defer { lock.unlock() }
+    return _lastAt
+  }
+
+  func bump() {
+    lock.lock()
+    _count &+= 1
+    _lastAt = CFAbsoluteTimeGetCurrent()
+    lock.unlock()
+  }
+}
+
+/// MediaMixer の映像出力に相乗りして「フレームが来たか」だけを観測する。
+///
+/// 実装は HaishinKit 同梱の MTHKView（プレビュー用ビュー）の MediaMixerOutput 準拠を
+/// そのまま踏襲している。videoTrackId = UInt8.max ＝「合成後の映像出力」を受け取る資格で、
+/// passthrough モードではカメラのサンプルバッファがそのまま1枚ずつ流れてくる。
+/// 映像そのものには一切触らない（数えるだけ）ので配信品質に影響しない。
+@MainActor
+final class FrameProbe: MediaMixerOutput {
+  var videoTrackId: UInt8? = UInt8.max
+  var audioTrackId: UInt8?
+
+  private let counter: VideoFrameCounter
+
+  init(counter: VideoFrameCounter) {
+    self.counter = counter
+  }
+
+  nonisolated func mixer(_ mixer: MediaMixer, didOutput sampleBuffer: CMSampleBuffer) {
+    counter.bump()
+  }
+
+  nonisolated func mixer(_ mixer: MediaMixer, didOutput buffer: AVAudioPCMBuffer, when: AVAudioTime) {
+  }
+
+  func selectTrack(_ id: UInt8?, mediaType: CMFormatDescription.MediaType) async {
+    if mediaType == .video {
+      videoTrackId = id
+    }
   }
 }
 
