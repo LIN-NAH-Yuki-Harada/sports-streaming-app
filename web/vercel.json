@@ -10,7 +10,15 @@
     },
     {
       "path": "/api/cron/alerts",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/no-video",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/trial-enforce",
+      "schedule": "* * * * *"
     }
   ]
 }

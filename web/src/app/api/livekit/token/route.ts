@@ -1,6 +1,14 @@
 import { AccessToken } from "livekit-server-sdk";
 import { getAdminClient, getUser } from "@/lib/supabase-admin";
+import {
+  TRIAL_PROFILE_COLUMNS,
+  type TrialProfile,
+  isEnforceableFree,
+  remainingSeconds,
+  trialEnforceMode,
+} from "@/lib/trial";
 
+// 旧来の「配信単位で10分」判定。累積方式（lib/trial.ts）へ移行するまでの併存用。
 const TRIAL_DURATION_MS = 10 * 60 * 1000; // 10分
 
 export async function POST(request: Request) {
@@ -37,14 +45,16 @@ export async function POST(request: Request) {
       const admin = getAdminClient();
       const { data: profile } = await admin
         .from("profiles")
-        .select("plan")
+        .select(TRIAL_PROFILE_COLUMNS)
         .eq("id", user.id)
         .single();
 
-      const subscribed = profile?.plan === "broadcaster" || profile?.plan === "team";
+      const p = (profile ?? null) as TrialProfile | null;
+      const subscribed = p?.plan === "broadcaster" || p?.plan === "team";
 
+      // (a) 既存の挙動（配信単位で10分）。ここは今日まで本番で動いているので温存する。
+      //     ※ 配信単位なので「9分で切って開き直す」を繰り返せば実質無制限だった。
       if (!subscribed) {
-        // 無料ユーザー: この配信が10分を超えていないかチェック
         const { data: broadcast } = await admin
           .from("broadcasts")
           .select("started_at")
@@ -64,6 +74,19 @@ export async function POST(request: Request) {
           const remainingSec = Math.max(60, Math.ceil(remainingMs / 1000));
           ttl = `${remainingSec}s`;
         }
+      }
+
+      // (b) 累積方式（profiles.trial_seconds_used）への統一。cron/trial-enforce と
+      //     完全に同じ判定（lib/trial.ts）を使い、上の「開き直し」の抜け道を塞ぐ。
+      //     ロールアウトは cron と同じ TRIAL_ENFORCE_MODE の配下に置く
+      //     ＝ on にするまで挙動は 1bit も変わらない。
+      if (trialEnforceMode() === "on" && isEnforceableFree(p, Date.now())) {
+        const remaining = remainingSeconds(p);
+        if (remaining <= 0) {
+          return Response.json({ error: "Trial time expired" }, { status: 403 });
+        }
+        // 累積の残り時間の方が短ければそちらに合わせる（最低60秒）
+        ttl = `${Math.max(60, remaining)}s`;
       }
     }
 
