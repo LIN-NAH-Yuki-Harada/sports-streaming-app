@@ -29,6 +29,14 @@ const RECORDING_WAIT_MS = 30 * 60 * 1000;
 const CRF_INTERMEDIATE = process.env.CRF_INTERMEDIATE || "17";
 // 最終 canonicalize の CRF（旧23→20。YouTubeに渡す原盤の質を引き上げ）。
 const CRF_FINAL = process.env.CRF_FINAL || "20";
+// アーカイブ音声のビットレート。
+//
+// ★2026-08-11 追加。それまで **-b:a を1箇所も指定しておらず** ffmpeg 既定の 128k のまま、
+//   端末128k → 焼き込み128k → 正規化128k → YouTube で Opus へ、と
+//   **同じレートの AAC 再エンコードを3世代**通していた。同レートの AAC→AAC は確実に劣化する。
+//   体育館は残響＋歓声＝広帯域ノイズで AAC が最も苦手な信号であり、かつ保護者が最も価値を
+//   感じるのは「子どもの名前が呼ばれた声」「応援の声」。CPU 増は 1% 未満。
+const AUDIO_BITRATE = process.env.AUDIO_BITRATE || "192k";
 // この秒数未満の配信はアーカイブしない（誤スタートのゴミ動画がYouTubeに残る対策）。
 // env 誤設定（例 "300"）で実試合を捨てないよう上限60にクランプする。
 const MIN_ARCHIVE_SEC = Math.min(
@@ -564,6 +572,7 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
     "-r", "30",
     "-af", "aresample=async=1:first_pts=0",
     "-c:a", "aac",
+    "-b:a", AUDIO_BITRATE,
     "-ar", "48000",
     "-ac", "2",
     "-movflags", "+faststart",
@@ -585,7 +594,7 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
       "-c:v", "libx264", "-preset", "veryfast", "-crf", CRF_INTERMEDIATE,
       "-pix_fmt", "yuv420p", "-r", "30",
       "-af", "aresample=async=1:first_pts=0",
-      "-c:a", "aac", "-ar", "48000", "-ac", "2",
+      "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ar", "48000", "-ac", "2",
       "-movflags", "+faststart",
       outPath,
     ]);
@@ -672,6 +681,7 @@ async function concatSegments(paths, workDir) {
     "-pix_fmt", "yuv420p",
     "-r", "30",
     "-c:a", "aac",
+    "-b:a", AUDIO_BITRATE,
     "-movflags", "+faststart",
     outPath,
   ]);
@@ -720,6 +730,7 @@ async function canonicalize(inputPath, outPath) {
       "-map", "0:a:0",
       "-af", "aresample=async=1:first_pts=0",
       "-c:a", "aac",
+      "-b:a", AUDIO_BITRATE,
       "-ar", "48000",
       "-ac", "2",
     );
