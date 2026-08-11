@@ -147,6 +147,52 @@ const DROP_UNARCHIVED_RECORDINGS =
 const DROP_MIN_IDLE_MS =
   Number(process.env.DROP_MIN_IDLE_MS) || 10 * 60 * 1000; // 10分以内に書かれたものは触らない
 
+// ===========================================================================
+// 処理順: 尺の短い配信を優先する（2026-08-08 追加）
+//
+// ワーカーは1tickにつき1本しか処理しない。それまでは「終了が古い順」だったため、
+// **長い配信1本が後続の全員を何時間も塞いでいた**。実測: 1時間42分(2.5GB)の変換が
+// 57分かかり、その裏で 67秒の配信が40分近く待たされた。
+// 短い配信は数十秒で終わるので、先に流したほうが全体の待ち時間が劇的に減る
+// （スケジューリングで言う shortest-job-first）。
+//
+// ★飢餓（starvation）防止: 短い配信が次々来ると長い配信が永久に後回しになる。
+//   終了から ARCHIVE_STARVATION_MS を超えて待っている配信は、尺に関係なく最優先にする。
+// ===========================================================================
+const QUEUE_LOOKAHEAD = Number(process.env.QUEUE_LOOKAHEAD) || 10;
+const ARCHIVE_STARVATION_MS =
+  Number(process.env.ARCHIVE_STARVATION_MS) || 3 * 60 * 60 * 1000; // 既定3時間
+
+function pickNext(rows) {
+  const now = Date.now();
+  const items = rows.map((r) => {
+    const s = Date.parse(r.started_at);
+    const e = Date.parse(r.ended_at);
+    const sec = (e - s) / 1000;
+    return {
+      r,
+      // 尺が測れない行（日付が壊れている等）は 0 扱いにして**先に**処理する。
+      // 後回しにすると永久に選ばれない行が生まれるため（飢餓を作らない側に倒す）。
+      sec: Number.isFinite(sec) && sec > 0 ? sec : 0,
+      waited: Number.isFinite(e) ? now - e : 0,
+    };
+  });
+
+  // ①長く待たされている配信があれば、尺に関係なくそれを最優先（待ち時間の長い順）。
+  const starving = items.filter((x) => x.waited >= ARCHIVE_STARVATION_MS);
+  if (starving.length > 0) {
+    starving.sort((a, b) => b.waited - a.waited);
+    log(
+      `starvation guard: ${starving[0].r.share_code} (${Math.round(starving[0].waited / 60000)}分待ち)`,
+    );
+    return starving[0].r;
+  }
+
+  // ②通常は尺の短い順。同尺なら「待ちが長い＝終了が古い」順（従来の挙動に一致）。
+  items.sort((a, b) => a.sec - b.sec || b.waited - a.waited);
+  return items[0].r;
+}
+
 function dropRecordings(shareCode, reason) {
   if (!DROP_UNARCHIVED_RECORDINGS) return;
   let recs;
@@ -1115,7 +1161,7 @@ async function main() {
     .or("youtube_upload_status.is.null,youtube_upload_status.eq.pending")
     .lt("youtube_retry_count", MAX_RETRY)
     .order("ended_at", { ascending: true })
-    .limit(1);
+    .limit(QUEUE_LOOKAHEAD);
   if (error) {
     console.error("[archive] select failed:", error.message);
     process.exit(1);
@@ -1124,7 +1170,7 @@ async function main() {
     log("no pending");
     return;
   }
-  const b = rows[0];
+  const b = pickNext(rows);
   const retry = b.youtube_retry_count || 0;
 
   // 2. 適格性（¥500チーム + 自動アーカイブON + YouTube連携済み）
@@ -1359,6 +1405,45 @@ async function main() {
       prof.youtube_access_token,
       prof.id,
     );
+
+    // ★ 15分ゲート（事前判定）: 重いエンコードを始める**前**に、そもそも上げられるかを確かめる。
+    //
+    // 2026-08-08 の実測でこの位置に移した。それまでは canonicalize の**後**にだけ
+    // 置いていたため、1時間42分(2.5GB)の配信で **57分ぶんのCPUを使い切ってから**
+    // 「アップロードできません」と判定していた。ワーカーは1tickにつき1本しか処理しない
+    // ので、**その57分のあいだ後続の配信が全員待たされる**（同日、67秒の配信が
+    // 40分近く待たされた）。尺は録画から既に測れている（videoTotalSec）ので、
+    // 判定は最初にできる。
+    //
+    // ★ videoTotalSec が 0/NaN（ffprobe 全滅）のときは checkLongUploadGate が
+    //   「上限以下」と見なして ok を返す＝**フェイルオープン**。誤って止めない。
+    // ★ エンコード後のゲート（下方・finalDur 基準）は**残す**。事前測定が実尺を
+    //   過小評価した場合の保険で、短い配信ではAPIを叩かないので追加コストはない。
+    {
+      const preGate = await checkLongUploadGate(oauth, videoTotalSec);
+      if (!preGate.ok) {
+        log(
+          "long-upload gate blocked (pre-encode)",
+          b.share_code,
+          `${Math.round(videoTotalSec)}s`,
+        );
+        await setStatus(b.id, {
+          youtube_upload_status: "failed",
+          youtube_upload_error: preGate.message.slice(0, 500),
+          youtube_retry_count: retry,
+        });
+        // この関数には finally が無く、早期 return では作業ディレクトリが残る。
+        // 下方のゲートと同じく明示的に消す（この時点では空だが /var/tmp に溜めない）。
+        try {
+          fs.rmSync(workDir, { recursive: true, force: true });
+        } catch {
+          /* noop */
+        }
+        // ★元録画は残す（48時間以内なら、電話番号確認を済ませてから再実行で救える）。
+        return;
+      }
+    }
+
     // 配信全体のスコアイベントを一度だけ取得（区間は各セグメントの開始時刻で切る）。
     const { data: events } = await admin
       .from("broadcast_score_events")
