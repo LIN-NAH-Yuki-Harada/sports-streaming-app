@@ -591,21 +591,25 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
     pngs.push(pngPath);
   }
 
-  // ffmpeg: 各PNGを区間 enable で重ねる
   const outPath = path.join(tmpdir, "scored.mp4");
-  const args = ["-y", "-i", recPath];
-  pngs.forEach((p) => args.push("-i", p));
-  let fc = "";
-  let cur = "0:v";
-  segs.forEach((seg, i) => {
-    const inp = `${i + 1}:v`;
-    const outLabel = i === segs.length - 1 ? "vout" : `v${i}`;
-    fc += `[${cur}][${inp}]overlay=0:0:enable='between(t,${seg.s.toFixed(2)},${seg.e.toFixed(2)})'[${outLabel}];`;
-    cur = outLabel;
-  });
-  fc = fc.replace(/;$/, "");
-  args.push(
-    "-filter_complex", fc,
+
+  // ★2026-08-11: メモリが得点イベント数に比例して増える問題を解消した。
+  //
+  // 【旧方式の問題】得点1件につき「フルスクリーンPNG1枚 + ffmpeg入力1本 + overlay1段」を
+  //   鎖状に繋いでいた。実測ピークRSS:
+  //       1件=184MB / 8件=259MB / 30件=488MB / 60件=861MB / **120件=1,428MB**
+  //   バレーのフルセット(100〜150点)や野球のB/S/O更新はこの危険域に入り、
+  //   `MemoryHigh=1200M` を超えて速度が落ちる。2GBのVPSでは MediaMTX と共倒れの圏内。
+  //   **全国大会のバレー決勝が、この箱で最も危険なジョブ形状**だった。
+  //
+  // 【新方式】concat デマクサで PNG を「1本の画像シーケンス入力」にまとめ、overlay も1段にする。
+  //   入力もフィルタも件数に依存しない＝**メモリがイベント数に依存しなくなる**。
+  //
+  // ★新方式が失敗したら旧方式で再試行し、それも失敗したら overlay 無しで正規化する。
+  //   **最悪でも現行と同じ挙動**に留める三段構え。
+
+  // 共通の出力オプション（映像フィルタの出口ラベルは [vout] で統一）
+  const tailArgs = [
     "-map", "[vout]",
     "-map", "0:a?",
     "-c:v", "libx264",
@@ -623,12 +627,78 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
     "-ac", "2",
     "-movflags", "+faststart",
     outPath,
-  );
+  ];
+
+  // 旧方式: N入力 + N段 overlay（フォールバック用にそのまま残す）
+  const buildChained = () => {
+    const a = ["-y", "-i", recPath];
+    pngs.forEach((q) => a.push("-i", q));
+    let fc = "";
+    let cur = "0:v";
+    segs.forEach((seg, i) => {
+      const inp = `${i + 1}:v`;
+      const outLabel = i === segs.length - 1 ? "vout" : `v${i}`;
+      fc += `[${cur}][${inp}]overlay=0:0:enable='between(t,${seg.s.toFixed(2)},${seg.e.toFixed(2)})'[${outLabel}];`;
+      cur = outLabel;
+    });
+    return [...a, "-filter_complex", fc.replace(/;$/, ""), ...tailArgs];
+  };
+
+  // 新方式: concat デマクサで1入力にまとめ、overlay は1段だけ
+  const buildConcat = async () => {
+    const blankPng = path.join(tmpdir, "blank.png");
+    // 最初の得点までの区間は「完全に透明」を重ねる＝何も表示しない（旧方式と同じ見た目）
+    await spawnP("ffmpeg", [
+      "-y", "-f", "lavfi",
+      "-i", `color=c=black@0.0:s=${w}x${h}:d=0.1,format=rgba`,
+      "-frames:v", "1", blankPng,
+    ]);
+    const entries = [];
+    if (segs[0].s > 0.05) entries.push({ png: blankPng, dur: segs[0].s });
+    for (let i = 0; i < segs.length; i++) {
+      // 次の得点までを表示区間にする（イベント間に間が空いても直前の表示を維持＝旧方式と同じ）
+      const next = i + 1 < segs.length ? segs[i + 1].s : segs[i].e;
+      entries.push({ png: pngs[i], dur: Math.max(0.04, next - segs[i].s) });
+    }
+    const esc = (f) => f.replace(/'/g, "'\\''");
+    let list = entries.map((e) => `file '${esc(e.png)}'\nduration ${e.dur.toFixed(3)}`).join("\n") + "\n";
+    // ★末尾をもう一度書く: concat デマクサは最後の duration を無視するため、
+    //   これが無いと最後のスコアが一瞬で消える（デマクサの既知の仕様）。
+    list += `file '${esc(entries[entries.length - 1].png)}'\n`;
+    const listPath = path.join(tmpdir, "overlay.txt");
+    fs.writeFileSync(listPath, list);
+    return [
+      "-y", "-i", recPath,
+      "-f", "concat", "-safe", "0", "-i", listPath,
+      "-filter_complex",
+      // shortest=1: 画像側が本編より長くても出力を伸ばさない
+      "[1:v]format=rgba,setpts=PTS-STARTPTS[ov];[0:v][ov]overlay=0:0:shortest=1[vout]",
+      ...tailArgs,
+    ];
+  };
+
   log(
     `seg${idx}: burning scoreboard SVG (${segs.length} score segments, ${w}x${h}, dur ${Math.round(durationMs / 1000)}s)`,
   );
   try {
-    await ffmpegP(args);
+    let concatArgs;
+    try {
+      concatArgs = await buildConcat();
+    } catch (e) {
+      log(`seg${idx}: concat の準備に失敗 -> 旧方式: ${String(e).slice(0, 120)}`);
+      concatArgs = null;
+    }
+    if (concatArgs) {
+      try {
+        await ffmpegP(concatArgs);
+        return { path: outPath, scored: true };
+      } catch (e) {
+        // ★concat 方式が失敗しても、ここで諦めずに旧方式で焼き直す。
+        //   新方式の不具合が「スコアボードの消失」に化けないための保険。
+        log(`seg${idx}: concat 焼き込み失敗 -> 旧方式で再試行: ${String(e).slice(0, 120)}`);
+      }
+    }
+    await ffmpegP(buildChained());
     return { path: outPath, scored: true };
   } catch (e) {
     // 焼き込み失敗（短い断片のPNG生成失敗等）でも、生のまま返さず必ず canonical に正規化する。
