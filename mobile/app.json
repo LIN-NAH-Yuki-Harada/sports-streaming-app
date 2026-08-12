@@ -4,7 +4,7 @@
     "slug": "mobile",
     "owner": "live-spotch",
     "scheme": "spotch",
-    "version": "1.1.7",
+    "version": "1.1.8",
     "orientation": "default",
     "//locales": "★App Store の言語が「EN 英語」と表示される問題の対策。infoPlist の2キーだけでは不十分で、Apple は .lproj フォルダから対応言語を判定するため ja.lproj を実際に生成させる必要がある。ただし `expo.locales` を使うと Android にも無意味なリソース（iOS のキー名のまま）が生成され、2026-08-05 に Android の Gradle ビルドが失敗した（iOS は同一コミットで成功）。そのため locales はここに書かず、iOS 限定の ./plugins/withIosOnlyLocales.js で適用する。",
     "icon": "./assets/icon.png",
