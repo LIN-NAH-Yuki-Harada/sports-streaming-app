@@ -10,6 +10,8 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -23,9 +25,11 @@ import com.pedro.encoder.input.video.CameraHelper
 import com.pedro.encoder.utils.gl.TranslateTo
 import com.pedro.library.rtmp.RtmpStream
 import com.pedro.library.util.BitrateAdapter
+import com.pedro.library.util.streamclient.StreamBaseClient
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
+import kotlin.math.roundToInt
 
 // カメラ＋マイクを RTMP(TCP/バッファ型) で push する Expo ネイティブ View（Android 版）。
 // iOS 版 (ios/RtmpPublisherView.swift) と同一の Prop/Event 契約:
@@ -86,6 +90,13 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
   private var streamStartedAt = 0L
   // 映像なしが疑われる状態が続いた秒数（onNewBitrate は毎秒来る）
   private var lowBitrateSeconds = 0
+  // prepareVideo に実際に渡した fps（送信キュー上限の算出に使う。Prop の既定 60 ではなく実値）。
+  private var preparedFps = 30
+  // 実際に適用できた送信キュー上限（0 = 適用できずライブラリ既定 400 のまま）。診断用。
+  private var appliedSendCacheItems = 0
+  // 配信中に観測したキュー滞留の最大値と、統計ログの間引き用タイムスタンプ。
+  private var peakItemsInCache = 0
+  private var lastStatsLogMs = 0L
 
   private val audioBitrate = 128_000
 
@@ -174,6 +185,10 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     if (surfaceReady && !s.isOnPreview) {
       try { s.startPreview(surfaceView) } catch (_: Exception) {}
     }
+    // ★送信キュー上限の適用は「startStream の直前・キューが空のうち」に必ず行う（下の説明参照）。
+    peakItemsInCache = 0
+    lastStatsLogMs = 0L
+    applySendCache(s)
     // ★配信前チェック: プレビューを開始できたなら、カメラが実際に開くのを待ってから publish する。
     //   プレビューを開始できていない（surface 未生成など）ときは待たない
     //   ＝ vc15 と完全に同じ挙動のまま（新しい失敗経路を作らない）。
@@ -234,6 +249,8 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     lowBitrateSeconds = 0
     noVideoNotified = false
     val s = stream ?: return
+    // 停止直前のキュー統計を控えてから止める（stopStream 後は 0 にリセットされて読めない）。
+    val summary = cacheSummary(s)
     try {
       if (s.isStreaming) {
         // stopStream が false を返したらエンコーダの再利用不可＝次回 start 前に作り直す。
@@ -243,7 +260,11 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
       prepared = false
     }
     bitrateAdapter.reset()
-    emit("closed") // iOS の stopStreaming と同じく正常停止でも closed を通知（JS は endedRef で無視）
+    Log.i(TAG, "stream stopped: $summary")
+    // iOS の stopStreaming と同じく正常停止でも closed を通知（JS は endedRef で無視）。
+    // message はキュー統計（JS 側は closed の message を参照しないので挙動は変わらない。
+    // console.log 経由で logcat/Metro に残り、実機テストの合否判定に使える）。
+    emit("closed", summary)
   }
 
   // RtmpStream を Prop 確定値で構築して prepare する。失敗時は false。
@@ -306,6 +327,7 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
         try { s.release() } catch (_: Exception) {}
         return false
       }
+      preparedFps = fpsInt // 送信キュー上限の算出に使う（Prop 既定の 60 ではなく実際に prepare した値）
       // 体育館スポーツ配信は OS 音声処理(AGC/NS/EC)全 OFF が正解（PR#112 の知見）。
       // echoCanceler/noiseSuppressor は既定 false、AGC は UNPROCESSED ソース指定で回避。
       var audioOk = try {
@@ -344,6 +366,110 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     appliedOrientation = 270
     try { s.setOrientation(270) } catch (_: Exception) {}
     return true
+  }
+
+  // ---- 送信キュー（RootEncoder の cache）の上限 --------------------------------------
+  // ★ここは「画質」ではなく「送信の待ち行列の長さ」だけを変える。解像度/ビットレート/fps/GOP
+  //   には一切触れない（触れると画質が落ちるため。オーナー方針）。
+  //
+  // 何が起きていたか（2026-08-11 サレジオ会場・桐朋戦 66分・Android vc15）:
+  //   サーバー(MediaMTX v1.17.1)が「録画の経過時間と実時間のズレが5秒を超えた」として
+  //   録画を強制リセットするログを 136 回出し、録画が 131 本に分割、合計 6.7 分の映像が欠落。
+  //   1回のリセットで約3秒失う（再開待ち2秒 + GOP2秒でキーフレーム待ち平均1秒）ため
+  //   136 回 × 3秒 = 6.8分 で実測の欠落 6.7 分とほぼ一致する。
+  //   同じ会場・同じ時間帯に配信した iOS(1.1.4) は録画1本・欠落なし＝Android 固有。
+  //   ※ズレの閾値 5 秒は MediaMTX にハードコードで、サーバー設定では変えられない。
+  //
+  // なぜ Android だけか（RootEncoder 2.6.7 の実装）:
+  //   BaseSender の送信キューは既定 400 個（common/base/BaseSender.kt: cacheSize = 400）。
+  //   本アプリの構成では 1 秒あたりに積まれるフレーム数が
+  //     映像 30 個(30fps) ＋ 音声 46.875 個(48000Hz ÷ AAC-LC 1024サンプル/フレーム)
+  //     = 76.875 個/秒
+  //   なので 400 ÷ 76.875 ≒ 5.2 秒ぶん溜め込める。回線が詰まるとこの行列が伸び、
+  //   サーバーには最大 5.2 秒遅れて届く ＝ 閾値 5 秒を超える。5.2 秒 vs 5 秒の紙一重。
+  //
+  // 対策:
+  //   キュー上限を「約 1.5 秒ぶん」に縮め、遅れが構造的に 5 秒へ届かないようにする。
+  //   1.5 秒なら閾値まで 3.5 秒の余裕（3.3 倍のマージン）。
+  //   縮めた副作用は「輻輳が 1.5 秒続くとフレームが捨てられる（＝一瞬カクつく）」だが、
+  //   捨てられても接続は切れない。従来は捨てずに溜め込んだ結果サーバー側リセットを招き、
+  //   3 秒の欠落＋録画分割＋スコアずれになっていたので、こちらの方が明確に軽い。
+
+  /**
+   * 送信キューに積んでよいメディアフレーム数を、実際に prepare した fps から算出する。
+   * 1 秒あたりのフレーム数 = 映像 fps ＋ 音声フレーム/秒(48000 ÷ 1024 = 46.875)。
+   * 本番設定(fps=30) では (30 + 46.875) × 1.5 秒 = 115.3 → 115 個。
+   */
+  private fun sendCacheItemsFor(fpsInt: Int): Int {
+    val audioFramesPerSecond = AUDIO_SAMPLE_RATE.toDouble() / AAC_SAMPLES_PER_FRAME // 46.875
+    val framesPerSecond = fpsInt + audioFramesPerSecond
+    return (framesPerSecond * SEND_CACHE_SECONDS).roundToInt()
+      .coerceIn(SEND_CACHE_MIN_ITEMS, SEND_CACHE_MAX_ITEMS)
+  }
+
+  /**
+   * 送信キュー上限を適用する。
+   * ★呼ぶ場所が重要: resizeCache は「今キューに入っている量より小さいサイズ」を要求すると
+   *   RuntimeException を投げる（BaseSender.resizeCache のガード）。したがって必ず
+   *   startStream の前＝送信が始まっておらずキューが空のうちに呼ぶ。
+   *   （BaseSender.start() が queue.clear() するので、停止中のキューは空。
+   *     縮めたキュー自体は RtmpClient が持つ sender に残るので、再接続時も維持される）
+   * ★失敗しても配信は止めない。ライブラリ既定 400 のままでも配信自体は成立する。
+   */
+  private fun applySendCache(s: RtmpStream) {
+    if (s.isStreaming) return // 送信中は実データが入っており縮小できない（例外になる）
+    val items = sendCacheItemsFor(preparedFps)
+    appliedSendCacheItems = try {
+      s.getStreamClient().resizeCache(items)
+      Log.i(
+        TAG,
+        "send cache resized: $items items" +
+          " (~${SEND_CACHE_SECONDS}s at ${preparedFps}fps + ${AUDIO_SAMPLE_RATE}Hz audio," +
+          " library default 400 = ~5.2s)",
+      )
+      items
+    } catch (e: Exception) {
+      Log.w(TAG, "send cache resize failed, keep library default 400: ${e.message}")
+      0
+    }
+  }
+
+  /**
+   * 輻輳判定のしきい値（%）。
+   * ライブラリ既定は「キュー上限の 20%」。上限 400 個のときは 80 個＝約 1.04 秒の滞留で
+   * 輻輳とみなしていたが、上限を 115 個に縮めると同じ 20% が 23 個＝約 0.30 秒になり、
+   * キーフレーム送出の一瞬の詰まりでも輻輳と判定されてビットレートが下がりうる
+   * （＝画質が落ちる。オーナー方針に反する）。
+   * ★今回変えたいのは「キューの上限」だけなので、ビットレート適応が働き始める“実時間”は
+   *   従来どおり約 1.0 秒の滞留に据え置く。そのために % を計算し直す。
+   *   1.0 ÷ 1.5 × 100 = 66.7% → 115 個 × 66.7% ≒ 77 個 ≒ 1.0 秒。
+   */
+  private fun congestionPercent(): Float =
+    ((CONGESTION_TRIGGER_SECONDS / SEND_CACHE_SECONDS) * 100.0).toFloat().coerceIn(1f, 100f)
+
+  /** 実機テストの合否判定に使うキュー統計（1行）。重い処理は含めない。 */
+  private fun cacheSummary(s: RtmpStream): String = try {
+    val client = s.getStreamClient()
+    val limit = if (appliedSendCacheItems > 0) appliedSendCacheItems.toString() else "400(default)"
+    "cacheLimit=$limit peakItems=$peakItemsInCache" +
+      " droppedVideo=${client.getDroppedVideoFrames()} droppedAudio=${client.getDroppedAudioFrames()}"
+  } catch (_: Exception) {
+    "cacheLimit=? peakItems=$peakItemsInCache"
+  }
+
+  /**
+   * キュー滞留の観測。onNewBitrate（ライブラリが約1秒ごとに呼ぶ）に相乗りし、
+   * さらに 1 秒未満の連続呼び出しは間引く（配信中に処理を増やさないため）。
+   * ※ getCacheSize() はライブラリ側が resizeCache 後も 400 を返す実装（BaseSender の
+   *   cacheSize フィールドが更新されない）ため使わない。実測は getItemsInCache() のみ。
+   */
+  private fun observeCache(client: StreamBaseClient) {
+    val now = SystemClock.elapsedRealtime()
+    if (now - lastStatsLogMs < STATS_LOG_INTERVAL_MS) return
+    lastStatsLogMs = now
+    val items = client.getItemsInCache()
+    if (items > peakItemsInCache) peakItemsInCache = items
+    Log.i(TAG, "cache items=$items peak=$peakItemsInCache limit=$appliedSendCacheItems")
   }
 
   // 実マイク入力を無加工で取る音源を選ぶ。UNPROCESSED(API24+・対応端末)が第一候補、
@@ -469,7 +595,10 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
   }
 
   override fun onDisconnect() {
-    emit("closed")
+    val s = stream
+    val summary = if (s != null) cacheSummary(s) else "cacheLimit=? peakItems=$peakItemsInCache"
+    Log.i(TAG, "disconnected: $summary")
+    emit("closed", summary)
   }
 
   override fun onAuthError() {
@@ -484,9 +613,17 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     mainHandler.post {
       val s = stream ?: return@post
       if (!s.isStreaming) return@post
+      val client = try { s.getStreamClient() } catch (_: Exception) { return@post }
       try {
-        bitrateAdapter.adaptBitrate(bitrate, s.getStreamClient().hasCongestion())
+        // キュー上限を縮められた場合だけ % を読み替える（縮小に失敗＝既定 400 のままなら
+        // ライブラリ既定の 20% をそのまま使う。どちらでも実時間の判定基準は約 1.0 秒）。
+        val congested =
+          if (appliedSendCacheItems > 0) client.hasCongestion(congestionPercent())
+          else client.hasCongestion()
+        bitrateAdapter.adaptBitrate(bitrate, congested)
       } catch (_: Exception) {}
+      // 診断はビットレート適応の後（統計で例外が出ても適応を止めない）。
+      try { observeCache(client) } catch (_: Exception) {}
       checkVideoAlive(bitrate)
     }
   }
@@ -532,6 +669,8 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     if (context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) "ok" else "NG"
 
   companion object {
+    private const val TAG = "RtmpPublisher"
+
     // アダプティブ降格の下限（これ未満は映像が用をなさないため足切り）。
     // BitrateAdapter.Listener の引数は Int(bps)。
     private const val MIN_VIDEO_BITRATE = 500_000
@@ -547,5 +686,25 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     private const val NO_VIDEO_SECONDS = 20
     // 配信開始直後の助走期間（この間は判定しない）。
     private const val NO_VIDEO_WARMUP_MS = 10_000L
+    // ---- 送信キュー上限のパラメータ（値を調整するならここだけ） ----
+    // ★調整する場合は SEND_CACHE_SECONDS だけを 1.0〜2.0 の範囲で書き換える。
+    //   小さすぎる（1.0秒未満）と輻輳時のコマ落ちが増えて映像がカクつき、
+    //   大きすぎる（2.0秒超）とサーバー(MediaMTX)のズレ閾値5秒に対する余裕が減る。
+    //   1.5 秒は「カクつきを増やさない下限側の余裕」と「閾値まで3.5秒のマージン」の両立点。
+    // ★env ではなく定数にしている理由: このアプリは OTA 更新(expo-updates)を持たないため
+    //   env にしても値の変更＝再ビルドで手間は同じ。定数1つの方が誤設定の余地がない。
+    private const val SEND_CACHE_SECONDS = 1.5
+    // ビットレート適応が「輻輳」とみなし始める滞留時間。ライブラリ既定（上限400個の20%＝
+    // 80個＝約1.04秒）と実時間で揃えるための値。キュー上限を変えても適応の挙動を変えない。
+    private const val CONGESTION_TRIGGER_SECONDS = 1.0
+    // prepareAudio(48_000, ...) と一致させること（音声フレーム/秒の算出に使う）。
+    private const val AUDIO_SAMPLE_RATE = 48_000
+    // AAC-LC は 1 フレーム = 1024 サンプル固定（48000 ÷ 1024 = 46.875 フレーム/秒）。
+    private const val AAC_SAMPLES_PER_FRAME = 1024
+    // 下限/上限のクランプ。上限はライブラリ既定＝これ以上は広げない（広げても意味がない）。
+    private const val SEND_CACHE_MIN_ITEMS = 60
+    private const val SEND_CACHE_MAX_ITEMS = 400
+    // キュー統計ログの間引き間隔（配信中に処理を増やさない）。
+    private const val STATS_LOG_INTERVAL_MS = 1000L
   }
 }
