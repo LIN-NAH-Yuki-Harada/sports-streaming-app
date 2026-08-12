@@ -313,11 +313,26 @@ class RtmpPublisherView: ExpoView {
     guard created == noErr, let probe else { return false }
     // 実エンコーダセッションが作られる前に必ず破棄する（ハードウェアを掴んだままにしない）。
     defer { VTCompressionSessionInvalidate(probe) }
-    return VTSessionSetProperty(
-      probe,
-      key: kVTCompressionPropertyKey_ProfileLevel,
-      value: kVTProfileLevel_H264_High_AutoLevel
-    ) == noErr
+
+    // ★ProfileLevel だけを聞くのでは不十分。本番の HaishinKit は makeOptions() の
+    //   全プロパティを **一括** で投入し、さらに prepareToEncodeFrames まで呼ぶ。
+    //   High を受け付けても CABAC(H264EntropyMode) の同時投入や準備で失敗する端末が
+    //   あった場合、本番の1フレーム目で throw → HaishinKit がログ1行で握り潰し →
+    //   RTMPは繋がったまま「配信中」表示、視聴者は真っ暗、という最悪の壊れ方になる
+    //   （2026-08-12 に別経路で実際に起きた「音声だけpublish」と同じ形）。
+    //   そこで本番と同じ組み合わせを**予行演習**し、通ったときだけ High を採用する。
+    //   増分コストは約1ms。
+    let props: [CFString: Any] = [
+      kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_High_AutoLevel,
+      kVTCompressionPropertyKey_H264EntropyMode: kVTH264EntropyMode_CABAC,
+      kVTCompressionPropertyKey_AllowFrameReordering: kCFBooleanFalse as Any,
+      kVTCompressionPropertyKey_RealTime: kCFBooleanTrue as Any,
+    ]
+    guard VTSessionSetProperties(probe, propertyDictionary: props as CFDictionary) == noErr else {
+      return false
+    }
+    // 準備まで通って初めて「この端末で本番と同じ設定が成立する」と言える。
+    return VTCompressionSessionPrepareToEncodeFrames(probe) == noErr
   }
 
   private func startStreaming(_ urlStr: String) async {
