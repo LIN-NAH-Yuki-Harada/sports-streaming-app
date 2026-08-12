@@ -1199,7 +1199,10 @@ function BroadcastPageInner() {
 
   // 無料お試しカウントダウンタイマー（累積秒数ベース）
   useEffect(() => {
-    if (subscribed || !shareCode) {
+    // ★二重防御: profile が読めていない（= プランが分からない）間は、決して打ち切らない。
+    //   圏外や一時的なDB障害で profile が null になると subscribed が false に落ちるため、
+    //   ここで止めないと課金者の試合が10分で強制終了する。プランは「分かるまで止めない」。
+    if (subscribed || !shareCode || !profile) {
       setTrialRemaining(null);
       return;
     }
@@ -1221,7 +1224,7 @@ function BroadcastPageInner() {
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subscribed, shareCode]);
+  }, [subscribed, shareCode, profile]);
 
   // ページ読み込み時に、このユーザーの放置された配信を自動終了する
   useEffect(() => {
