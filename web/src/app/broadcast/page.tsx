@@ -2360,13 +2360,20 @@ function BroadcastPageInner() {
             )
           ) : null
         ) : (
-          /* B-4: 無料プラン / 配信者プラン。他の注意ボックスより明らかに目立たせない */
-          <p className="text-[10px] text-gray-500 leading-relaxed">
-            このプランではライブ配信のみで、映像は保存されません。試合を残したい方は
-            <Link href="/pricing" className="text-gray-400 hover:underline">
-              チームプラン（¥500/月）をご覧ください →
-            </Link>
-          </p>
+          /* B-4: 無料プラン / 配信者プラン。★配信を始める直前なので、開始の妨げに
+             ならないよう控えめな枠にとどめつつ、チームプランは明示的に案内する。 */
+          <div className="rounded-lg bg-white/[0.03] ring-1 ring-white/10 p-2.5">
+            <p className="text-[11px] text-gray-300 leading-relaxed">
+              この配信の映像は残りません。
+              <span className="text-white font-medium">チームプラン（¥500/月）</span>
+              なら、YouTubeアーカイブをONにして試合の映像を残せます。
+            </p>
+            <p className="mt-1 text-[11px]">
+              <Link href="/pricing" className="text-[#e63946] hover:underline">
+                → チームプランを見る
+              </Link>
+            </p>
+          </div>
         )}
 
         {/* 配信前チェックリスト（YouTube 削除リスク回避・最重要） */}
@@ -2584,6 +2591,30 @@ function BroadcastPageInner() {
                 スイッチ・チェックの OFF、20 本が YouTube 側の未有効化だったため、
                 多い順に並べる。
                 C-3: 無料 / 配信者プランには何も出さない（終了直後にアップグレードを迫らない）。 */}
+            {/* C-5: チームプラン以外。試合を撮り終えた直後＝「残らない」を最も実感する
+                瞬間なので、ここでチームプランを案内する。★ただし「入れば残る」だけ書くと
+                期待を裏切る（YouTube連携も必要）ため、必要な手順まで含めて伝える。 */}
+            {!endedSummary.teamPlan && (
+              <div className="mt-4 bg-[#e63946]/5 ring-1 ring-[#e63946]/20 rounded-lg p-3">
+                <p className="text-[11px] font-semibold text-white leading-relaxed">
+                  📼 今日の試合を、残しませんか
+                </p>
+                <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">
+                  チームプラン（¥500/月）にすると、YouTubeアーカイブをONにして
+                  試合の映像をご自身のYouTubeチャンネルに限定公開で残せます。
+                  あとから何度でも見返せて、その場にいけなかったご家族にも届けられます。
+                </p>
+                <p className="mt-1.5 text-[10px] text-gray-500 leading-relaxed">
+                  ※ ご利用にはチームプランへの変更と、マイページでのYouTubeアカウント連携（1〜2分）が必要です。
+                </p>
+                <p className="mt-2 text-[11px]">
+                  <Link href="/pricing" className="text-[#e63946] hover:underline font-semibold">
+                    → チームプランを見る
+                  </Link>
+                </p>
+              </div>
+            )}
+
             {endedSummary.youtubeSave === "failed" && endedSummary.teamPlan && (
               <div className="mt-4 bg-[#e63946]/5 ring-1 ring-[#e63946]/20 rounded-lg p-3">
                 <p className="text-[11px] font-semibold text-white leading-relaxed">

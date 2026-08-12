@@ -478,7 +478,7 @@ function MyPageInner() {
               {!profile ? null : profile.plan !== "team" ? (
                 <div className="mt-3 pt-3 border-t border-white/5 text-[11px] text-gray-500 leading-relaxed">
                   <p>
-                    YouTubeへの自動保存はチームプラン（¥500/月）の機能です。無料プラン・配信者プランでは、配信はライブ視聴のみとなり、映像は残りません。
+                    チームプラン（¥500/月）なら、YouTubeアーカイブをONにして試合の映像をご自身のYouTubeチャンネルに限定公開で残せます。無料プラン・配信者プランでは配信はライブ視聴のみとなり、映像は残りません。
                   </p>
                   <Link href="/pricing" className="mt-1 inline-block text-gray-400 hover:text-white transition underline">
                     プランを見る →
