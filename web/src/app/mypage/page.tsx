@@ -486,7 +486,30 @@ function MyPageInner() {
                 </div>
               ) : profile.youtube_channel_id ? (
                 <div className="mt-3 text-[11px] text-amber-400/90 leading-relaxed">
-                  <p className="font-semibold">連携ありがとうございます。あと1つだけご確認ください</p>
+                  {/* ★連携済みユーザーで最も多い失敗（課金チームプランの 10 分超 103 本中
+                      83 本）は、連携ではなく profiles.youtube_live_enabled が OFF のまま
+                      配信していたケース。この列は DEFAULT false なので、連携しただけでは
+                      ブラウザ配信の映像は 1 本も残らない。ここを最優先で案内し、
+                      この場で ON にできるようにする（下までスクロールさせない）。 */}
+                  {liveArchiveLive && profile.youtube_live_enabled !== true ? (
+                    <div className="mb-3 rounded-md border border-[#e63946]/30 bg-[#e63946]/10 p-3">
+                      <p className="text-xs font-semibold text-white">
+                        連携ありがとうございます。ただし、YouTubeへの保存がOFFのままです
+                      </p>
+                      <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">
+                        「配信時にYouTube Liveを同時起動する」がOFFになっています。このままだと、ブラウザから配信した映像はYouTubeに保存されず、配信の終了と同時に見られなくなります。
+                      </p>
+                      <button
+                        onClick={() => handleToggleLive(true)}
+                        disabled={togglingLive}
+                        className="mt-3 w-full bg-[#e63946] hover:bg-[#c92a3a] text-white text-xs font-semibold py-2 rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {togglingLive ? "設定中..." : "YouTubeへの保存をONにする"}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="font-semibold">連携ありがとうございます。あとは、ご利用の配信方法に合わせてご確認ください</p>
+                  )}
                   <p className="mt-2 font-semibold">■ パソコン・スマホのブラウザから配信する場合</p>
                   <p className="mt-0.5">
                     YouTube側で「ライブ配信」が使える状態になっている必要があります。まだの方は初回の手続きから使えるようになるまで最大24時間かかるため、試合の前日までにお済ませください。
