@@ -183,6 +183,9 @@ export async function POST(request: Request) {
           current_period_end: periodEnd,
           iap_product_id: productId,
           iap_original_transaction_id: originalTxId,
+          // ★ プランが動いた時刻を必ず刻む。cron/trial-enforce の
+          //   「反映待ちの間は無料判定しない」猶予（lib/trial.ts planSettleMs）がこれを見る。
+          updated_at: new Date().toISOString(),
         })
         .eq("id", userId);
       if (error) throw new Error(error.message);
@@ -193,7 +196,10 @@ export async function POST(request: Request) {
       // 支払い問題（猶予期間中）。プランは維持しステータスのみ更新。
       const { error } = await admin
         .from("profiles")
-        .update({ subscription_status: "past_due" })
+        .update({
+          subscription_status: "past_due",
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", userId);
       if (error) throw new Error(error.message);
       return Response.json({ received: true });
@@ -209,7 +215,11 @@ export async function POST(request: Request) {
       if (prof?.stripe_subscription_id) {
         await admin
           .from("profiles")
-          .update({ iap_product_id: null, iap_original_transaction_id: null })
+          .update({
+            iap_product_id: null,
+            iap_original_transaction_id: null,
+            updated_at: new Date().toISOString(),
+          })
           .eq("id", userId);
         return Response.json({ received: true, note: "kept (active stripe sub)" });
       }
@@ -221,6 +231,7 @@ export async function POST(request: Request) {
           current_period_end: null,
           iap_product_id: null,
           iap_original_transaction_id: null,
+          updated_at: new Date().toISOString(),
         })
         .eq("id", userId);
       if (error) throw new Error(error.message);

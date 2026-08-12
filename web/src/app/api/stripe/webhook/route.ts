@@ -72,6 +72,9 @@ export async function POST(request: Request) {
               typeof session.customer === "string" ? session.customer : session.customer?.id,
             stripe_subscription_id: subscription.id,
             subscription_status: subscription.status,
+            // ★ プランが動いた時刻を必ず刻む。cron/trial-enforce の
+            //   「反映待ちの間は無料判定しない」猶予（lib/trial.ts planSettleMs）がこれを見る。
+            updated_at: new Date().toISOString(),
             current_period_end: subscription.items.data[0]?.current_period_end
               ? new Date(subscription.items.data[0].current_period_end * 1000).toISOString()
               : null,
@@ -105,6 +108,8 @@ export async function POST(request: Request) {
         // 課金中の team/broadcaster ユーザーが意図せず free に強制ダウングレードされる事故が発生していた。
         // plan を据え置けば、未知の priceId が来ても現状の権限が剥奪されない。
         const baseUpdate: Record<string, string | null> = {
+          // ★ プランが動いた時刻（cron/trial-enforce の反映待ち猶予が見る）
+          updated_at: new Date().toISOString(),
           stripe_subscription_id: sub.id,
           subscription_status: sub.status,
           current_period_end: sub.items.data[0]?.current_period_end
@@ -155,6 +160,7 @@ export async function POST(request: Request) {
             .update({
               stripe_subscription_id: null,
               current_period_end: null,
+              updated_at: new Date().toISOString(),
             })
             .eq("id", userId);
           if (keepErr) {
@@ -172,6 +178,7 @@ export async function POST(request: Request) {
             stripe_subscription_id: null,
             subscription_status: "canceled",
             current_period_end: null,
+            updated_at: new Date().toISOString(),
           })
           .eq("id", userId);
         if (updateErr) {

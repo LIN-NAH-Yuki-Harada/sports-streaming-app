@@ -194,11 +194,34 @@ export async function GET(request: Request) {
     }
   }
 
+  // 5. 「見えていない配信」検知（cron/no-video）の作業用マーカーを掃除する。
+  //    nv_ok / nv_susp / ns_susp は配信1本あたり最大2行増えるだけだが、放置すると
+  //    alert_log が単調増加する。判定は配信中（開始30分以内）にしか使わないので
+  //    7日で消して問題ない。
+  let noVideoMarksPurged = 0;
+  {
+    const sevenDaysAgo = new Date(
+      Date.now() - 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { data: purged, error: purgeErr } = await admin
+      .from("alert_log")
+      .delete()
+      .in("kind", ["nv_ok", "nv_susp", "ns_susp"])
+      .lt("created_at", sevenDaysAgo)
+      .select("id");
+    if (purgeErr) {
+      console.warn("[cron/cleanup] nv_* marker purge failed:", purgeErr.message);
+    } else {
+      noVideoMarksPurged = purged?.length ?? 0;
+    }
+  }
+
   return Response.json({
     cleaned: data?.length || 0,
     stuckStopped,
     liveStuckStopped,
     staleUploadersReverted,
     cancelledMp4Removed,
+    noVideoMarksPurged,
   });
 }
