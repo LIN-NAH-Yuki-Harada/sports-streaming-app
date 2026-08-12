@@ -513,11 +513,7 @@ function PricingPageInner() {
               <li>✓ 試合スケジュール管理</li>
               <li>✓ 共有コードのチーム自動配布</li>
               <li className="text-gray-200 flex items-center gap-1.5 flex-wrap">
-                <span>✓ 試合後に YouTube へ自動アーカイブ（ご自身のチャンネルに保存）</span>
-                <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
-              </li>
-              <li className="text-gray-200 flex items-center gap-1.5 flex-wrap">
-                <span>✓ YouTube に自動アーカイブ（ご自身のチャンネルに長期保存）</span>
+                <span>✓ 試合後に YouTube へ自動アーカイブ（ご自身のチャンネルに長期保存）</span>
                 <span className="bg-[#e63946] text-white text-[8px] font-black px-1.5 py-0.5 rounded">ベータ</span>
               </li>
               <li className="text-gray-400">🔜 リモコンでスコア操作（別端末から）</li>
@@ -526,7 +522,7 @@ function PricingPageInner() {
             {/* アーカイブが「残らない」二大原因。加入前に必ず見える位置に出す。 */}
             <div className="mt-3 pt-3 border-t border-white/10 space-y-1.5 text-[11px] text-gray-400 leading-relaxed">
               <p>
-                ※ YouTube 関連の機能には、マイページでのご自身の YouTube アカウント連携が必要です（初期状態はOFF）。
+                ※ YouTube関連の機能をご利用いただくには、マイページでご自身のYouTubeアカウントの連携が必要です（初期状態はOFF）。
               </p>
               <p>
                 ※ 15分を超える録画の保存には、YouTube チャンネルの電話番号確認（
@@ -539,6 +535,20 @@ function PricingPageInner() {
                   youtube.com/verify
                 </a>
                 ・数分で完了・身分証不要）が必要です。未確認のチャンネルでは保存されません。
+              </p>
+              {/* ブラウザ配信（YouTube Live 同時配信）のみに必要な条件。
+                  アプリ配信では「ライブ配信の有効化」は不要なため、経路を明示する。 */}
+              <p>
+                ※ パソコン・スマホのブラウザから配信する場合は、YouTube側で「ライブ配信」が使える状態になっている必要があります。初回の手続きから使えるようになるまで最大24時間かかるため、試合の前日までにご確認ください（
+                <a
+                  href="https://www.youtube.com/features"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#e63946] hover:underline"
+                >
+                  youtube.com/features
+                </a>
+                ）。
               </p>
             </div>
             {currentPlan === "team" ? (

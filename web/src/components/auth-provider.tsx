@@ -31,9 +31,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     try {
       const p = await getProfile(user.id);
-      setProfile(p);
+      // ★取得できたときだけ差し替える。getProfile は通信エラーでも throw せず null を
+      //   返すため（database.ts の getProfile）、そのまま入れると「圏外で一瞬失敗した」
+      //   だけで profile=null → subscribed=false になり、課金者が無料枠扱いになって
+      //   配信が10分で強制終了する。失敗時は直前の profile を保持する（fail-safe）。
+      if (p) setProfile(p);
     } catch {
-      setProfile(null);
+      // 例外時も同様に、直前の profile を保持する。
     }
   };
 

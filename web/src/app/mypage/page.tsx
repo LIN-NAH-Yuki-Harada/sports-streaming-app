@@ -44,6 +44,13 @@ function MyPageInner() {
   const [togglingLive, setTogglingLive] = useState(false);
   const archiveFeatureLive = isArchiveEnabled();
   const liveArchiveLive = isLiveArchiveEnabled();
+  // YouTube 連携（OAuth）を提供できるか。旧アーカイブ経路（録画→アップロード）と
+  // Live 中継経路（YouTube Live 同時配信）のどちらか一方でも本番稼働していれば
+  // 連携する意味があるため OR で判定する。
+  // ※ 以前は archiveFeatureLive（NEXT_PUBLIC_ARCHIVE_ENABLED）だけで判定しており、
+  //   本番では同変数が未設定＝false のため未連携ユーザーに連携ボタンが 1 つも
+  //   表示されていなかった（＝「連携してください」と案内しても連携手段が無い状態）。
+  const youtubeLinkAvailable = archiveFeatureLive || liveArchiveLive;
 
   // ストレイ broadcast (status='live' のまま 30 分以上残ってる) の検出 + 強制終了 UI。
   // 5/10 ブロックシード大会で endBroadcast 失敗で配信が「LIVE」のまま残るケースが
@@ -450,7 +457,7 @@ function MyPageInner() {
                   <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
                 </svg>
                 <h3 className="text-sm font-semibold text-white">YouTube自動アーカイブ</h3>
-                {!archiveFeatureLive && (
+                {!youtubeLinkAvailable && (
                   <span className="text-[10px] text-[#e63946] bg-[#e63946]/10 border border-[#e63946]/30 rounded px-1.5 py-0.5 font-semibold">近日公開</span>
                 )}
               </div>
@@ -462,21 +469,101 @@ function MyPageInner() {
                 <li>・チャンネルが育ち、チームの記録が資産に</li>
                 <li>・限定公開のため、URLを知る人のみ視聴可能</li>
               </ul>
-              <p className="mt-3 text-[11px] text-amber-400/90 leading-relaxed">
-                ⚠️ ご利用には YouTube 側で「ライブ配信の有効化」が必要です。初回の有効化は反映まで
-                <span className="font-semibold">24時間</span>
-                かかるため、<span className="font-semibold">試合前日までに</span>
-                <a
-                  href="https://www.youtube.com/features"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline hover:text-amber-300"
-                >
-                  YouTube の機能設定
-                </a>
-                でご確認ください。
-              </p>
-              {profile?.youtube_channel_id ? (
+              {/* 状態別の案内。
+                  ・チームプラン かつ 未連携 → 連携しないと映像が残らないことを最優先で伝える
+                  ・チームプラン かつ 連携済み → 配信方法（ブラウザ / アプリ）で確認先が違うため節を分ける
+                  ・それ以外のプラン → 事実だけを控えめに（煽らない）
+                  ※「ライブ配信の有効化」はブラウザ配信のみ必要、「電話番号の確認」はアプリ配信の
+                    15分超で必須。1 つの注意書きにまとめるとどちらかが不正確になるため分けている。 */}
+              {!profile ? null : profile.plan !== "team" ? (
+                <div className="mt-3 pt-3 border-t border-white/5 text-[11px] text-gray-500 leading-relaxed">
+                  <p>
+                    チームプラン（¥500/月）なら、YouTubeアーカイブをONにして試合の映像をご自身のYouTubeチャンネルに限定公開で残せます。無料プラン・配信者プランでは配信はライブ視聴のみとなり、映像は残りません。
+                  </p>
+                  <Link href="/pricing" className="mt-1 inline-block text-gray-400 hover:text-white transition underline">
+                    プランを見る →
+                  </Link>
+                </div>
+              ) : profile.youtube_channel_id ? (
+                <div className="mt-3 text-[11px] text-amber-400/90 leading-relaxed">
+                  {/* ★連携済みユーザーで最も多い失敗（課金チームプランの 10 分超 103 本中
+                      83 本）は、連携ではなく profiles.youtube_live_enabled が OFF のまま
+                      配信していたケース。この列は DEFAULT false なので、連携しただけでは
+                      ブラウザ配信の映像は 1 本も残らない。ここを最優先で案内し、
+                      この場で ON にできるようにする（下までスクロールさせない）。 */}
+                  {liveArchiveLive && profile.youtube_live_enabled !== true ? (
+                    <div className="mb-3 rounded-md border border-[#e63946]/30 bg-[#e63946]/10 p-3">
+                      <p className="text-xs font-semibold text-white">
+                        連携ありがとうございます。ただし、YouTubeへの保存がOFFのままです
+                      </p>
+                      <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">
+                        「配信時にYouTube Liveを同時起動する」がOFFになっています。このままだと、ブラウザから配信した映像はYouTubeに保存されず、配信の終了と同時に見られなくなります。
+                      </p>
+                      <button
+                        onClick={() => handleToggleLive(true)}
+                        disabled={togglingLive}
+                        className="mt-3 w-full bg-[#e63946] hover:bg-[#c92a3a] text-white text-xs font-semibold py-2 rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {togglingLive ? "設定中..." : "YouTubeへの保存をONにする"}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="font-semibold">連携ありがとうございます。あとは、ご利用の配信方法に合わせてご確認ください</p>
+                  )}
+                  <p className="mt-2 font-semibold">■ パソコン・スマホのブラウザから配信する場合</p>
+                  <p className="mt-0.5">
+                    YouTube側で「ライブ配信」が使える状態になっている必要があります。まだの方は初回の手続きから使えるようになるまで最大24時間かかるため、試合の前日までにお済ませください。
+                  </p>
+                  <p className="mt-0.5">
+                    →{" "}
+                    <a
+                      href="https://www.youtube.com/features"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-amber-300"
+                    >
+                      いま使えるか確認する（youtube.com/features）
+                    </a>
+                  </p>
+                  <p className="mt-2 font-semibold">■ アプリ（iPhone / Android）から配信する場合</p>
+                  <p className="mt-0.5">
+                    「ライブ配信」の手続きは不要です。ただし15分を超える試合を保存するには、YouTubeチャンネルの電話番号の確認が必要です。未確認だと15分を超えた分が受け付けられず、保存が中止されます。
+                  </p>
+                  <p className="mt-0.5">
+                    →{" "}
+                    <a
+                      href="https://www.youtube.com/verify"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-amber-300"
+                    >
+                      電話番号を確認する（youtube.com/verify・数分で完了・身分証は不要です）
+                    </a>
+                  </p>
+                </div>
+              ) : youtubeLinkAvailable ? (
+                <div className="mt-3 rounded-md border border-[#e63946]/30 bg-[#e63946]/10 p-3">
+                  <p className="text-xs font-semibold text-white">
+                    YouTubeと連携するまで、アーカイブは残りません
+                  </p>
+                  <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">
+                    試合の映像はあなたのYouTubeチャンネルに限定公開で保存されます。連携がまだのため、いま配信しても映像は残らず、配信の終了と同時に見られなくなります。
+                  </p>
+                  <button
+                    onClick={handleYoutubeLink}
+                    disabled={linkingYoutube}
+                    className="mt-3 w-full bg-[#e63946] hover:bg-[#c92a3a] text-white text-xs font-semibold py-2 rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {linkingYoutube ? "Google認証画面へ移動中..." : "YouTubeアカウントと連携する"}
+                  </button>
+                  <p className="mt-2 text-[11px] text-gray-500">
+                    Googleのログイン画面が開きます。1〜2分で完了します。
+                  </p>
+                </div>
+              ) : null}
+
+              {/* 連携中の表示・解除（プランを問わず、連携済みなら常に出す） */}
+              {profile?.youtube_channel_id && (
                 <div className="mt-3 pt-3 border-t border-white/5">
                   <p className="text-[11px] text-gray-500">
                     連携中の YouTube アカウント:{" "}
@@ -490,21 +577,7 @@ function MyPageInner() {
                     {unlinkingYoutube ? "解除中..." : "連携を解除する"}
                   </button>
                 </div>
-              ) : archiveFeatureLive ? (
-                <div className="mt-3 pt-3 border-t border-white/5">
-                  <button
-                    onClick={handleYoutubeLink}
-                    disabled={linkingYoutube || profile?.plan !== "team"}
-                    className="w-full bg-[#e63946] hover:bg-[#c92a3a] text-white text-xs font-semibold py-2 rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {linkingYoutube
-                      ? "Google認証画面へ移動中..."
-                      : profile?.plan === "team"
-                        ? "YouTubeアカウントと連携する"
-                        : "チームプランで利用できます"}
-                  </button>
-                </div>
-              ) : null}
+              )}
             </div>
 
             {/* Live 中継機能（YouTube 同時配信）— PR-5 */}
