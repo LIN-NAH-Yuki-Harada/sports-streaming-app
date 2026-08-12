@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
+import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { AuthForm } from "@/components/auth-form";
@@ -232,7 +233,13 @@ function BroadcastPageInner() {
   const [endedSummary, setEndedSummary] = useState<{
     durationSec: number;
     broadcastId: string | null;
-    archiveEligible: boolean;
+    // 今回の配信で YouTube への保存を実際に起動できたか。
+    // 「チームプランかどうか」ではなく「起動したか」で判定する（起動していない
+    // 配信に対して「保存されます」と表示すると事実と食い違うため）。
+    youtubeSaveStarted: boolean;
+    // チームプラン（＝そもそも保存機能の対象）かどうか。
+    // 無料 / 配信者プランには終了直後にアップグレードを迫らない（何も出さない）。
+    teamPlan: boolean;
   } | null>(null);
   const [archiveDiscarded, setArchiveDiscarded] = useState(false);
   const [discardingArchive, setDiscardingArchive] = useState(false);
@@ -939,7 +946,16 @@ function BroadcastPageInner() {
       ? Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000))
       : 0;
     const endedBroadcastId = broadcastRef.current?.id ?? null;
-    const archiveEligible = isArchiveEnabled() && profile?.plan === "team";
+    // 旧判定は isArchiveEnabled()（本番で未設定＝false）を見ていたため、この
+    // ブロックは本番で一度も表示されていなかった。今回の配信で実際に
+    // /api/livekit/live/start を起動したか（usingLivePipelineRef）で判定する。
+    // ※ usingLivePipelineRef は下の state リセット（false 代入）より前に読む必要がある。
+    const teamPlan = profile?.plan === "team";
+    const youtubeSaveStarted =
+      usingLivePipelineRef.current &&
+      teamPlan &&
+      profile?.youtube_live_enabled === true &&
+      !!profile?.youtube_channel_id;
 
     // 配信終了サマリモーダルを最初に表示する。
     // ここで先に出さないと、後続の await（getSession / endBroadcast 等）が
@@ -949,7 +965,8 @@ function BroadcastPageInner() {
     setEndedSummary({
       durationSec,
       broadcastId: endedBroadcastId,
-      archiveEligible,
+      youtubeSaveStarted,
+      teamPlan,
     });
     setArchiveDiscarded(false);
 
@@ -2211,31 +2228,98 @@ function BroadcastPageInner() {
           </p>
         </div>
 
-        {/* YouTube Live 同時配信トグル（チームプラン + マイページ ON のとき表示）。
+        {/* この配信のアーカイブ状態（案内のみ）。
+            ★どの分岐でも配信開始ボタンは押せるままにする。ここでボタンを塞ぐと
+              試合開始に間に合わず配信機会そのものを失うため、disabled 条件には一切触れない。
             マイページの youtube_live_enabled が機能利用許諾のマスタースイッチ、
-            このチェックは「今回の配信で使うかどうか」の都度判断。 */}
-        {isLiveArchiveEnabled()
-          && profile?.youtube_live_enabled === true
-          && profile?.plan === "team" && (
-          <div className="rounded-md bg-red-500/5 border border-red-500/20 px-3 py-3">
-            <label className="flex items-start gap-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={enableYouTubeLiveSession}
-                onChange={(e) => setEnableYouTubeLiveSession(e.target.checked)}
-                className="mt-0.5 w-4 h-4 rounded border-white/20 bg-black/40 accent-[#e63946] cursor-pointer"
-              />
-              <div className="flex-1">
-                <p className="text-[11px] font-semibold text-white flex items-center gap-1.5">
-                  📺 YouTube Live で同時配信する
-                  <span className="text-[8px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-medium">ベータ</span>
-                </p>
+            チェックボックスは「今回の配信で使うかどうか」の都度判断。 */}
+        {!profile ? null : profile.plan === "team" ? (
+          isLiveArchiveEnabled() ? (
+            !profile.youtube_channel_id ? (
+              /* B-1: チームプランだが YouTube 未連携 → 今回の映像は残らない */
+              <div className="rounded-md bg-red-500/5 border border-red-500/20 px-3 py-3">
+                <p className="text-[11px] font-semibold text-white">この配信は、終了後に残りません</p>
                 <p className="mt-1 text-[10px] text-gray-400 leading-relaxed">
-                  ON にするとあなたのYouTubeチャンネルにリアルタイム配信され、終了後は自動でアーカイブが残ります（限定公開）。OFF にすると今回の配信は YouTube に保存されません。
+                  YouTubeとの連携がまだのため、今回の映像は保存されません。配信中はご覧いただけますが、終了すると見返すことができなくなります。
+                </p>
+                {/* 同じタブで開くと入力中の試合情報が消えるため必ず別タブ */}
+                <Link
+                  href="/mypage"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-block text-[10px] text-[#e63946] hover:underline"
+                >
+                  マイページでYouTubeと連携する（1〜2分）
+                </Link>
+                <p className="mt-2 text-[10px] text-gray-500">
+                  このまま配信を始めていただいて問題ありません。
                 </p>
               </div>
-            </label>
-          </div>
+            ) : profile.youtube_live_enabled !== true ? (
+              /* B-2: 連携済みだがマイページの保存スイッチが OFF */
+              <div className="rounded-md bg-red-500/5 border border-red-500/20 px-3 py-3">
+                <p className="text-[11px] font-semibold text-white">この配信は、終了後に残りません</p>
+                <p className="mt-1 text-[10px] text-gray-400 leading-relaxed">
+                  YouTubeへの保存がOFFになっています。今回の映像は保存されず、配信の終了とともに見られなくなります。
+                </p>
+                <Link
+                  href="/mypage"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-block text-[10px] text-[#e63946] hover:underline"
+                >
+                  マイページでYouTubeへの保存をONにする
+                </Link>
+                <p className="mt-2 text-[10px] text-gray-500">
+                  このまま配信を始めていただいて問題ありません。
+                </p>
+              </div>
+            ) : (
+              /* B-3: 連携済み + スイッチ ON → 今回使うかの都度チェック */
+              <div className="rounded-md bg-red-500/5 border border-red-500/20 px-3 py-3">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableYouTubeLiveSession}
+                    onChange={(e) => setEnableYouTubeLiveSession(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-white/20 bg-black/40 accent-[#e63946] cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <p className="text-[11px] font-semibold text-white flex items-center gap-1.5">
+                      📺 YouTube Live で同時配信する
+                      <span className="text-[8px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-medium">ベータ</span>
+                    </p>
+                    <p className="mt-1 text-[10px] text-gray-400 leading-relaxed">
+                      ONにすると、あなたのYouTubeチャンネルにも同時に配信され、終了後そのまま映像が残ります（限定公開）。OFFにすると、今回の映像は保存されません。
+                    </p>
+                  </div>
+                </label>
+                {enableYouTubeLiveSession && (
+                  <p className="mt-2 text-[10px] text-amber-400/90 leading-relaxed">
+                    はじめてご利用の方へ — YouTube側で「ライブ配信」が使える状態になっていないと、保存されません。まだ手続きをしていない場合は、使えるようになるまで最大24時間かかります。
+                    <br />
+                    →{" "}
+                    <a
+                      href="https://www.youtube.com/features"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-amber-300"
+                    >
+                      いま使えるか確認する（youtube.com/features）
+                    </a>
+                  </p>
+                )}
+              </div>
+            )
+          ) : null
+        ) : (
+          /* B-4: 無料プラン / 配信者プラン。他の注意ボックスより明らかに目立たせない */
+          <p className="text-[10px] text-gray-500 leading-relaxed">
+            このプランではライブ配信のみで、映像は保存されません。試合を残したい方は
+            <Link href="/pricing" className="text-gray-400 hover:underline">
+              チームプラン（¥500/月）をご覧ください →
+            </Link>
+          </p>
         )}
 
         {/* 配信前チェックリスト（YouTube 削除リスク回避・最重要） */}
@@ -2367,20 +2451,23 @@ function BroadcastPageInner() {
               </div>
             )}
 
-            {/* YouTube アーカイブ可否（チームプランかつフラグONのとき） */}
-            {endedSummary.archiveEligible && (
+            {/* C-1: 今回 YouTube への保存を起動できた場合 */}
+            {endedSummary.youtubeSaveStarted && (
               <div className="mt-4 bg-[#e63946]/5 ring-1 ring-[#e63946]/20 rounded-lg p-3">
                 {!archiveDiscarded ? (
                   <>
                     <p className="text-[11px] text-gray-300 leading-relaxed">
-                      📹 この配信は YouTube に限定公開で自動保存されます
+                      📹 この試合はYouTubeに限定公開で保存されます
+                    </p>
+                    <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">
+                      YouTube側の処理があるため、見られるようになるまで1〜2時間ほどかかります。マイページの配信履歴からご確認いただけます。
                     </p>
                     <button
                       onClick={handleDiscardArchive}
                       disabled={discardingArchive}
                       className="mt-2 text-[11px] text-gray-500 hover:text-red-400 transition disabled:opacity-50 underline"
                     >
-                      {discardingArchive ? "設定中..." : "今回は YouTube に保存しない"}
+                      {discardingArchive ? "設定中..." : "今回はYouTubeに保存しない"}
                     </button>
                   </>
                 ) : (
@@ -2388,6 +2475,41 @@ function BroadcastPageInner() {
                     ✓ YouTube に保存しないことを記録しました
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* C-2: チームプランだが今回は起動しなかった（未連携／スイッチOFF／起動失敗）。
+                C-3: 無料 / 配信者プランには何も出さない（終了直後にアップグレードを迫らない）。 */}
+            {!endedSummary.youtubeSaveStarted && endedSummary.teamPlan && (
+              <div className="mt-4 bg-[#e63946]/5 ring-1 ring-[#e63946]/20 rounded-lg p-3">
+                <p className="text-[11px] font-semibold text-white leading-relaxed">
+                  今回の配信は、YouTubeに保存されていません
+                </p>
+                <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">
+                  次回から残すには、次の2つをご確認ください。
+                </p>
+                <ol className="mt-1 space-y-0.5 text-[11px] text-gray-400 leading-relaxed list-decimal list-inside">
+                  <li>マイページでYouTubeアカウントを連携し、保存をONにする（1〜2分）</li>
+                  <li>YouTube側で「ライブ配信」が使える状態にする（初回は使えるようになるまで最大24時間）</li>
+                </ol>
+                <p className="mt-2 text-[11px]">
+                  <Link href="/mypage" className="text-[#e63946] hover:underline">
+                    → マイページを開く
+                  </Link>
+                </p>
+                <p className="mt-1 text-[11px]">
+                  <a
+                    href="https://www.youtube.com/features"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#e63946] hover:underline"
+                  >
+                    → YouTubeの設定を確認する
+                  </a>
+                </p>
+                <p className="mt-2 text-[11px] text-gray-500 leading-relaxed">
+                  すでに配信済みの映像を後から保存することはできません。次の試合からご利用ください。
+                </p>
               </div>
             )}
 
