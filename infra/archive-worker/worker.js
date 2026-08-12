@@ -1280,7 +1280,21 @@ async function concatSegments(paths, workDir) {
       round += 1;
       // このラウンドの出力は全て同じ設定で焼いた正規形なので、残りは copy で繋げる
       // （木を上まで登ると全長の再エンコードが何度も走ってしまうため）。
+      // ★ただし段1・段2と同じ検査を必ず通す。1グループ＝1本だった入力は
+      //   filterComplexConcat を通らず素通しで level に残るため、生の録画が
+      //   混ざりうる。無検査で -c copy すると「25分の試合が4秒で終わっている」
+      //   類の破損を作る（過去に実損あり）。ここだけ検査を省いてはいけない。
       if (level.length > 1 && CONCAT_COPY_ENABLED) {
+        const lvMeta = [];
+        for (const p of level) lvMeta.push(await probeOne(p));
+        const lvRef = segSignature(lvMeta[0]);
+        const lvCopyable =
+          lvMeta.every(isCanonicalForm) &&
+          lvMeta.every((m) => segSignature(m) === lvRef);
+        if (!lvCopyable) {
+          log("concat: 中間copyの前提が揃っていない -> さらに分割");
+          continue;
+        }
         try {
           const out = await copyConcat(level, workDir, `r${round}`);
           await assertSane(out, expectedSec);
