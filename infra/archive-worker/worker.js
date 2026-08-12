@@ -55,6 +55,45 @@ const STALE_UPLOADING_MS = 4 * 60 * 60 * 1000;
 // SIGKILL 時は finally が走らず中間ファイルが残るため、古い作業dirを起動時に掃除する。
 const ORPHAN_WORKDIR_MS = 24 * 60 * 60 * 1000;
 
+// ===== 連結のメモリをセグメント本数から切り離す（2026-08-12）=====
+// 【何が起きていたか】66分の試合（有効131セグメント）のアーカイブが5回連続で失敗した。
+//   実測: CPU 6時間2分 / 実時間 2時間37分 / RSS 1.2GB + swap 1.9GB / ディスク読込 308GB /
+//   **load average 176**（3コアのVPSで正常値の約60倍）。TimeoutStartSec=3h 超過と OOM killer。
+// 【真因】旧 concatSegments が **131セグメント全部を -i で同時入力**し、filter_complex の中で
+//   1本ずつ scale/fps 変換しながら concat していた。デコーダとスケーラが131本ぶん同時に立ち、
+//   メモリもCPUもセグメント数に比例した（実測 約22MB/入力 × 131 ＋ ベース184MB ≒ 3.1GB要求）。
+// 【直し方】正規化を「連結の中」から「セグメント1本ずつの前段」へ移す。前段は元々
+//   スコアボード焼き込みで1本ずつ再エンコードしているので、**追加のエンコードパスはゼロ**。
+//   全セグメントが同一パラメータの正規形になれば、連結は concat デマクサ + -c copy＝
+//   デコード無し・メモリO(1)で済む。ffmpeg の入力は常に「録画1本＋PNG列＋無音」だけになる。
+//
+// ロールバックはファイル差し替え不要で env だけでできる（本番は手デプロイのため重要）:
+//   CONCAT_COPY_ENABLED=0      … 連結の -c copy を無効化（逐次正規化＋分割 filter_complex）
+//   SEGMENT_NORMALIZE_ENABLED=0 … セグメント前段を旧 burnScoreboard 相当に戻す
+const SEGMENT_NORMALIZE_ENABLED = process.env.SEGMENT_NORMALIZE_ENABLED !== "0";
+const CONCAT_COPY_ENABLED = process.env.CONCAT_COPY_ENABLED !== "0";
+// フォールバックで filter_complex 連結に落ちたときの1回あたり入力本数。
+// 8入力 ≒ 184MB + 8×22MB ≒ 360MB で MemoryHigh=1200M に十分収まる。
+const CONCAT_CHUNK = Math.max(2, Number(process.env.CONCAT_CHUNK) || 8);
+// 最終手段として「旧実装そのまま（全入力を一度に filter_complex）」を試してよい上限本数。
+// これを超える本数で全部乗せをやると OOM が確実なので、試さず例外にして retry に倒す
+// （壊れた動画を上げて元録画を消す事故を防ぐ＝既存の fail-closed 原則）。
+const CONCAT_FULL_FC_MAX = Math.max(0, Number(process.env.CONCAT_FULL_FC_MAX) || 12);
+// 実映像がこの秒数を超えたら 1080p 拡大を見送る（既定100分）。
+// 3時間級の試合では拡大ありの最終正規化だけで105分かかり、合計が TimeoutStartSec=3h に
+// 対して余裕12分しか無くなる。**画質より完走を優先**するための安全弁。
+const UPSCALE_MAX_SEC = Number(process.env.UPSCALE_MAX_SEC) || 6000;
+
+// セグメントの「正規形」。ここが全セグメントで揃っていれば -c copy で連結できる。
+const SEG_W = 1280;
+const SEG_H = 720;
+const SEG_TIMESCALE = "30000";
+// ★自前で正規形として作ったファイルのパスだけを覚えておく集合。
+//   -c copy を許すかどうかは「パラメータが偶然一致しているか」ではなく
+//   **「自分が作ったファイルか」**で判定する。生の録画が偶然揃って見えたときに
+//   copy してしまう事故（＝過去の「25分が4秒に切れる」事象の再来）を構造的に防ぐ。
+const CANON = new Set();
+
 // ===== ライブ並走バックオフ（live-aware backoff・2026-07-22 / レビュー反映版）=====
 // 進行中ライブがある tick は、重い ffprobe/ffmpeg/YouTubeアップロードを次tick(5分後)へ
 // 見送り、MediaMTX の HLS 分割・視聴 egress・上り帯域・ディスクIO をライブに明け渡す。
@@ -443,11 +482,26 @@ function spawnP(cmd, args) {
 
 // ffmpeg 実行ヘルパー。FFMPEG_THREADS 設定時のみ、出力パス（最終引数）の直前に
 // -threads を挿入する（全呼び出しで出力パスが末尾に来る前提＝本ファイル内の4箇所で確認済）。
+//
+// ★2026-08-12: 直列実行の mutex を追加した。このVPSはメモリ2GBしかなく、ffmpeg が
+//   同時に2本走ると即 OOM になる。現状のコードは全ループが for + await で Promise.all は
+//   1つも無いが（grep 済）、**将来の編集で誤って並列化されても物理的に直列に戻る**ように
+//   promise チェーンで直列化しておく。systemd 側は Type=oneshot + OnUnitActiveSec=5min
+//   なので多重起動もしない（前回が走っている間は起動されない）＝三重の担保。
+let ffChain = Promise.resolve();
 function ffmpegP(args) {
   if (FFMPEG_THREADS) {
     args = [...args.slice(0, -1), "-threads", FFMPEG_THREADS, args[args.length - 1]];
   }
-  return spawnP("ffmpeg", args);
+  const run = () => spawnP("ffmpeg", args);
+  // 前段が失敗しても次は走らせる（フォールバック実行を止めないため）。
+  const p = ffChain.then(run, run);
+  // チェーン自体には失敗を伝播させない（未処理rejectionを作らない）。
+  ffChain = p.then(
+    () => {},
+    () => {},
+  );
+  return p;
 }
 
 async function ffprobeDurationSec(p) {
@@ -514,22 +568,187 @@ async function ffprobeHasVideo(p) {
   }
 }
 
+// ===== ffprobe の統合（1ファイル1回だけ起動する）=====
+// 旧実装は1セグメントあたり **7回** ffprobe を spawn していた（3-2で2回・焼き込みで2回・
+// 連結で3回）。131セグメントなら約900プロセスで、それだけで1分半以上かかっていた。
+// -show_streams -show_format を1回で取り、パスをキーにキャッシュして使い回す。
+// ★JSONが取れない壊れたmp4では既存の個別ヘルパへフォールバックする（＝挙動不変）。
+const probeCache = new Map();
+
+// ファイルを書き換えたらキャッシュを捨てる（フォールバックで同じパスに焼き直す経路がある）。
+function forgetProbe(p) {
+  probeCache.delete(p);
+}
+
+function pickStream(streams, type) {
+  return streams.find((s) => s && s.codec_type === type) || null;
+}
+
+async function probeOneUncached(p) {
+  try {
+    const out = await spawnP("ffprobe", [
+      "-v", "error",
+      "-show_streams",
+      "-show_format",
+      "-print_format", "json",
+      p,
+    ]);
+    const j = JSON.parse(out);
+    const streams = Array.isArray(j.streams) ? j.streams : [];
+    const v = pickStream(streams, "video");
+    const a = pickStream(streams, "audio");
+    return {
+      p,
+      hasVideo: !!v,
+      hasAudio: !!a,
+      // ffprobeWH と同じフォールバック値（実測できないときの既定 1280x720）。
+      w: (v && Number(v.width)) || 1280,
+      h: (v && Number(v.height)) || 720,
+      dur: parseFloat(j.format && j.format.duration) || 0,
+      // -c copy 連結の可否判定に使う指紋。mp4 は avcC(SPS/PPS) をトラックに1つしか
+      // 持てないため、profile/level/色情報まで一致していないと2本目以降が化ける。
+      vsig: v
+        ? [
+            v.codec_name, v.width, v.height, v.pix_fmt,
+            v.sample_aspect_ratio, v.profile, v.level,
+            v.color_range, v.color_space, v.color_primaries, v.color_transfer,
+          ].join("/")
+        : "",
+      asig: a
+        ? [a.codec_name, a.sample_rate, a.channels, a.channel_layout].join("/")
+        : "",
+    };
+  } catch {
+    // 壊れた/JSONが取れないファイルは従来の個別 ffprobe に落とす（判定基準は変えない）。
+    const wh = await ffprobeWH(p);
+    return {
+      p,
+      hasVideo: await ffprobeHasVideo(p),
+      hasAudio: await ffprobeHasAudio(p),
+      w: wh.w,
+      h: wh.h,
+      dur: await ffprobeDurationSec(p),
+      // ★指紋不明。後述の segSignature() が必ず一意な値を返すので copy は許されない。
+      vsig: "",
+      asig: "",
+    };
+  }
+}
+
+async function probeOne(p) {
+  if (probeCache.has(p)) return probeCache.get(p);
+  const r = await probeOneUncached(p);
+  probeCache.set(p, r);
+  return r;
+}
+
+// 連結可否の指紋。指紋が取れなかったファイルは「自分自身としか一致しない」値を返す＝
+// 複数本の一致判定では必ず不一致になり、-c copy が選ばれない（fail-closed）。
+function segSignature(m) {
+  if (!m.vsig || !m.asig) return `unknown:${m.p}`;
+  return `${m.vsig}|${m.asig}`;
+}
+
+// 「自前で作った正規形か」の判定。★パラメータ一致だけで copy を許さないための門番。
+function isCanonicalForm(m) {
+  return (
+    CANON.has(m.p) && m.hasVideo && m.hasAudio && m.w === SEG_W && m.h === SEG_H
+  );
+}
+
+// 正規形セグメント／中間連結物の共通出力オプション。
+// ここが全ファイルで同一だからこそ、連結を -c copy（デコード無し・メモリO(1)）にできる。
+function segTailArgs(outPath) {
+  return [
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    // 中間は「ほぼ無劣化」で通し、本気の圧縮は最終 canonicalize の1回だけにする。
+    "-crf", CRF_INTERMEDIATE,
+    // x264 の既定も High だが、明示しないと preset 次第で変わり得る（ultrafast は
+    // Constrained Baseline になる）。指紋を安定させるため必ず明示する。
+    "-profile:v", "high",
+    "-pix_fmt", "yuv420p",
+    // 固定フレームレート(CFR 30)に正規化。配信側アダプティブが可変fpsにすると
+    // 再生不可/尺崩れになるため、ここで30fps一定に焼き直す。
+    "-r", "30",
+    "-vsync", "cfr",
+    "-video_track_timescale", SEG_TIMESCALE,
+    // ★色情報を明示的に固定する。省略すると入力のタグがそのまま伝播し、セグメント間で
+    //   SPS(VUI) が変わって -c copy 連結後に2本目以降の色が飛ぶことがある。端末が出す
+    //   H.264 は実質すべて bt709/limited なので、明示しても見え方は変わらない（タグ付けの
+    //   みで変換は起きない）。
+    "-color_range", "tv",
+    "-colorspace", "bt709",
+    "-color_primaries", "bt709",
+    "-color_trc", "bt709",
+    "-c:a", "aac",
+    "-b:a", AUDIO_BITRATE,
+    "-ar", "48000",
+    "-ac", "2",
+    "-max_muxing_queue_size", "1024",
+    // ★中間ファイルに +faststart は付けない。moov を先頭へ移すために数GBを丸ごと
+    //   書き直す処理がセグメント本数ぶん走るだけで、完全に無駄（最終 canonicalize では付ける）。
+    outPath,
+  ];
+}
+
 // 1セグメントにスコアボードを焼き込んだファイルパスを返す。イベント無し/失敗時は元(raw)。
 // workDir = このセグメント専用の一時ディレクトリ（中間生成物の置き場・呼び出し側で削除）。
 // idx = 同一配信内のセグメント番号（一時ファイル名の衝突回避用）。
 // events = 配信全体のスコアイベント（全セグメントで共有。区間は各ファイルの開始時刻で切る）。
 // 返り値 { path, scored } scored=true のとき path は焼き込み済みの中間ファイル。
-async function burnScoreboard(recPath, b, events, workDir, idx) {
+//
+// ★2026-08-12: 中身を buildOverlayAssets() に切り出した（挙動は一切変えていない）。
+//   単一セグメント配信は**従来どおりこの関数を通す**。ここで 1280x720 に落としてしまうと
+//   canonicalize の UPSCALE_1080（入力がちょうど1280x720のときだけ拡大）の判定を壊し、
+//   1080p素材が 1080→720→1080 の往復で劣化するため。
+//   複数セグメント配信は代わりに prepareSegment() を使う（連結可能な正規形を出す）。
+
+// スコアボードPNG列を concat デマクサ用のリストファイルにまとめる。
+// 得点数に依存しない1入力にするための下準備（PR #260 と同じ思想）。
+async function buildOverlayList(tmpdir, segs, pngs, w, h) {
+  const blankPng = path.join(tmpdir, "blank.png");
+  // 最初の得点までの区間は「完全に透明」を重ねる＝何も表示しない（旧方式と同じ見た目）
+  await spawnP("ffmpeg", [
+    "-y", "-f", "lavfi",
+    "-i", `color=c=black@0.0:s=${w}x${h}:d=0.1,format=rgba`,
+    "-frames:v", "1", blankPng,
+  ]);
+  const entries = [];
+  if (segs[0].s > 0.05) entries.push({ png: blankPng, dur: segs[0].s });
+  for (let i = 0; i < segs.length; i++) {
+    // 次の得点までを表示区間にする（イベント間に間が空いても直前の表示を維持＝旧方式と同じ）
+    const next = i + 1 < segs.length ? segs[i + 1].s : segs[i].e;
+    entries.push({ png: pngs[i], dur: Math.max(0.04, next - segs[i].s) });
+  }
+  const esc = (f) => f.replace(/'/g, "'\\''");
+  let list =
+    entries
+      .map((e) => `file '${esc(e.png)}'\nduration ${e.dur.toFixed(3)}`)
+      .join("\n") + "\n";
+  // ★末尾をもう一度書く: concat デマクサは最後の duration を無視するため、
+  //   これが無いと最後のスコアが一瞬で消える（デマクサの既知の仕様）。
+  list += `file '${esc(entries[entries.length - 1].png)}'\n`;
+  const listPath = path.join(tmpdir, "overlay.txt");
+  fs.writeFileSync(listPath, list);
+  return listPath;
+}
+
+// スコアボード焼き込みに必要な素材（表示区間・PNG・concatリスト）を用意する。
+// 返り値 null = オーバーレイ不要（イベント無し／duration不明／このセグメントに区間が無い）。
+// pr = probeOne() の結果（dur/w/h をここから取り、ffprobe の再実行をしない）。
+async function buildOverlayAssets(recPath, b, events, workDir, idx, pr) {
   if (!events || events.length === 0) {
     log(`seg${idx}: no score events -> raw`);
-    return { path: recPath, scored: false };
+    return null;
   }
-  const durationMs = (await ffprobeDurationSec(recPath)) * 1000;
+  const durationMs = pr.dur * 1000;
   if (!durationMs) {
     log(`seg${idx}: ffprobe duration 0 -> raw`);
-    return { path: recPath, scored: false };
+    return null;
   }
-  const { w, h } = await ffprobeWH(recPath);
+  const w = pr.w;
+  const h = pr.h;
   // 各セグメントは自身のファイル名から開始時刻を算出 → 再接続ギャップがあっても
   // 区間がそのセグメント内で正しく揃う（連結後に1回焼くとギャップ分ズレる）。
   const fileStartMs = recordingStartMs(recPath, b.started_at);
@@ -548,7 +767,7 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
   }
   if (segs.length === 0) {
     log(`seg${idx}: no score segments in range -> raw`);
-    return { path: recPath, scored: false };
+    return null;
   }
 
   // PNG/中間生成物はこのセグメント専用 workDir に置く（呼び出し側で一括削除）。
@@ -591,22 +810,36 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
     pngs.push(pngPath);
   }
 
-  const outPath = path.join(tmpdir, "scored.mp4");
+  // concat デマクサ用リスト。作成に失敗しても null にして旧N段 overlay へ倒す。
+  let listPath = null;
+  try {
+    listPath = await buildOverlayList(tmpdir, segs, pngs, w, h);
+  } catch (e) {
+    log(`seg${idx}: concat の準備に失敗 -> 旧方式: ${String(e).slice(0, 120)}`);
+  }
+  return { tmpdir, w, h, segs, pngs, listPath };
+}
 
-  // ★2026-08-11: メモリが得点イベント数に比例して増える問題を解消した。
-  //
-  // 【旧方式の問題】得点1件につき「フルスクリーンPNG1枚 + ffmpeg入力1本 + overlay1段」を
-  //   鎖状に繋いでいた。実測ピークRSS:
-  //       1件=184MB / 8件=259MB / 30件=488MB / 60件=861MB / **120件=1,428MB**
-  //   バレーのフルセット(100〜150点)や野球のB/S/O更新はこの危険域に入り、
-  //   `MemoryHigh=1200M` を超えて速度が落ちる。2GBのVPSでは MediaMTX と共倒れの圏内。
-  //   **全国大会のバレー決勝が、この箱で最も危険なジョブ形状**だった。
-  //
-  // 【新方式】concat デマクサで PNG を「1本の画像シーケンス入力」にまとめ、overlay も1段にする。
-  //   入力もフィルタも件数に依存しない＝**メモリがイベント数に依存しなくなる**。
-  //
-  // ★新方式が失敗したら旧方式で再試行し、それも失敗したら overlay 無しで正規化する。
-  //   **最悪でも現行と同じ挙動**に留める三段構え。
+// ★2026-08-11: メモリが得点イベント数に比例して増える問題を解消した。
+//
+// 【旧方式の問題】得点1件につき「フルスクリーンPNG1枚 + ffmpeg入力1本 + overlay1段」を
+//   鎖状に繋いでいた。実測ピークRSS:
+//       1件=184MB / 8件=259MB / 30件=488MB / 60件=861MB / **120件=1,428MB**
+//   バレーのフルセット(100〜150点)や野球のB/S/O更新はこの危険域に入り、
+//   `MemoryHigh=1200M` を超えて速度が落ちる。2GBのVPSでは MediaMTX と共倒れの圏内。
+//   **全国大会のバレー決勝が、この箱で最も危険なジョブ形状**だった。
+//
+// 【新方式】concat デマクサで PNG を「1本の画像シーケンス入力」にまとめ、overlay も1段にする。
+//   入力もフィルタも件数に依存しない＝**メモリがイベント数に依存しなくなる**。
+//
+// ★新方式が失敗したら旧方式で再試行し、それも失敗したら overlay 無しで正規化する。
+//   **最悪でも現行と同じ挙動**に留める三段構え。
+async function burnScoreboard(recPath, b, events, workDir, idx) {
+  const pr = await probeOne(recPath);
+  const ov = await buildOverlayAssets(recPath, b, events, workDir, idx, pr);
+  if (!ov) return { path: recPath, scored: false };
+  const { tmpdir, w, h, segs, pngs, listPath } = ov;
+  const outPath = path.join(tmpdir, "scored.mp4");
 
   // 共通の出力オプション（映像フィルタの出口ラベルは [vout] で統一）
   const tailArgs = [
@@ -645,52 +878,23 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
   };
 
   // 新方式: concat デマクサで1入力にまとめ、overlay は1段だけ
-  const buildConcat = async () => {
-    const blankPng = path.join(tmpdir, "blank.png");
-    // 最初の得点までの区間は「完全に透明」を重ねる＝何も表示しない（旧方式と同じ見た目）
-    await spawnP("ffmpeg", [
-      "-y", "-f", "lavfi",
-      "-i", `color=c=black@0.0:s=${w}x${h}:d=0.1,format=rgba`,
-      "-frames:v", "1", blankPng,
-    ]);
-    const entries = [];
-    if (segs[0].s > 0.05) entries.push({ png: blankPng, dur: segs[0].s });
-    for (let i = 0; i < segs.length; i++) {
-      // 次の得点までを表示区間にする（イベント間に間が空いても直前の表示を維持＝旧方式と同じ）
-      const next = i + 1 < segs.length ? segs[i + 1].s : segs[i].e;
-      entries.push({ png: pngs[i], dur: Math.max(0.04, next - segs[i].s) });
-    }
-    const esc = (f) => f.replace(/'/g, "'\\''");
-    let list = entries.map((e) => `file '${esc(e.png)}'\nduration ${e.dur.toFixed(3)}`).join("\n") + "\n";
-    // ★末尾をもう一度書く: concat デマクサは最後の duration を無視するため、
-    //   これが無いと最後のスコアが一瞬で消える（デマクサの既知の仕様）。
-    list += `file '${esc(entries[entries.length - 1].png)}'\n`;
-    const listPath = path.join(tmpdir, "overlay.txt");
-    fs.writeFileSync(listPath, list);
-    return [
-      "-y", "-i", recPath,
-      "-f", "concat", "-safe", "0", "-i", listPath,
-      "-filter_complex",
-      // shortest=1: 画像側が本編より長くても出力を伸ばさない
-      "[1:v]format=rgba,setpts=PTS-STARTPTS[ov];[0:v][ov]overlay=0:0:shortest=1[vout]",
-      ...tailArgs,
-    ];
-  };
+  const buildConcat = () => [
+    "-y", "-i", recPath,
+    "-f", "concat", "-safe", "0", "-i", listPath,
+    "-filter_complex",
+    // shortest=1: 画像側が本編より長くても出力を伸ばさない
+    "[1:v]format=rgba,setpts=PTS-STARTPTS[ov];[0:v][ov]overlay=0:0:shortest=1[vout]",
+    ...tailArgs,
+  ];
 
   log(
-    `seg${idx}: burning scoreboard SVG (${segs.length} score segments, ${w}x${h}, dur ${Math.round(durationMs / 1000)}s)`,
+    `seg${idx}: burning scoreboard SVG (${segs.length} score segments, ${w}x${h}, dur ${Math.round(pr.dur)}s)`,
   );
   try {
-    let concatArgs;
-    try {
-      concatArgs = await buildConcat();
-    } catch (e) {
-      log(`seg${idx}: concat の準備に失敗 -> 旧方式: ${String(e).slice(0, 120)}`);
-      concatArgs = null;
-    }
-    if (concatArgs) {
+    if (listPath) {
       try {
-        await ffmpegP(concatArgs);
+        await ffmpegP(buildConcat());
+        forgetProbe(outPath);
         return { path: outPath, scored: true };
       } catch (e) {
         // ★concat 方式が失敗しても、ここで諦めずに旧方式で焼き直す。
@@ -699,6 +903,7 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
       }
     }
     await ffmpegP(buildChained());
+    forgetProbe(outPath);
     return { path: outPath, scored: true };
   } catch (e) {
     // 焼き込み失敗（短い断片のPNG生成失敗等）でも、生のまま返さず必ず canonical に正規化する。
@@ -714,32 +919,286 @@ async function burnScoreboard(recPath, b, events, workDir, idx) {
       "-movflags", "+faststart",
       outPath,
     ]);
+    forgetProbe(outPath);
     return { path: outPath, scored: false };
   }
 }
 
-// 複数の mp4 を1本に連結する。各入力を独立にデコード→正規化(1280x720/30fps/yuv420p/SAR1/
-// 48kHz)→concatフィルタで再タイムして再エンコードする。
-// ★ -c copy も concat demuxer も使わない：パラメータ/タイムスタンプ不一致で尺が打ち切られる
-//   （25分が4秒に切れる事象）。filter_complex は各入力を独立にデコードして連結するので、
-//   別々にエンコードされたセグメントでも崩れない。極小/壊れた断片は呼び出し側(3-2)で除外済み。
-async function concatSegments(paths, workDir) {
-  const outPath = path.join(workDir, "concat.mp4");
-
-  // ★ 各セグメントの音声有無を事前に調べる。4G再接続や着信で「音声トラックが無い
-  //   セグメント」が混ざると、全入力に [i:a:0] を要求する連結は ffmpeg が
-  //   「Stream specifier :a:0 matches no streams」で全失敗→アーカイブ0本になる。
-  //   音声が有るセグメントの音声は保持しつつ、欠落セグメントだけ無音(anullsrc)で
-  //   補って連結を必ず成立させる（全セグメント音声有りなら従来と同一グラフ）。
-  const meta = [];
-  for (const p of paths) {
-    meta.push({
-      p,
-      hasAudio: await ffprobeHasAudio(p),
-      hasVideo: await ffprobeHasVideo(p),
-      dur: await ffprobeDurationSec(p),
-    });
+// ★2026-08-12 追加: 複数セグメント配信用の「1セグメント = ffmpeg 1本」処理。
+//
+// burnScoreboard との違いは**出力を必ず連結可能な正規形にする**ことだけ。
+//   ・1280x720 / SAR 1:1 / yuv420p / H.264 High / CFR30 / bt709 に揃える
+//   ・音声が無いセグメントは anullsrc で無音を合成し、**必ず音声トラックを持たせる**
+//   ・生(raw)のパスは絶対に返さない（旧 burnScoreboard の raw 復帰口3つを塞ぐ）
+// これで全セグメントの指紋が一致し、連結を -c copy（メモリO(1)）にできる。
+// ★焼き込みONの経路では**追加のエンコードパスはゼロ**。元々1本ずつ再エンコードしており、
+//   出力条件を足しただけだから。むしろ連結の全長1パスが消えて速くなる。
+//
+// 返り値: 正規形mp4のパス / null = 映像が無いので連結に混ぜない。
+async function prepareSegment(recPath, b, events, workDir, idx, pr) {
+  // 【退行防止2】映像が無いセグメントは除外する。混ざると [i:v:0] が
+  //   "matches no streams" になり全失敗＝アーカイブ0本になる（三重防御の2枚目）。
+  if (!pr.hasVideo) {
+    log(`seg${idx}: no video stream -> excluded from concat`);
+    return null;
   }
+  const tmpdir = path.join(workDir, `seg${idx}`);
+  fs.mkdirSync(tmpdir, { recursive: true });
+  const outPath = path.join(tmpdir, "seg.mp4");
+  const ov = await buildOverlayAssets(recPath, b, events, workDir, idx, pr);
+
+  // 【退行防止1】音声が無いセグメント（4G再接続や着信で実発生）は無音を合成して補う。
+  //   これが無いと連結で「Stream specifier :a:0 matches no streams」→全失敗になる。
+  const silArgs = pr.hasAudio
+    ? []
+    : [
+        "-f", "lavfi",
+        "-t", (pr.dur > 0 ? pr.dur : 1).toFixed(3),
+        "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+      ];
+  // 【退行防止4】解像度が途中で変わる配信（再接続）でも 1280x720 に揃える。
+  //   既に 1280x720 なら scale を挟まない（無駄な再サンプルを避ける）。
+  const sc =
+    pr.w === SEG_W && pr.h === SEG_H
+      ? ""
+      : `scale=${SEG_W}:${SEG_H}:flags=lanczos,`;
+  // 音声も filter_complex 側で処理する。
+  // ★-af（簡易フィルタ）は filter_complex が供給するストリームには使えないため、
+  //   グラフに含めて出口ラベルを [aout] に統一する。
+  // ★first_pts=0 が重要: 音声の開始位置を必ず0に揃えないと、-c copy 連結で
+  //   セグメント境界に音ズレが持ち込まれる。async=1 は着信等の無音区間も吸収する。
+  const aFilter = (src) =>
+    `[${src}]aresample=48000:async=1:first_pts=0[aout]`;
+
+  // 段1: overlay を1入力(画像列)にまとめる＝メモリが得点数に依存しない
+  const argsConcatOv = () => {
+    const aSrc = pr.hasAudio ? "0:a:0" : "2:a:0"; // 0=録画 1=画像列 2=無音
+    return [
+      "-y",
+      "-i", recPath,
+      "-f", "concat", "-safe", "0", "-i", ov.listPath,
+      ...silArgs,
+      "-filter_complex",
+      `[1:v]format=rgba,setpts=PTS-STARTPTS[ov];[0:v][ov]overlay=0:0:shortest=1,${sc}setsar=1,format=yuv420p[vout];${aFilter(aSrc)}`,
+      "-map", "[vout]",
+      "-map", "[aout]",
+      ...segTailArgs(outPath),
+    ];
+  };
+  // 段2: 旧N段 overlay（段1が壊れてもスコアボードを消さないための保険）
+  const argsChainedOv = () => {
+    const ins = ["-i", recPath];
+    ov.pngs.forEach((q) => ins.push("-i", q));
+    ins.push(...silArgs);
+    const aSrc = pr.hasAudio ? "0:a:0" : `${1 + ov.pngs.length}:a:0`;
+    let fc = "";
+    let cur = "0:v";
+    ov.segs.forEach((seg, i) => {
+      fc += `[${cur}][${i + 1}:v]overlay=0:0:enable='between(t,${seg.s.toFixed(2)},${seg.e.toFixed(2)})'[ovl${i}];`;
+      cur = `ovl${i}`;
+    });
+    fc += `[${cur}]${sc}setsar=1,format=yuv420p[vout];${aFilter(aSrc)}`;
+    return [
+      "-y", ...ins,
+      "-filter_complex", fc,
+      "-map", "[vout]",
+      "-map", "[aout]",
+      ...segTailArgs(outPath),
+    ];
+  };
+  // 段3: overlay 無し。★それでも必ず正規形にする（生では返さない）
+  const argsPlain = () => {
+    const aSrc = pr.hasAudio ? "0:a:0" : "1:a:0";
+    return [
+      "-y",
+      "-i", recPath,
+      ...silArgs,
+      "-filter_complex",
+      `[0:v]${sc}setsar=1,format=yuv420p[vout];${aFilter(aSrc)}`,
+      "-map", "[vout]",
+      "-map", "[aout]",
+      ...segTailArgs(outPath),
+    ];
+  };
+
+  const attempts = [];
+  if (ov && ov.listPath) attempts.push(["concat overlay", argsConcatOv]);
+  if (ov) attempts.push(["chained overlay", argsChainedOv]);
+  attempts.push(["no overlay", argsPlain]);
+  if (ov) {
+    log(
+      `seg${idx}: burning scoreboard SVG (${ov.segs.length} score segments, ${ov.w}x${ov.h}, dur ${Math.round(pr.dur)}s)`,
+    );
+  }
+
+  for (let k = 0; k < attempts.length; k++) {
+    try {
+      await ffmpegP(attempts[k][1]());
+      forgetProbe(outPath);
+      CANON.add(outPath); // ★自前で作った正規形だけを copy 許可リストに載せる
+      return outPath;
+    } catch (e) {
+      if (k === attempts.length - 1) throw e; // 全段だめなら呼び出し側で raw に倒す
+      log(
+        `seg${idx}: ${attempts[k][0]} 失敗 -> ${attempts[k + 1][0]} で再試行: ${String(e).slice(0, 120)}`,
+      );
+    }
+  }
+  return outPath; // 到達しない（ループ内で必ず return か throw）
+}
+
+// ===== 連結 =====
+
+// 連結結果の健全性チェック（fail-closed の要）。
+// 尺が入力合計から外れていたら例外にして次のフォールバック段へ落とす。
+// ★「25分が4秒に切れる」型の事故は、必ずここで捕まる。
+async function assertSane(outPath, expectedSec) {
+  forgetProbe(outPath);
+  const m = await probeOne(outPath);
+  if (!m.hasVideo) throw new Error("assertSane: 出力に映像トラックが無い");
+  if (!m.hasAudio) throw new Error("assertSane: 出力に音声トラックが無い");
+  if (!(m.dur > 0)) throw new Error("assertSane: 出力の尺が0");
+  if (expectedSec > 0) {
+    const ratio = m.dur / expectedSec;
+    // 下限98%: 途中で打ち切られた連結を弾く。
+    // 上限103%: セグメント境界ごとに最大1音声フレーム(21ms)の隙間が積む可能性を許容する
+    //           （131本で最大約2.8秒＝0.07%。最終 canonicalize の -vsync cfr が吸収する）。
+    if (ratio < 0.98 || ratio > 1.03) {
+      throw new Error(
+        `assertSane: 尺が想定外 ${m.dur.toFixed(1)}s / 期待 ${expectedSec.toFixed(1)}s (${(ratio * 100).toFixed(1)}%)`,
+      );
+    }
+  }
+  return m;
+}
+
+// concat デマクサ + -c copy で連結する。**デコードしないのでメモリはO(1)・CPUはほぼ0**。
+// ★呼び出し側で「全入力が自前生成の正規形かつ指紋一致」を確認済みのときだけ使うこと。
+async function copyConcat(paths, workDir, tag) {
+  const listPath = path.join(workDir, `concat_${tag}.txt`);
+  const esc = (f) => f.replace(/'/g, "'\\''");
+  fs.writeFileSync(listPath, paths.map((p) => `file '${esc(p)}'`).join("\n") + "\n");
+  const outPath = path.join(workDir, `concat_${tag}.mp4`);
+  await ffmpegP([
+    "-y",
+    "-f", "concat", "-safe", "0",
+    "-i", listPath,
+    // ストリーム選択を明示（各入力は映像1+音声1に正規化済み）。
+    "-map", "0:v:0",
+    "-map", "0:a:0",
+    "-c", "copy",
+    // ★中間なので +faststart は付けない（数GBの全書き直しを避ける）。
+    outPath,
+  ]);
+  forgetProbe(outPath);
+  CANON.add(outPath);
+  return outPath;
+}
+
+// 1本を正規形へ焼き直す（フォールバック段2用・ffmpegは常に1本だけ立つ）。
+// 失敗したら元のパスを返し、段3の filter_complex に処理を委ねる。
+async function normalizeOne(m, workDir, tag) {
+  const dir = path.join(workDir, `norm_${tag}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const outPath = path.join(dir, "n.mp4");
+  const ins = ["-fflags", "+genpts", "-i", m.p];
+  if (!m.hasAudio) {
+    ins.push(
+      "-f", "lavfi",
+      "-t", (m.dur > 0 ? m.dur : 1).toFixed(3),
+      "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+    );
+  }
+  const aSrc = m.hasAudio ? "0:a:0" : "1:a:0";
+  const sc =
+    m.w === SEG_W && m.h === SEG_H ? "" : `scale=${SEG_W}:${SEG_H}:flags=lanczos,`;
+  try {
+    await ffmpegP([
+      "-y", ...ins,
+      "-filter_complex",
+      `[0:v]${sc}setsar=1,format=yuv420p[vout];[${aSrc}]aresample=48000:async=1:first_pts=0[aout]`,
+      "-map", "[vout]",
+      "-map", "[aout]",
+      ...segTailArgs(outPath),
+    ]);
+    forgetProbe(outPath);
+    CANON.add(outPath);
+    return outPath;
+  } catch (e) {
+    log(`concat: 正規化失敗 -> そのまま次段へ: ${String(e).slice(0, 120)}`);
+    return m.p;
+  }
+}
+
+// 旧来の filter_complex 連結（各入力を独立にデコード→正規化→concat して再エンコード）。
+// ★これがメモリを食う張本人（実測 約22MB/入力）。**必ず少数本ずつ**呼ぶこと。
+//   131本を一度に渡すと 3.1GB を要求して OOM する（2026-08-12 実障害）。
+async function filterComplexConcat(paths, workDir, tag) {
+  const outPath = path.join(workDir, `fc_${tag}.mp4`);
+  const meta = [];
+  for (const p of paths) meta.push(await probeOne(p));
+  // ★ 三重防御の3枚目: 映像の無い入力は除外（[i:v:0] が "matches no streams" になる）。
+  const usable = meta.filter((m) => m.hasVideo);
+  if (usable.length === 0) throw new Error("concat: no input has a video stream");
+  if (usable.length === 1) return usable[0].p;
+
+  const inputs = [];
+  usable.forEach((m) => inputs.push("-i", m.p)); // 入力 0..N-1 = 実セグメント
+  // 音声欠落セグメント用の無音入力を後ろに足す（各セグメント尺に合わせる）。
+  const silenceIdx = {};
+  let nextIdx = usable.length;
+  usable.forEach((m, i) => {
+    if (!m.hasAudio) {
+      const d = m.dur > 0 ? m.dur : 1;
+      inputs.push(
+        "-f", "lavfi",
+        "-t", d.toFixed(3),
+        "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+      );
+      silenceIdx[i] = nextIdx;
+      nextIdx += 1;
+    }
+  });
+
+  let fc = "";
+  usable.forEach((m, i) => {
+    fc += `[${i}:v:0]scale=${SEG_W}:${SEG_H},fps=30,format=yuv420p,setsar=1[v${i}];`;
+    const aSrc = m.hasAudio ? `${i}:a:0` : `${silenceIdx[i]}:a:0`;
+    fc += `[${aSrc}]aresample=48000:async=1:first_pts=0[a${i}];`;
+  });
+  fc +=
+    usable.map((_, i) => `[v${i}][a${i}]`).join("") +
+    `concat=n=${usable.length}:v=1:a=1[v][a]`;
+  await ffmpegP([
+    "-y",
+    ...inputs,
+    "-filter_complex", fc,
+    "-map", "[v]",
+    "-map", "[a]",
+    ...segTailArgs(outPath),
+  ]);
+  forgetProbe(outPath);
+  CANON.add(outPath); // 同じ設定で焼いた＝正規形。以降の段は copy で繋げる。
+  return outPath;
+}
+
+// 複数の mp4 を1本に連結する。
+//
+// ★2026-08-12 全面改稿。旧実装は**全セグメントを -i で同時入力**して filter_complex の
+//   中で正規化しながら連結していたため、メモリ・CPU がセグメント本数に比例した
+//   （131本 = 3.1GB要求 / load 176 / 2時間37分かけて OOM・5回連続失敗）。
+//   正規化を prepareSegment（1本ずつ）へ移したので、ここは基本 -c copy で済む。
+//
+// フォールバックは4段。**どの段も ffmpeg の入力本数が有界**なのが要点。
+//   段1: concat デマクサ + -c copy（全入力が自前生成の正規形かつ指紋一致のときだけ）
+//   段2: 揃っていないものだけ1本ずつ正規形へ焼き直し、もう一度 copy
+//   段3: filter_complex 連結を CONCAT_CHUNK(既定8)本ずつ・木構造で
+//   段4: 入力が CONCAT_FULL_FC_MAX(既定12)本以下のときだけ、旧実装そのまま(全入力一括)
+//        ※12本超で全部乗せは OOM が確実なので試さず例外＝retry に倒す（fail-closed）
+async function concatSegments(paths, workDir) {
+  const meta = [];
+  for (const p of paths) meta.push(await probeOne(p));
+
   // ★ 二重防御: 映像の無い入力は連結から除外する（[i:v:0] が "matches no streams"
   //   で全失敗するため）。呼び出し側(3-2)で除外済みのはずだが、焼き込みのフォール
   //   バック等で audio-only の中間ファイルが紛れる経路に備える。
@@ -754,54 +1213,112 @@ async function concatSegments(paths, workDir) {
   if (usable.length === 1) {
     return usable[0].p; // 1本だけ残ったら連結不要
   }
-  meta.length = 0;
-  meta.push(...usable);
-  paths = usable.map((m) => m.p);
+  const expectedSec = usable.reduce((s, m) => s + (m.dur > 0 ? m.dur : 0), 0);
 
-  const inputs = [];
-  meta.forEach((m) => inputs.push("-i", m.p)); // 入力 0..N-1 = 実セグメント
-  // 音声欠落セグメント用の無音入力を後ろに足す（各セグメント尺に合わせる）。
-  const silenceIdx = {};
-  let nextIdx = paths.length;
-  meta.forEach((m, i) => {
-    if (!m.hasAudio) {
-      const d = m.dur > 0 ? m.dur : 1;
-      inputs.push(
-        "-f", "lavfi",
-        "-t", d.toFixed(3),
-        "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-      );
-      silenceIdx[i] = nextIdx;
-      nextIdx += 1;
+  // ── 段1: 全部が正規形なら -c copy（デコード無し・メモリO(1)）────────────
+  if (CONCAT_COPY_ENABLED) {
+    const ref = segSignature(usable[0]);
+    const copyable =
+      usable.every(isCanonicalForm) &&
+      usable.every((m) => segSignature(m) === ref);
+    if (copyable) {
+      try {
+        const out = await copyConcat(usable.map((m) => m.p), workDir, "copy");
+        await assertSane(out, expectedSec);
+        log(`concat: ${usable.length}本を -c copy で連結（再エンコード無し）`);
+        return out;
+      } catch (e) {
+        log(`concat: copy失敗 -> 逐次正規化: ${String(e).slice(0, 160)}`);
+      }
+    } else {
+      log(`concat: 正規形が揃っていない -> 1本ずつ正規化してから copy`);
     }
-  });
+  }
 
-  let fc = "";
-  meta.forEach((m, i) => {
-    fc += `[${i}:v:0]scale=1280:720,fps=30,format=yuv420p,setsar=1[v${i}];`;
-    const aSrc = m.hasAudio ? `${i}:a:0` : `${silenceIdx[i]}:a:0`;
-    fc += `[${aSrc}]aresample=48000:async=1:first_pts=0[a${i}];`;
-  });
-  const cat = paths.map((_, i) => `[v${i}][a${i}]`).join("");
-  fc += `${cat}concat=n=${paths.length}:v=1:a=1[v][a]`;
-  await ffmpegP([
-    "-y",
-    ...inputs,
-    "-filter_complex", fc,
-    "-map", "[v]",
-    "-map", "[a]",
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    // 連結は中間工程＝ほぼ無劣化で通し、圧縮は最終 canonicalize に一任する。
-    "-crf", CRF_INTERMEDIATE,
-    "-pix_fmt", "yuv420p",
-    "-r", "30",
-    "-c:a", "aac",
-    "-b:a", AUDIO_BITRATE,
-    "-movflags", "+faststart",
-    outPath,
-  ]);
-  return outPath;
+  // ── 段2: 揃っていないものだけ1本ずつ正規化して、もう一度 copy ──────────
+  const fixed = [];
+  for (let i = 0; i < usable.length; i++) {
+    const m = usable[i];
+    fixed.push(isCanonicalForm(m) ? m.p : await normalizeOne(m, workDir, `${i}`));
+  }
+  if (CONCAT_COPY_ENABLED) {
+    const fixedMeta = [];
+    for (const p of fixed) fixedMeta.push(await probeOne(p));
+    const ref2 = segSignature(fixedMeta[0]);
+    const uniform =
+      fixedMeta.every(isCanonicalForm) &&
+      fixedMeta.every((m) => segSignature(m) === ref2);
+    if (uniform) {
+      try {
+        const out = await copyConcat(fixed, workDir, "copy2");
+        await assertSane(out, expectedSec);
+        log(`concat: 正規化後に -c copy で連結（${fixed.length}本）`);
+        return out;
+      } catch (e) {
+        log(`concat: 正規化後もcopy失敗 -> 分割filter_complex: ${String(e).slice(0, 160)}`);
+      }
+    } else {
+      log("concat: 正規化しても指紋が揃わない -> 分割filter_complex");
+    }
+  }
+
+  // ── 段3: filter_complex を少数本ずつ・木構造で（メモリを本数から切り離す）──
+  try {
+    let level = fixed;
+    let round = 0;
+    while (level.length > 1) {
+      const next = [];
+      for (let i = 0; i < level.length; i += CONCAT_CHUNK) {
+        const group = level.slice(i, i + CONCAT_CHUNK);
+        next.push(
+          group.length === 1
+            ? group[0]
+            : await filterComplexConcat(group, workDir, `L${round}_${i}`),
+        );
+      }
+      level = next;
+      round += 1;
+      // このラウンドの出力は全て同じ設定で焼いた正規形なので、残りは copy で繋げる
+      // （木を上まで登ると全長の再エンコードが何度も走ってしまうため）。
+      // ★ただし段1・段2と同じ検査を必ず通す。1グループ＝1本だった入力は
+      //   filterComplexConcat を通らず素通しで level に残るため、生の録画が
+      //   混ざりうる。無検査で -c copy すると「25分の試合が4秒で終わっている」
+      //   類の破損を作る（過去に実損あり）。ここだけ検査を省いてはいけない。
+      if (level.length > 1 && CONCAT_COPY_ENABLED) {
+        const lvMeta = [];
+        for (const p of level) lvMeta.push(await probeOne(p));
+        const lvRef = segSignature(lvMeta[0]);
+        const lvCopyable =
+          lvMeta.every(isCanonicalForm) &&
+          lvMeta.every((m) => segSignature(m) === lvRef);
+        if (!lvCopyable) {
+          log("concat: 中間copyの前提が揃っていない -> さらに分割");
+          continue;
+        }
+        try {
+          const out = await copyConcat(level, workDir, `r${round}`);
+          await assertSane(out, expectedSec);
+          log(`concat: 分割連結(${round}段) -> 残りを -c copy で結合`);
+          return out;
+        } catch (e) {
+          log(`concat: 中間copy失敗 -> さらに分割: ${String(e).slice(0, 120)}`);
+        }
+      }
+    }
+    const out = level[0];
+    await assertSane(out, expectedSec);
+    return out;
+  } catch (e) {
+    log(`concat: 分割filter_complex失敗: ${String(e).slice(0, 160)}`);
+    // ── 段4: 少数本なら旧実装そのまま（全入力一括）を最後に1回だけ試す ────
+    if (fixed.length <= CONCAT_FULL_FC_MAX) {
+      log(`concat: ${fixed.length}本なので旧実装(全入力一括)で最終試行`);
+      return await filterComplexConcat(fixed, workDir, "legacy");
+    }
+    // ★12本超で全部乗せは OOM が確実。壊れた動画を上げて元録画を消す事故を防ぐため
+    //   ここで諦めて例外にする（pending/retry に倒れ、録画は残る）。
+    throw e;
+  }
 }
 
 // ★ アップロード直前に必ず通す「YouTube安全化」正規化。
@@ -810,7 +1327,11 @@ async function concatSegments(paths, workDir) {
 // でした）」で再生不可になる。raw/焼き込み/連結いずれの結果でも最終的に
 // CFR30・H.264 High・yuv420p・AAC48k/2ch・faststart・PTS再生成 に揃える。
 // 音声が無い録画でも落ちないよう、音声トラックがある時だけ音声処理を付ける。
-async function canonicalize(inputPath, outPath) {
+// ★2026-08-12: opts.allowUpscale を追加。**エンコード条件は1文字も変えていない**。
+//   1080p拡大を「するかどうか」の判定にだけ効く。長尺で TimeoutStartSec=3h に
+//   負けないための安全弁（呼び出し側が UPSCALE_MAX_SEC を見て渡す）。
+async function canonicalize(inputPath, outPath, opts = {}) {
+  const allowUpscale = opts.allowUpscale !== false;
   const hasAudio = await ffprobeHasAudio(inputPath);
   // UPSCALE_1080: 入力（burn/concat 出力または raw）が正確に 1280x720 と実測できた
   // ときだけ 1920x1080 へアップスケール（YouTube の 1080p ティアは 720p より割当
@@ -819,7 +1340,7 @@ async function canonicalize(inputPath, outPath) {
   // probe 失敗（フォールバック値でも w/h は 1280x720 になるが、その場合は実測
   // 720p と区別できないだけで拡大しても無害）や 720p 以外は既存の偶数化 vf を維持。
   let vf = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
-  if (UPSCALE_1080) {
+  if (UPSCALE_1080 && allowUpscale) {
     const { w, h } = await ffprobeWH(inputPath);
     if (w === 1280 && h === 720) {
       vf = "scale=1920:1080:flags=lanczos,setsar=1";
@@ -858,6 +1379,35 @@ async function canonicalize(inputPath, outPath) {
 
 async function setStatus(id, fields) {
   await admin.from("broadcasts").update(fields).eq("id", id);
+}
+
+// 連結が終わった直後に、もう使わない中間生成物を消す（2026-08-12 追加）。
+// 中間セグメント131本(約4.5GB) + 連結結果(約4.5GB) + 最終出力(約2.5GB) が同時に
+// 存在すると /var/tmp のピークが11.5GBになる。連結後にセグメントを消せば約7GBに収まり、
+// 同一FSで動く MediaMTX の録画書き込みを圧迫しない。
+// ★keepPath（＝連結結果）を含むディレクトリは絶対に消さない。
+function pruneIntermediates(workDir, keepPath) {
+  let names;
+  try {
+    names = fs.readdirSync(workDir);
+  } catch {
+    return;
+  }
+  let removed = 0;
+  for (const n of names) {
+    const isSegDir = /^seg\d+$/.test(n) || /^norm_/.test(n);
+    const isChunkFile = /^(fc_|concat_)/.test(n);
+    if (!isSegDir && !isChunkFile) continue;
+    const full = path.join(workDir, n);
+    if (keepPath === full || keepPath.startsWith(full + path.sep)) continue;
+    try {
+      fs.rmSync(full, { recursive: true, force: true });
+      removed += 1;
+    } catch {
+      /* 消せなければ finally の rmSync に任せる */
+    }
+  }
+  if (removed > 0) log(`pruned ${removed} intermediate item(s) before canonicalize`);
 }
 
 // SIGKILL（Timeout等）で finally が走らなかった過去実行の残骸を掃除する。
@@ -1344,11 +1894,10 @@ async function main() {
     const MIN_SEG_SEC = 5;
     const withMeta = [];
     for (const r of recs) {
-      withMeta.push({
-        r,
-        d: await ffprobeDurationSec(r.p).catch(() => 0),
-        hasVideo: await ffprobeHasVideo(r.p),
-      });
+      // ★probeOne は1ファイル1回だけ ffprobe を起動し、結果をキャッシュして
+      //   焼き込み・連結でも使い回す（旧: 1セグメントあたり7回起動＝131本で約900プロセス）。
+      const pr = await probeOne(r.p);
+      withMeta.push({ r, d: pr.dur, hasVideo: pr.hasVideo });
     }
     videoTotalSec = withMeta
       .filter((x) => x.hasVideo)
@@ -1536,20 +2085,48 @@ async function main() {
 
     // ③ 各セグメントに個別にスコアボードを焼く（再接続ギャップで時刻がズレないよう必須）。
     //    焼き込み失敗時はそのセグメントだけ生のまま使う（raw fallback）。
+    //
+    // ★2026-08-12: 複数セグメントのときは prepareSegment を使い、焼き込みと同時に
+    //   「連結可能な正規形」まで揃える。これで連結が -c copy になり、メモリが
+    //   セグメント本数に依存しなくなる（131本で3.1GB要求→OOM していた問題の根治）。
+    //   単一セグメントは従来どおり burnScoreboard（720pへ落とすと canonicalize の
+    //   UPSCALE_1080 判定を壊し、1080p素材が往復して劣化するため）。
+    const useNormalizedSegments = SEGMENT_NORMALIZE_ENABLED && recs.length > 1;
     const segPaths = [];
     for (let i = 0; i < recs.length; i++) {
-      let segPath = recs[i].p;
+      const pr = await probeOne(recs[i].p);
+      if (!useNormalizedSegments) {
+        let segPath = recs[i].p;
+        try {
+          const burned = await burnScoreboard(recs[i].p, b, events, workDir, i);
+          segPath = burned.path;
+        } catch (e) {
+          log(
+            `seg${i}: scoreboard burn failed -> raw segment:`,
+            String(e).slice(0, 200),
+          );
+          segPath = recs[i].p;
+        }
+        segPaths.push(segPath);
+        continue;
+      }
       try {
-        const burned = await burnScoreboard(recs[i].p, b, events, workDir, i);
-        segPath = burned.path;
+        const out = await prepareSegment(recs[i].p, b, events, workDir, i, pr);
+        // null = 映像が無いセグメント。連結に混ぜない（三重防御の2枚目）。
+        if (out) segPaths.push(out);
       } catch (e) {
+        // 全段だめだったセグメントだけ生のまま渡す。連結側が段2で正規化を試みる。
         log(
           `seg${i}: scoreboard burn failed -> raw segment:`,
           String(e).slice(0, 200),
         );
-        segPath = recs[i].p;
+        segPaths.push(recs[i].p);
       }
-      segPaths.push(segPath);
+    }
+    if (segPaths.length === 0) {
+      // 3-2 で映像ありを保証しているので通常は起きない。起きたら壊れた動画を
+      // 上げずに例外へ倒す（fail-closed・元録画は残る）。
+      throw new Error("no usable segment after preparation");
     }
 
     // 全セグメントを1本に連結（単一ファイルなら無駄なconcatを避けてそのまま）。
@@ -1563,6 +2140,9 @@ async function main() {
       log(
         `${segPaths.length} segments concatenated, total ${totalSec}s`,
       );
+      // ★連結が終わればセグメント中間ファイルは不要。canonicalize に入る前に消して
+      //   /var/tmp のピークを約4.5GB下げる（中間131本＋連結＋最終が同居しないようにする）。
+      pruneIntermediates(workDir, finalPath);
     }
 
     // ★ アップ直前に必ず YouTube 安全プロファイルへ正規化（可変fps録画の
@@ -1570,7 +2150,18 @@ async function main() {
     //   （壊れた動画を作って元録画を消す事故を防ぐ）。
     let uploadPath;
     try {
-      uploadPath = await canonicalize(finalPath, path.join(workDir, "final.mp4"));
+      // ★長尺は 1080p 拡大を見送る（画質より完走を優先）。拡大ありの最終正規化は
+      //   実時間の約1.7倍かかるため、3時間級では TimeoutStartSec=3h に負ける。
+      //   videoTotalSec が 0/NaN（ffprobe全滅）なら比較が false ＝従来どおり拡大する。
+      const allowUpscale = !(videoTotalSec > UPSCALE_MAX_SEC);
+      if (!allowUpscale && UPSCALE_1080) {
+        log(
+          `long recording (${Math.round(videoTotalSec / 60)}min > ${Math.round(UPSCALE_MAX_SEC / 60)}min) -> skipping 1080p upscale to finish in time`,
+        );
+      }
+      uploadPath = await canonicalize(finalPath, path.join(workDir, "final.mp4"), {
+        allowUpscale,
+      });
     } catch (e) {
       throw new Error(`canonicalize failed: ${String(e).slice(0, 200)}`);
     }
