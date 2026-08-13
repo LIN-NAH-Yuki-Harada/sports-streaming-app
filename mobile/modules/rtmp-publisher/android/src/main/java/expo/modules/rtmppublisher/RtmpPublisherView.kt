@@ -92,6 +92,8 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
   private var appliedTotalBitrate = 0
   /** 混雑を検知しなかった連続秒数（上げる判断に使う）。 */
   private var calmTicks = 0
+  // 配信開始からの経過 tick（＝秒）。開始直後の一時的な滞留で画質を落とさないための助走に使う。
+  private var adaptTicks = 0
   /** 直前 tick までの累計ドロップ数（この1秒で増えたか＝実際にコマを捨てたかの判定に使う）。 */
   private var lastDroppedFrames = 0L
   /** 診断用: 降格した回数と、配信中に到達した最低映像ビットレート。 */
@@ -416,6 +418,7 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     targetTotalBitrate = maxTotalBitrate
     appliedTotalBitrate = 0 // 0 = 未適用。配信開始後の最初の tick で必ず上限を適用し直す
     calmTicks = 0
+    adaptTicks = 0
     lastDroppedFrames = 0L
     bitrateDownCount = 0
     lowestVideoBitrate = 0
@@ -448,10 +451,24 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     items: Int,
     droppedDelta: Long,
   ): Boolean {
+    adaptTicks++
+    // ★開始直後は降格しない（助走）。TCP のスロースタートと最初のキーフレーム送出で
+    //   キューは一時的に膨らむが、これは回線が細いのではなく「立ち上がり」でしかない。
+    //   ここで降格すると、視聴者が入ってくる一番大事な最初の十数秒が半分の画質になる。
+    //   キューは 2.5 秒ぶんあるので、2 tick 待っても MediaMTX の 5 秒閾値には届かない。
+    val warmingUp = adaptTicks <= STARTUP_GRACE_TICKS
+    // ★1 tick 目の droppedDelta は使わない。ライブラリのドロップ累計が stop→start で
+    //   リセットされる保証が無く、前回配信ぶんを「今の混雑」と誤認しうるため。
+    val dropSignal = if (adaptTicks <= 1) false else droppedDelta > 0
     // 実際にコマを捨てた ＝ 疑いようのない混雑。1 秒に 1 回のサンプリングでは
     // キューが溜まって捌けた瞬間を取りこぼすことがあるため、この signal も併用する。
-    val congested = items >= congestionItems() || droppedDelta > 0
+    val congested = items >= congestionItems() || dropSignal
     if (maxTotalBitrate <= 0) return congested
+    // 助走中は「混雑している」と報告だけして、目標値には手を触れない。
+    if (warmingUp && congested) {
+      calmTicks = 0
+      return true
+    }
 
     val minTotal = MIN_VIDEO_BITRATE + audioBitrate
     var next = targetTotalBitrate
@@ -728,6 +745,9 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     private const val BITRATE_INCREASE_FACTOR = 1.15
     // 上げるまでに必要な「混雑なし」の連続 tick 数（onNewBitrate は毎秒 ＝ 3 秒）。
     private const val RECOVERY_CALM_TICKS = 3
+    // 配信開始からこの tick 数(=秒)のあいだは降格しない。TCP スロースタートが終わるのに
+    // 十分で、かつキュー 2.5 秒ぶんがあるので録画リセット(5秒)には届かない。
+    private const val STARTUP_GRACE_TICKS = 2
     // prepareAudio(48_000, ...) と一致させること（音声フレーム/秒の算出に使う）。
     private const val AUDIO_SAMPLE_RATE = 48_000
     // AAC-LC は 1 フレーム = 1024 サンプル固定（48000 ÷ 1024 = 46.875 フレーム/秒）。
