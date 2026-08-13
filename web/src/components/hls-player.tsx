@@ -361,10 +361,45 @@ export function HlsPlayer({ src }: { src: string }) {
           !switchedToHlsJs &&
           video.error?.code === MEDIA_ERR_SRC_NOT_SUPPORTED
         ) {
-          switchedToHlsJs = true;
-          detachNative?.();
-          clearTimers();
-          startHlsJs(true); // ネイティブが汚したキャッシュを迂回する
+          // ★ここで即座に切り替えてはいけない。
+          //   Safari(WebKit) は「本当に非対応」のときだけでなく、
+          //     ①配信がまだ始まっていない（m3u8 が 404）
+          //     ②サーバーが一瞬エラーを返した
+          //     ③電波が悪くて取得できない
+          //   のいずれでも **同じ code 4** を返す（実測: 3件中3件）。
+          //   見分けずに切り替えると、体育館で電波が一瞬切れただけで
+          //   iPhone の視聴者が片道で別経路に移され、iOS 17.1 未満の端末では
+          //   そのまま永久エラーになる。現状は3秒ごとに自動復帰するので明確な後退。
+          //   → **プレイリストが実際に取れるか**を1回確かめ、
+          //     「取れているのに再生できない」＝本当に非対応、のときだけ切り替える。
+          void (async () => {
+            let genuinelyUnsupported = false;
+            try {
+              const res = await fetch(src, { cache: "no-store" });
+              if (res.ok) {
+                const text = await res.text();
+                // 中身が本当に HLS のプレイリストなら、取得は成功している＝再生側の非対応
+                genuinelyUnsupported = text.trimStart().startsWith("#EXTM3U");
+              }
+            } catch {
+              // 取得自体が失敗＝配信前/一時的な不通。ネイティブのまま再試行する。
+              genuinelyUnsupported = false;
+            }
+            if (cancelled || switchedToHlsJs) return;
+            if (!genuinelyUnsupported) {
+              // 一時的な不調とみなし、従来どおりネイティブで再試行する。
+              if (retryTimer) return;
+              retryTimer = setTimeout(() => {
+                retryTimer = null;
+                reloadNative();
+              }, RETRY_MS);
+              return;
+            }
+            switchedToHlsJs = true;
+            detachNative?.();
+            clearTimers();
+            startHlsJs(true); // ネイティブが汚したキャッシュを迂回する
+          })();
           return;
         }
         if (retryTimer) return;
