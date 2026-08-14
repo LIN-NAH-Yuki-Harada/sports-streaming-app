@@ -12,7 +12,8 @@ export const runtime = "nodejs";
  *   本番は既に RESEND_FROM_EMAIL=noreply@live-spotch.com（ドメイン検証済み）が
  *   入っているので、他のメールと同じくそれを読む。fallback は従来と同一。
  */
-const FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || "LIVE SPOtCH <onboarding@resend.dev>";
+const FROM_ADDRESS =
+  process.env.RESEND_FROM_EMAIL?.trim() || "LIVE SPOtCH <onboarding@resend.dev>";
 
 // 走査範囲の絞り込み。重複通知の防止は alert_log の UNIQUE(kind, ref_id) が担うため、
 // この窓は「古い障害まで毎回スキャンしない」ためのもの。

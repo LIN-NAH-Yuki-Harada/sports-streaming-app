@@ -275,6 +275,19 @@ export function AuthForm({ redirectTo, defaultMode = "login" }: AuthFormProps = 
             Appleでサインイン
           </button>
         )}
+
+        {/* ★ログイン方法が2つになったので、取り違えを防ぐ。
+            Google で登録した人が Apple を押すと、Apple の「メールを非公開」により
+            別アドレスが発行され、**別アカウントが新規作成される**（プランも履歴も引き継がれない）。
+            大会当日に配信者がログインし直す場面で踏むと、無料枠10分で配信が止まる。
+            2026-08-14 実測: Apple 利用者の大半が非公開アドレスで、メール一致による救済が効かない。 */}
+        {isAppleLoginEnabled() && (
+          <p className="pt-1 text-[11px] text-gray-500 leading-relaxed text-center">
+            <span className="text-gray-300 font-medium">前回と同じ方法</span>でログインしてください。
+            <br />
+            別の方法を選ぶと、<span className="text-gray-300">別のアカウント</span>として扱われます。
+          </p>
+        )}
       </div>
 
       {/* 区切り線 */}
