@@ -108,14 +108,24 @@ const CARD_EXPIRY_NOTICE_DAYS = 60;
 const CARD_EXPIRY_SUBJECT_DAYS = 30;
 
 // ── 監視対象（env で上書き可能・既定は本番の実値）──────────────────────────
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://live-spotch.com").replace(
-  /\/+$/,
-  "",
-);
+/**
+ * env は必ず trim してから使う。
+ * ★本番の STREAM_HOST には実際に前後の空白が入っており（2026-08-14 に本番実測で判明）、
+ *   trim しないと "https:// live.live-spotch.com /live/..." というURLになって
+ *   `Failed to parse URL` / `getaddrinfo ENOTFOUND` で必ず失敗する。
+ *   配信サーバーは正常なのに毎朝🔴が出る = 監視として最悪の誤報。
+ *   既存の api/stream/provision と api/cron/no-video は最初から .trim() している。
+ *   ここだけが抜けていた。以後 env を読むときは必ずこの関数を通すこと。
+ */
+function env(name: string): string {
+  return (process.env[name] || "").trim();
+}
+
+const SITE_URL = (env("NEXT_PUBLIC_SITE_URL") || "https://live-spotch.com").replace(/\/+$/, "");
 /** MediaMTX オリジン（CloudFront を介さない生死確認） */
-const ORIGIN_HOST = process.env.STREAM_HOST || "live.live-spotch.com";
+const ORIGIN_HOST = env("STREAM_HOST") || "live.live-spotch.com";
 /** CDN 前段。未設定なら CDN 点検はスキップ（VPS 直運用に戻している状態） */
-const CDN_HOST = process.env.STREAM_PLAYBACK_HOST || "";
+const CDN_HOST = env("STREAM_PLAYBACK_HOST");
 const RTMP_PORT = 1935;
 
 /**
@@ -395,7 +405,7 @@ export async function GET(request: Request) {
 
   // [6] Supabase（データベース）
   const supabaseCheck = safeCheck("supabase", "データベース（Supabase）", "致命", async () => {
-    const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/+$/, "");
+    const base = env("NEXT_PUBLIC_SUPABASE_URL").replace(/\/+$/, "");
     if (!base) {
       return { level: "notice", value: "URL未設定", ownerActionable: false };
     }
@@ -435,7 +445,7 @@ export async function GET(request: Request) {
 
   // [7] LiveKit（ブラウザ配信の基盤）
   const livekitCheck = safeCheck("livekit", "LiveKit（ブラウザ配信）", "重要", async () => {
-    const raw = process.env.NEXT_PUBLIC_LIVEKIT_URL || "";
+    const raw = env("NEXT_PUBLIC_LIVEKIT_URL");
     if (!raw) return { level: "skip", value: "未設定", ownerActionable: false };
     const httpUrl = raw.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/+$/, "");
     const { result, attempts } = await probeTwice(
@@ -893,8 +903,8 @@ export async function GET(request: Request) {
   }
 
   // [15] メール送信そのものが設定されているか
-  const resendKey = process.env.RESEND_API_KEY;
-  const to = process.env.ALERT_NOTIFICATION_EMAIL ?? process.env.CONTACT_NOTIFICATION_EMAIL;
+  const resendKey = env("RESEND_API_KEY");
+  const to = env("ALERT_NOTIFICATION_EMAIL") || env("CONTACT_NOTIFICATION_EMAIL");
   const emailConfigured = !!resendKey && !!to;
   checks.push({
     id: "email_config",
@@ -902,7 +912,7 @@ export async function GET(request: Request) {
     severity: "致命",
     level: emailConfigured ? "ok" : "alert",
     value: emailConfigured
-      ? `設定済み（送信元: ${process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev"}）`
+      ? `設定済み（送信元: ${env("RESEND_FROM_EMAIL") || "onboarding@resend.dev"}）`
       : `未設定（${!resendKey ? "RESEND_API_KEY" : ""}${!resendKey && !to ? " と " : ""}${!to ? "ALERT_NOTIFICATION_EMAIL" : ""} がありません）`,
     cause: emailConfigured
       ? undefined
@@ -916,7 +926,7 @@ export async function GET(request: Request) {
   // [16] 支払い方法（カード）の有効期限そのもの
   checks.push(
     await safeCheck("payment_methods", "支払い方法の有効期限", "重要", async () => {
-      const raw = process.env.PAYMENT_METHOD_EXPIRIES || "";
+      const raw = env("PAYMENT_METHOD_EXPIRIES");
       if (!raw.trim()) {
         return {
           level: "notice",
@@ -1053,7 +1063,7 @@ export async function GET(request: Request) {
     //   「メールが届かない = 監視が死んだ」という最悪の誤報になる。
     const result = await Promise.race([
       new Resend(resendKey).emails.send({
-        from: process.env.RESEND_FROM_EMAIL || "LIVE SPOtCH <onboarding@resend.dev>",
+        from: env("RESEND_FROM_EMAIL") || "LIVE SPOtCH <onboarding@resend.dev>",
         to: [to],
         subject,
         html: buildHtml({ now, checks, alerts, notices, summary }),
