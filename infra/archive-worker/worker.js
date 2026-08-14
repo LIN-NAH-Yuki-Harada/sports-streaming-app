@@ -87,6 +87,35 @@ const METRICS_ENABLED = process.env.METRICS_ENABLED === "1";
 const METRICS_STATE_PATH = "/var/tmp/archive-worker-metrics.json";
 const METRICS_RETENTION_DAYS = 30;
 
+// ===== ウォッチドッグ（Vercel の生死を VPS から見張る・2026-08-14）=====
+// 【なぜ VPS に置くのか】
+//   監視役が Vercel の中だけにいると、Vercel が止まったときに「何も鳴らない」。
+//   2026-06-13 の支払い失敗による全停止がまさにこれで、沈黙と正常が区別できなかった。
+//   VPS(Xserver) と Vercel は別会社なので同時には止まらない。だから VPS から見張る。
+//
+// 【外部に口は開けない】
+//   ここも server_metrics と同じ「押し込み方式」。VPS 側は外向きに叩くだけで、
+//   外部から VPS へ問い合わせる口は一切作らない（攻撃面ゼロ・SSHも不要）。
+//
+// 既定 OFF。WATCHDOG_ENABLED=1 で点灯する。
+const WATCHDOG_ENABLED = process.env.WATCHDOG_ENABLED === "1";
+const WATCHDOG_SITE_URL = process.env.WATCHDOG_SITE_URL || "https://live-spotch.com";
+const WATCHDOG_STATE_PATH = "/var/tmp/archive-worker-watchdog.json";
+// ★2回連続(=10分)で失敗して初めて発報する。1回の瞬断で鳴らすと信用されなくなる。
+const WATCHDOG_FAIL_THRESHOLD = Number(process.env.WATCHDOG_FAIL_THRESHOLD) || 2;
+// 同じ事象で何通も送らないためのクールダウン（既定60分）
+const WATCHDOG_COOLDOWN_MS =
+  Number(process.env.WATCHDOG_COOLDOWN_MS) || 60 * 60 * 1000;
+// Vercel の cron が黙ったと判断する鮮度（既定30分・毎分cronの30回分の猶予）
+const WATCHDOG_CRON_STALE_SEC =
+  Number(process.env.WATCHDOG_CRON_STALE_SEC) || 30 * 60;
+const WATCHDOG_TIMEOUT_MS = Number(process.env.WATCHDOG_TIMEOUT_MS) || 10000;
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+const ALERT_EMAIL =
+  process.env.ALERT_NOTIFICATION_EMAIL || process.env.CONTACT_NOTIFICATION_EMAIL || "";
+const RESEND_FROM_EMAIL =
+  process.env.RESEND_FROM_EMAIL || "LIVE SPOtCH <onboarding@resend.dev>";
+
 if (
   !SUPABASE_URL ||
   !SUPABASE_SERVICE_ROLE_KEY ||
@@ -1123,6 +1152,232 @@ async function collectServerMetrics() {
     .then(undefined, () => {});
 }
 
+// ===== ウォッチドッグ本体 =====
+
+/** Resend の REST API で1通送る（SDK 依存を増やさない）。失敗は握り潰す。 */
+async function sendWatchdogMail(subject, lines) {
+  if (!RESEND_API_KEY || !ALERT_EMAIL) {
+    log("watchdog: メール未設定のため送信しません (RESEND_API_KEY / ALERT_NOTIFICATION_EMAIL)");
+    return false;
+  }
+  const html = `<!DOCTYPE html>
+<html lang="ja"><body style="margin:0;padding:24px;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;padding:24px;color:#1a1a1a;line-height:1.8;">
+    ${lines.map((l) => `<div style="margin-top:8px;font-size:14px;">${l}</div>`).join("")}
+    <p style="margin-top:24px;font-size:12px;color:#888;">
+      この通知は配信サーバー(VPS)から送っています。Vercel が止まっていても届きます。
+    </p>
+  </div>
+</body></html>`;
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: RESEND_FROM_EMAIL,
+        to: [ALERT_EMAIL],
+        subject,
+        html,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) {
+      log("watchdog: メール送信失敗 http", res.status);
+      return false;
+    }
+    log("watchdog: 送信しました:", subject);
+    return true;
+  } catch (e) {
+    log("watchdog: メール送信失敗:", String(e).slice(0, 120));
+    return false;
+  }
+}
+
+function jstStamp(d = new Date()) {
+  const j = new Date(d.getTime() + 9 * 3600_000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${j.getUTCMonth() + 1}/${j.getUTCDate()} ${p(j.getUTCHours())}:${p(j.getUTCMinutes())}`;
+}
+
+/**
+ * Vercel(本番サイト)の生死と、Vercel cron の鮮度を見張る。
+ * 失敗は全て握り潰す＝アーカイブ本処理には一切影響させない。
+ */
+async function runWatchdog() {
+  // 状態（2回連続判定・クールダウン・復旧検知に使う）
+  let state = { site: {}, cron: {} };
+  try {
+    const raw = JSON.parse(fs.readFileSync(WATCHDOG_STATE_PATH, "utf8"));
+    if (raw && typeof raw === "object") state = { site: {}, cron: {}, ...raw };
+  } catch {
+    /* 初回・破損時は初期値 */
+  }
+  if (!state.site || typeof state.site !== "object") state.site = {};
+  if (!state.cron || typeof state.cron !== "object") state.cron = {};
+  const now = Date.now();
+  const save = () => {
+    try {
+      fs.writeFileSync(WATCHDOG_STATE_PATH, JSON.stringify(state));
+    } catch {
+      /* noop */
+    }
+  };
+
+  // ── 1. Vercel を叩く（キャッシュを必ず貫通させる）──────────────────
+  const url = `${WATCHDOG_SITE_URL}/api/health?_=${Date.now().toString(36)}${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+  let status = null;
+  let vercelError = null;
+  let body = null;
+  let netError = null;
+  try {
+    const res = await fetch(url, {
+      cache: "no-store",
+      redirect: "manual",
+      signal: AbortSignal.timeout(WATCHDOG_TIMEOUT_MS),
+      headers: { "User-Agent": "live-spotch-watchdog/1.0" },
+    });
+    status = res.status;
+    vercelError = res.headers.get("x-vercel-error");
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+  } catch (e) {
+    netError = String(e && e.message ? e.message : e).slice(0, 150);
+  }
+
+  // ── 2. 自分側の回線障害を除外する ────────────────────────────────
+  // ★VPS の回線が切れているだけなのに「Vercel が死んだ」と誤報しないための要。
+  //   Vercel に届かなかったときは Supabase(別会社)にも到達を試し、
+  //   両方ダメなら自分側の問題と判断して発報しない。
+  const vercelReachable = netError === null;
+  if (!vercelReachable) {
+    let supabaseReachable = false;
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+        signal: AbortSignal.timeout(8000),
+      });
+      // キー無しの 401 も「応答している」証拠なので到達扱い
+      supabaseReachable = r.status === 200 || r.status === 401;
+    } catch {
+      supabaseReachable = false;
+    }
+    if (!supabaseReachable) {
+      log("watchdog: Vercel も Supabase も不達 = VPS 側の回線障害と判断（発報しない）");
+      return;
+    }
+  }
+
+  // ── 3. 状態を分類する ───────────────────────────────────────────
+  // ★404 は「サイトは生きているが /api/health が未デプロイ」。
+  //   Vercel がルーティングを処理できている＝生きている証拠なので、停止扱いにしない。
+  const isBilling =
+    (status === 402 || status === 403) &&
+    String(vercelError || "").includes("DEPLOYMENT_DISABLED");
+  const siteDown =
+    netError !== null || vercelError !== null || (status !== null && status >= 500) || isBilling;
+  const endpointMissing = status === 404 && !vercelError;
+  const siteOk = status === 200 && !vercelError;
+
+  // ── 4. サイトの生死（2回連続で発報・1時間クールダウン）──────────
+  if (siteDown) {
+    state.site.fails = (Number(state.site.fails) || 0) + 1;
+    if (!state.site.downSinceMs) state.site.downSinceMs = now;
+    const reason = isBilling
+      ? `Vercel 402/403 DEPLOYMENT_DISABLED（支払い失敗の可能性）`
+      : netError !== null
+        ? `到達不可: ${netError}`
+        : vercelError !== null
+          ? `x-vercel-error: ${vercelError}`
+          : `HTTP ${status}`;
+    const cooledDown = now - (Number(state.site.lastSentMs) || 0) > WATCHDOG_COOLDOWN_MS;
+    if (state.site.fails >= WATCHDOG_FAIL_THRESHOLD && cooledDown) {
+      const mins = Math.round((now - state.site.downSinceMs) / 60000);
+      await sendWatchdogMail(
+        isBilling
+          ? `🔴🔴 LIVE SPOtCH サイト停止 ${jstStamp()}｜Vercel ${status}（支払い失敗の可能性）`
+          : `🔴🔴 LIVE SPOtCH サイト停止 ${jstStamp()}｜${reason}`,
+        [
+          `<b style="color:#e63946;">サイトが開かなくなっています。</b>`,
+          `<b>【何が起きているか】</b><br>${WATCHDOG_SITE_URL} が正常な応答を返しません。視聴も配信もできない状態の可能性があります。`,
+          `<b>【いつから】</b><br>${jstStamp(new Date(state.site.downSinceMs))} から（約${mins}分）`,
+          isBilling
+            ? `<b>【まず確認すること】</b><br>1. Vercel にログインし、支払い方法（カード）が失敗していないか見る<br>2. 2026-06-13 に同じ原因で全停止した実績があります`
+            : `<b>【まず確認すること】</b><br>1. ${WATCHDOG_SITE_URL} をスマホで開いてみる<br>2. 開かなければ Vercel にログインし、支払いが失敗していないか見る`,
+          `<b style="font-size:12px;color:#888;">【技術的な詳細】</b><br><span style="font-size:12px;color:#888;font-family:monospace;">${url} → ${reason} / ${state.site.fails}回連続</span>`,
+        ],
+      );
+      state.site.lastSentMs = now;
+      state.site.alerting = true;
+    }
+    save();
+    return; // サイトが死んでいるときに cron の鮮度を語っても意味がない
+  }
+
+  // 復旧した（発報済み → 正常）
+  if ((siteOk || endpointMissing) && state.site.alerting) {
+    const mins = Math.round((now - (Number(state.site.downSinceMs) || now)) / 60000);
+    await sendWatchdogMail(`✅ LIVE SPOtCH 復旧 ${jstStamp()}｜停止していた時間 ${mins}分`, [
+      `<b style="color:#2a9d8f;">サイトが復旧しました。</b>`,
+      `停止していた時間: 約${mins}分`,
+      `対応は不要です。`,
+    ]);
+  }
+  if (siteOk || endpointMissing) {
+    state.site = { fails: 0, downSinceMs: null, lastSentMs: state.site.lastSentMs || 0, alerting: false };
+  }
+
+  // /api/health がまだ無い本番（このPRの反映前）では cron 鮮度を判定できない
+  if (endpointMissing) {
+    log("watchdog: /api/health が 404（未デプロイ）。cron 鮮度の判定はスキップ");
+    save();
+    return;
+  }
+
+  // ── 5. Vercel の cron が黙っていないか ──────────────────────────
+  const age = body && typeof body.newestCronAgeSec === "number" ? body.newestCronAgeSec : null;
+  const dbOk = !!(body && body.dbOk);
+  if (age === null) {
+    // 心拍がまだ1件も無い / DBが読めない。cron の死とは断定できないので鳴らさない。
+    log("watchdog: 心拍が読めず（dbOk=" + dbOk + "）。cron 判定はスキップ");
+    state.cron.fails = 0;
+    save();
+    return;
+  }
+  if (age > WATCHDOG_CRON_STALE_SEC) {
+    state.cron.fails = (Number(state.cron.fails) || 0) + 1;
+    const cooledDown = now - (Number(state.cron.lastSentMs) || 0) > WATCHDOG_COOLDOWN_MS;
+    if (state.cron.fails >= WATCHDOG_FAIL_THRESHOLD && cooledDown) {
+      await sendWatchdogMail(
+        `🔴 LIVE SPOtCH 定期処理が停止 ${jstStamp()}｜最新の心拍が${Math.round(age / 60)}分前`,
+        [
+          `<b style="color:#e63946;">サイトは開きますが、定期処理(cron)が止まっています。</b>`,
+          `<b>【何が起きているか】</b><br>配信の自動終了・アーカイブ処理・障害通知が止まります。視聴と配信そのものは動いています。`,
+          `<b>【まず確認すること】</b><br>Vercel のダッシュボードで Cron Jobs が有効か、支払いが正常かを見てください。`,
+          `<b style="font-size:12px;color:#888;">【技術的な詳細】</b><br><span style="font-size:12px;color:#888;font-family:monospace;">newestCronAgeSec=${age} (閾値 ${WATCHDOG_CRON_STALE_SEC}) / ${state.cron.fails}回連続</span>`,
+        ],
+      );
+      state.cron.lastSentMs = now;
+      state.cron.alerting = true;
+    }
+  } else {
+    if (state.cron.alerting) {
+      await sendWatchdogMail(`✅ LIVE SPOtCH 定期処理が復旧 ${jstStamp()}`, [
+        `<b style="color:#2a9d8f;">定期処理(cron)が動き始めました。</b>`,
+        `対応は不要です。`,
+      ]);
+    }
+    state.cron = { fails: 0, lastSentMs: state.cron.lastSentMs || 0, alerting: false };
+  }
+  save();
+}
+
 async function main() {
   // 0. 保守: 残骸workDir掃除 + stale uploadingの復旧（どちらも失敗しても本処理は続行）
   try {
@@ -1147,6 +1402,14 @@ async function main() {
       await collectServerMetrics();
     } catch (e) {
       log("metrics failed (ignored):", String(e).slice(0, 120));
+    }
+  }
+  if (WATCHDOG_ENABLED) {
+    // ★Vercel が止まったときに鳴らせる唯一の経路。失敗しても本処理には影響させない。
+    try {
+      await runWatchdog();
+    } catch (e) {
+      log("watchdog failed (ignored):", String(e).slice(0, 120));
     }
   }
 

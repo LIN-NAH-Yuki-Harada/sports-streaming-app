@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { isArchiveEnabled } from "@/lib/archive-flag";
+import { recordHeartbeat } from "@/lib/ops-heartbeat";
 import { getAdminClient } from "@/lib/supabase-admin";
 import {
   classifyError,
@@ -58,6 +59,10 @@ export async function GET(request: Request) {
   if (!authorized) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // cron が動いている証拠を1行残す（絶対に throw しない・3秒で打ち切る）。
+  // フラグ判定より前に置く: フラグ off でも「cron 自体は生きている」ことを記録したい。
+  await recordHeartbeat("cron:youtube-upload");
 
   // フラグ off の間は何もしない（cron 自体は走るが noop で 200）
   if (!isArchiveEnabled()) {
