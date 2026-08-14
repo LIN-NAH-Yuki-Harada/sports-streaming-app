@@ -32,13 +32,13 @@ export async function GET() {
     ok: boolean;
     now: string;
     dbOk: boolean;
-    crons: Record<string, { lastRunAt: string; ageSec: number; ok: boolean }>;
+    cronCount: number;
     newestCronAgeSec: number | null;
   } = {
     ok: false,
     now: now.toISOString(),
     dbOk: false,
-    crons: {},
+    cronCount: 0,
     newestCronAgeSec: null,
   };
 
@@ -56,14 +56,14 @@ export async function GET() {
       body.dbOk = true;
       let newest: number | null = null;
       for (const row of data ?? []) {
+        // ★"cron:" で始まる行だけを数える。
+        //   ここに vps:watchdog（VPS 自身の心拍）を混ぜると、Vercel の cron が全滅していても
+        //   自分の心拍で newestCronAgeSec が新しくなり、cron の死を永久に見逃す（自己参照）。
+        if (!String(row.name).startsWith("cron:")) continue;
         const t = new Date(row.last_run_at).getTime();
         if (Number.isNaN(t)) continue;
         const ageSec = Math.max(0, Math.round((now.getTime() - t) / 1000));
-        body.crons[row.name] = {
-          lastRunAt: row.last_run_at,
-          ageSec,
-          ok: row.ok !== false,
-        };
+        body.cronCount += 1;
         if (newest === null || ageSec < newest) newest = ageSec;
       }
       body.newestCronAgeSec = newest;

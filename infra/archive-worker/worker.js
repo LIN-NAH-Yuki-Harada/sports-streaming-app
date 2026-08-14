@@ -97,6 +97,14 @@ const METRICS_RETENTION_DAYS = 30;
 //   ここも server_metrics と同じ「押し込み方式」。VPS 側は外向きに叩くだけで、
 //   外部から VPS へ問い合わせる口は一切作らない（攻撃面ゼロ・SSHも不要）。
 //
+// 【★検知の速さについて正直に書く】
+//   これはアーカイブworkerの oneshot タイマー(5分)に相乗りしている。
+//   systemd は実行中の oneshot を再起動しないため、長尺アーカイブの変換中は
+//   次の tick が来ない。実測の tick 間隔は中央値5.5分だが最大56.2分、
+//   ユニットの上限は3時間。したがって「必ず10分以内」ではない。
+//   平常時は10分／変換中は最大1〜2時間、と理解すること。
+//   恒久策は独立した systemd timer への分離（大会後に実施）。
+//
 // 既定 OFF。WATCHDOG_ENABLED=1 で点灯する。
 const WATCHDOG_ENABLED = process.env.WATCHDOG_ENABLED === "1";
 const WATCHDOG_SITE_URL = process.env.WATCHDOG_SITE_URL || "https://live-spotch.com";
@@ -1280,10 +1288,13 @@ async function runWatchdog() {
   const isBilling =
     (status === 402 || status === 403) &&
     String(vercelError || "").includes("DEPLOYMENT_DISABLED");
-  const siteDown =
-    netError !== null || vercelError !== null || (status !== null && status >= 500) || isBilling;
+  // ★分類はホワイトリスト方式にする。「正常」だけを列挙し、残りは全部「停止」。
+  //   ブラックリスト方式（500以上だけを停止扱い）だと、401(デプロイ保護の誤有効化)・
+  //   403(WAF)・429(レート制限)・3xx(ドメイン誤設定) が「異常でも正常でもない」無言ゾーンに落ちる。
+  //   利用者はサイトを開けないのに何も鳴らない = 沈黙と正常を区別するために作った仕組みが沈黙する。
   const endpointMissing = status === 404 && !vercelError;
   const siteOk = status === 200 && !vercelError;
+  const siteDown = !siteOk && !endpointMissing;
 
   // ── 4. サイトの生死（2回連続で発報・1時間クールダウン）──────────
   if (siteDown) {
@@ -1376,6 +1387,21 @@ async function runWatchdog() {
     state.cron = { fails: 0, lastSentMs: state.cron.lastSentMs || 0, alerting: false };
   }
   save();
+
+  // ── 6. 「第2層が生きている」ことを第1層に見せる ────────────────────
+  // ★これが無いと、ウォッチドッグが止まっていても毎朝のメールは ✅ を出し続け、
+  //   「二重に見張っている」と信じたまま実際は第1層しか無い状態になる。
+  //   2026-06-13 の再発防止が env 1個に懸かっているので、その env の生死を可視化する。
+  try {
+    await admin
+      .from("ops_heartbeat")
+      .upsert(
+        { name: "vps:watchdog", last_run_at: new Date().toISOString(), ok: true, detail: null },
+        { onConflict: "name" },
+      );
+  } catch (e) {
+    log("watchdog heartbeat failed (ignored):", String(e).slice(0, 120));
+  }
 }
 
 async function main() {

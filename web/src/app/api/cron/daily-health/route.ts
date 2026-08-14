@@ -12,8 +12,13 @@ import { recordHeartbeat } from "@/lib/ops-heartbeat";
 import { getAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
-// 外形プローブを並列で叩くが、遅い相手が居ても打ち切れるよう余裕を持たせる。
-export const maxDuration = 60;
+/**
+ * 外形プローブを並列で叩くが、遅い相手が居ても打ち切れるよう余裕を持たせる。
+ * ★60秒にしてはいけない。個別タイムアウトの直列最悪値は約98秒（外形26s + DB点検8s×8 + 心拍3s）で、
+ *   Supabase が重い朝に関数ごと打ち切られると「メールが1通も届かない」= 監視が死んだ、と読める。
+ *   誤報として最悪の壊れ方なので Pro の既定値まで上げ、下の SOFT_DEADLINE_MS で自分から畳む。
+ */
+export const maxDuration = 300;
 
 /**
  * 毎朝の総合点検（22:00 UTC = 07:00 JST）
@@ -39,8 +44,33 @@ export const maxDuration = 60;
  */
 
 // ── 閾値（すべて 2026-08-14 の実測に基づく。根拠をコメントに残すこと）──────────
+/**
+ * 点検全体のソフト締切。これを超えたら残りの点検を「点検できず」にして、必ずメールを1通出す。
+ * 不完全な報告 > 沈黙。沈黙は「監視が死んだ」と区別できないため、絶対に避ける。
+ */
+const SOFT_DEADLINE_MS = 120 * 1000;
 /** cron の心拍がこれ以上古い = cron だけ死んだ。毎分 cron の30回分の猶予。 */
 const CRON_STALE_MS = 30 * 60 * 1000;
+/**
+ * ★心拍の鮮度は「本ごとの実行間隔」で判定する。全部を一律30分で見てはいけない。
+ *   daily-health は1日1回しか動かないので、一律30分だと自分自身が毎朝必ず stale 判定になり、
+ *   件名が毎日 🟡 になる ＝「✅ が来たら何もしなくていい」という設計の前提が初日から壊れる。
+ *   値は vercel.json の schedule に対応。許容は「期待間隔 × 6、最低30分」。
+ */
+const CRON_EXPECTED_INTERVAL_MS: Record<string, number> = {
+  "cron:trial-enforce": 1 * 60 * 1000, // * * * * *
+  "cron:no-video": 2 * 60 * 1000, // */2 * * * *
+  "cron:cleanup": 5 * 60 * 1000, // */5 * * * *
+  "cron:youtube-upload": 5 * 60 * 1000, // */5 * * * *
+  "cron:alerts": 5 * 60 * 1000, // */5 * * * *
+  "cron:daily-health": 24 * 60 * 60 * 1000, // 0 22 * * *（この点検自身）
+};
+/** 名前ごとの許容鮮度。未知の名前は従来どおり30分。 */
+function cronStaleLimitMs(name: string): number {
+  const expected = CRON_EXPECTED_INTERVAL_MS[name];
+  if (!expected) return CRON_STALE_MS;
+  return Math.max(CRON_STALE_MS, expected * 6);
+}
 /**
  * VPS ワーカー(server_metrics)の鮮度。
  * 実測(直近約4日): tick間隔は中央値5.5分 / p99 6.0分 / 最大56.2分、60分超は0回。
@@ -53,9 +83,13 @@ const DISK_ALERT_PCT = 92;
 /** 証明書残日数。Let's Encrypt は30日前から自動更新 = 14日切りは更新が壊れている。 */
 const CERT_NOTICE_DAYS = 14;
 const CERT_ALERT_DAYS = 7;
-/** 決済異常。実測 past_due 1件が居座るのが平常なので、絶対値より前日比を主軸にする。 */
+/**
+ * 決済異常。実測 past_due 1件が居座るのが平常なので、絶対値より前日比を主軸にする。
+ * ★課金者は十数人規模なので「1人が past_due に落ちた」が最も起きやすい。
+ *   増分1で鳴らしても十分に静かで、かつ「決済失敗が誰にも通知されない」を実際に解消できる。
+ */
 const BILLING_ABS_NOTICE = 3;
-const BILLING_DELTA_NOTICE = 3;
+const BILLING_DELTA_NOTICE = 1;
 /** アーカイブ滞留（終了から3時間以上経っても未処理）。実測 pending 0件。 */
 const BACKLOG_NOTICE = 5;
 const BACKLOG_ALERT = 15;
@@ -129,12 +163,31 @@ type Check = {
 const SEVERITY_RANK: Record<Severity, number> = { 致命: 0, 重要: 1, 注意: 2 };
 
 /** 点検1つを実行する。点検自体が例外を投げても他を巻き込まない。 */
+/**
+ * 点検全体の締切。startedAt からの経過が SOFT_DEADLINE_MS を超えたら、
+ * 残りの点検は実行せず「点検できず」にして先へ進む。
+ * ★不完全な報告 > 沈黙。メールが届かないのは「監視が死んだ」と区別できない。
+ */
+let deadlineAt = Number.POSITIVE_INFINITY;
+
 async function safeCheck(
   id: string,
   label: string,
   severity: Severity,
   fn: () => Promise<Omit<Check, "id" | "label" | "severity">>,
 ): Promise<Check> {
+  if (Date.now() > deadlineAt) {
+    return {
+      id,
+      label,
+      severity,
+      level: "notice",
+      value: "点検できず（時間切れ）",
+      cause: "点検全体が時間切れになったため、この項目は省略しました。",
+      action: "毎朝のメールが届いている＝監視自体は生きています。翌日も同じなら調査が必要です。",
+      ownerActionable: false,
+    };
+  }
   try {
     return { id, label, severity, ...(await fn()) };
   } catch (e) {
@@ -182,6 +235,8 @@ export async function GET(request: Request) {
   const dryRun = new URL(request.url).searchParams.get("dry") === "1";
 
   const now = new Date();
+  // 以降の点検はこの締切を過ぎたら省略する。何があっても必ずメールを1通出すため。
+  deadlineAt = now.getTime() + SOFT_DEADLINE_MS;
   const admin = getAdminClient();
   const yesterday = jstYesterdayRange(now);
 
@@ -480,7 +535,8 @@ export async function GET(request: Request) {
           ownerActionable: true,
         };
       }
-      const rows = data ?? [];
+      // ★cron 以外の心拍（vps:watchdog など）は別項目で見る。ここに混ぜると誤判定する。
+      const rows = (data ?? []).filter((r) => String(r.name).startsWith("cron:"));
       if (rows.length === 0) {
         return {
           level: "notice",
@@ -489,37 +545,44 @@ export async function GET(request: Request) {
           ownerActionable: false,
         };
       }
-      const ages = rows.map((r) => now.getTime() - new Date(r.last_run_at).getTime());
-      const newest = Math.min(...ages);
-      const newestMin = Math.round(newest / 60_000);
-      const stale = rows.filter(
-        (r) => now.getTime() - new Date(r.last_run_at).getTime() > CRON_STALE_MS,
-      );
-      if (newest > CRON_STALE_MS) {
+      // ★鮮度は「本ごとの実行間隔」で見る。一律にすると1日1回の daily-health が毎朝 stale になる。
+      const graded = rows.map((r) => {
+        const ageMs = now.getTime() - new Date(r.last_run_at).getTime();
+        return { name: r.name, ageMs, limitMs: cronStaleLimitMs(r.name), stale: false };
+      });
+      for (const g of graded) g.stale = g.ageMs > g.limitMs;
+      const detail = graded
+        .map((g) => `${g.name}: ${Math.round(g.ageMs / 60_000)}分前${g.stale ? "(停止)" : ""}`)
+        .join(" / ");
+      const stale = graded.filter((g) => g.stale);
+      // 「5分以内に回るはずの本」だけを cron 基盤そのものの生死判定に使う。
+      const frequent = graded.filter((g) => g.limitMs <= CRON_STALE_MS);
+      const newestFrequentMin =
+        frequent.length > 0 ? Math.round(Math.min(...frequent.map((g) => g.ageMs)) / 60_000) : null;
+      if (frequent.length > 0 && frequent.every((g) => g.stale)) {
         return {
           level: "alert",
-          value: `最新の心拍が${newestMin}分前`,
+          value: `短周期の${frequent.length}本すべてが停止（最新 ${newestFrequentMin}分前）`,
           cause:
             "サイトは生きていますが、定期処理（cron）が止まっています。配信の自動終了・アーカイブ処理・障害通知がすべて止まります。",
           action: "Vercel のダッシュボードで Cron Jobs が有効か、支払いが正常かを確認してください。",
-          detail: rows
-            .map((r) => `${r.name}: ${Math.round((now.getTime() - new Date(r.last_run_at).getTime()) / 60_000)}分前`)
-            .join(" / "),
+          detail,
           ownerActionable: true,
         };
       }
       if (stale.length > 0) {
         return {
           level: "notice",
-          value: `${rows.length}本中${stale.length}本が${CRON_STALE_MS / 60_000}分以上停止`,
+          value: `${rows.length}本中${stale.length}本が想定より止まっています`,
           cause: `${stale.map((s) => s.name).join(", ")} だけが動いていません。`,
-          detail: rows
-            .map((r) => `${r.name}: ${Math.round((now.getTime() - new Date(r.last_run_at).getTime()) / 60_000)}分前`)
-            .join(" / "),
+          detail,
           ownerActionable: false,
         };
       }
-      return { level: "ok", value: `${rows.length}本すべて稼働（最新 ${newestMin}分前）` };
+      return {
+        level: "ok",
+        value: `${rows.length}本すべて稼働${newestFrequentMin === null ? "" : `（最新 ${newestFrequentMin}分前）`}`,
+      };
     }),
   );
 
@@ -608,6 +671,47 @@ export async function GET(request: Request) {
     }),
   );
 
+  // [9b] 第2層（VPSの見張り）が生きているか
+  // ★これを見ないと、ウォッチドッグが止まっていても ✅ が出続け、
+  //   「二重に見張っている」と信じたまま第1層しか無い状態になる。
+  //   2026-06-13 型の全停止を実際に捕まえられるのは第2層だけなので、その生死は必ず見る。
+  checks.push(
+    await safeCheck("watchdog_alive", "見張り役2人目（VPS側）", "致命", async () => {
+      const { data, error } = await admin
+        .from("ops_heartbeat")
+        .select("last_run_at")
+        .eq("name", "vps:watchdog")
+        .abortSignal(AbortSignal.timeout(8000))
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) {
+        return {
+          level: "notice",
+          value: "まだ動いていません（未設定）",
+          cause:
+            "VPS 側の見張りがまだ点灯していません。Vercel が丸ごと止まったときに鳴らせるのはこの見張りだけなので、現状その状況では自動通知は出ません。",
+          action:
+            "大会後に VPS で worker.js を差し替え、WATCHDOG_ENABLED=1 と RESEND_API_KEY / ALERT_NOTIFICATION_EMAIL を設定してください。",
+          ownerActionable: true,
+        };
+      }
+      const ageMs = now.getTime() - new Date(data.last_run_at).getTime();
+      const ageMin = Math.round(ageMs / 60_000);
+      // 相乗り運用なので長尺変換中は間隔が伸びる。実測最大56.2分に合わせて 90分。
+      if (ageMs > WORKER_STALE_MS) {
+        return {
+          level: "alert",
+          value: `${ageMin}分前から動いていません`,
+          cause:
+            "VPS 側の見張りが止まっています。この状態で Vercel が止まると、自動通知は1通も出ません（＝2026-06-13 の再発）。",
+          action: "VPS のワーカーが動いているか（上の項目）と、WATCHDOG_ENABLED の設定を確認してください。",
+          ownerActionable: true,
+        };
+      }
+      return { level: "ok", value: `${ageMin}分前に稼働（Vercel を見張り中）` };
+    }),
+  );
+
   checks.push(certs);
 
   // [11] 利用者の決済異常（past_due / unpaid）
@@ -631,8 +735,14 @@ export async function GET(request: Request) {
         return {
           level: "notice",
           value,
-          cause: `決済に失敗している利用者が1日で${delta}件増えました。Stripe 側の一括失敗の可能性があります。`,
-          action: "見ておくだけで大丈夫です。数日続くようなら Stripe のダッシュボードを確認してください。",
+          cause:
+            delta >= 3
+              ? `決済に失敗している利用者が1日で${delta}件増えました。Stripe 側の一括失敗の可能性があります。`
+              : `決済に失敗している利用者が1日で${delta}件増えました（カードの期限切れなど、1件単位では通常起きます）。`,
+          action:
+            delta >= 3
+              ? "Stripe のダッシュボードで一括失敗が起きていないか確認してください。"
+              : "見ておくだけで大丈夫です（Stripe は数日かけて自動リトライします）。",
           ownerActionable: false,
         };
       }
@@ -659,6 +769,11 @@ export async function GET(request: Request) {
         .eq("status", "ended")
         .lt("ended_at", cutoff)
         .or("youtube_upload_status.is.null,youtube_upload_status.eq.pending")
+        // ★VPSワーカーの取得条件と必ず一致させること（worker.js は stream_playback_url NOT NULL 必須）。
+        //   これが無いと旧ブラウザ配信(LiveKit経路)の行まで数えてしまう。
+        //   2026-08-14 の本番実測: このフィルタ無し=396件 / 有り=0件。396件はワーカーが一生触らないので
+        //   永久に減らず、毎朝必ず🔴が出て「✅以外が来たら見る」という設計が初日から壊れる。
+        .not("stream_playback_url", "is", null)
         .abortSignal(AbortSignal.timeout(8000));
       if (error) throw new Error(error.message);
       const n = count ?? 0;
@@ -934,13 +1049,20 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await new Resend(resendKey).emails.send({
-      from: process.env.RESEND_FROM_EMAIL || "LIVE SPOtCH <onboarding@resend.dev>",
-      to: [to],
-      subject,
-      html: buildHtml({ now, checks, alerts, notices, summary }),
-      text: buildText({ now, checks, alerts, notices, summary }),
-    });
+    // ★送信にも必ず上限を付ける。ここで無限に待つと関数ごと打ち切られ、
+    //   「メールが届かない = 監視が死んだ」という最悪の誤報になる。
+    const result = await Promise.race([
+      new Resend(resendKey).emails.send({
+        from: process.env.RESEND_FROM_EMAIL || "LIVE SPOtCH <onboarding@resend.dev>",
+        to: [to],
+        subject,
+        html: buildHtml({ now, checks, alerts, notices, summary }),
+        text: buildText({ now, checks, alerts, notices, summary }),
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("resend timeout (20s)")), 20_000),
+      ),
+    ]);
     if (result.error) throw new Error(result.error.message);
     payload.emailed = true;
     console.info("[cron/daily-health] sent:", subject);
