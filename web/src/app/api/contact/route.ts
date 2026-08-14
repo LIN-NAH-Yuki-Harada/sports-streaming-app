@@ -5,7 +5,15 @@ const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
 
-const FROM_ADDRESS = "LIVE SPOtCH <onboarding@resend.dev>";
+/**
+ * ★onboarding@resend.dev は Resend の共有テストアドレスで、宛先が
+ *   「Resend アカウント所有者本人のメール」に制限される。それ以外へ送ると失敗し、
+ *   問い合わせが来ても誰も気づけない（実際に 2026-08-14 10:10 の1件が無通知だった）。
+ *   独自ドメインは 2026-06 に検証済みで RESEND_FROM_EMAIL に入っているのに、
+ *   ここだけ 55 日間ハードコードのまま残っていた。fallback は従来と同一。
+ */
+const FROM_ADDRESS =
+  process.env.RESEND_FROM_EMAIL?.trim() || "LIVE SPOtCH <onboarding@resend.dev>";
 
 export async function POST(request: Request) {
   try {
@@ -39,9 +47,10 @@ export async function POST(request: Request) {
       return Response.json({ error: "Failed to save message" }, { status: 500 });
     }
 
-    // 管理者通知メール送信。Resend の onboarding@resend.dev は独自ドメイン
-    // 認証前はアカウント所有者のメール宛のみ可。ユーザーへの自動返信は独自
-    // ドメイン認証後に追加する。
+    // 管理者通知メール送信。送信元は検証済みドメイン（上の FROM_ADDRESS）。
+    // ★送信失敗は console.error に出るだけで誰も見ていない。届かなかったことに
+    //   気づく手段が無いので、問い合わせは必ず contact_messages テーブルにも残す
+    //   （insert はメール送信より前に済ませてある）。
     const adminEmail = process.env.CONTACT_NOTIFICATION_EMAIL;
     if (resend && adminEmail) {
       try {

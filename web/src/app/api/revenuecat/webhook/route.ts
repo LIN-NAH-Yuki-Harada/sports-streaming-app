@@ -34,7 +34,9 @@ const ACTIVE_TYPES = new Set([
   "SUBSCRIPTION_EXTENDED",
 ]);
 
-const RESEND_FROM = "LIVE SPOtCH <onboarding@resend.dev>";
+// ★共有テストアドレスは宛先が制限され届かない。検証済みドメインの env を読む。
+const RESEND_FROM =
+  process.env.RESEND_FROM_EMAIL?.trim() || "LIVE SPOtCH <onboarding@resend.dev>";
 
 function productToPlan(
   productId: string | null | undefined,
