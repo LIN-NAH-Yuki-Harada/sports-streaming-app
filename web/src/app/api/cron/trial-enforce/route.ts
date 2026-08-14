@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { Resend } from "resend";
 import { sendPlanPitchEmail } from "@/lib/emails/plan-pitch";
+import { recordHeartbeat } from "@/lib/ops-heartbeat";
 import { getAdminClient } from "@/lib/supabase-admin";
 import {
   TRIAL_MAX_SECONDS,
@@ -68,6 +69,11 @@ export async function GET(request: Request) {
   if (!authorized) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // cron が動いている証拠を1行残す（絶対に throw しない・3秒で打ち切る）。
+  // ★これが5本の中で最も高頻度（毎分）なので、ウォッチドッグの鮮度判定の主軸になる。
+  // kill switch より前に置く: mode=off でも「cron 自体は生きている」ことを記録したい。
+  await recordHeartbeat("cron:trial-enforce");
 
   // ★ kill switch。env を off に戻して Redeploy すれば以降は何もしない。
   const mode = trialEnforceMode();

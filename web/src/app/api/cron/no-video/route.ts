@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { recordHeartbeat } from "@/lib/ops-heartbeat";
 import { getAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
@@ -89,6 +90,10 @@ export async function GET(request: Request) {
   if (!authorized) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // cron が動いている証拠を1行残す（絶対に throw しない・3秒で打ち切る）。
+  // kill switch より前に置く: off でも「cron 自体は生きている」ことを記録したい。
+  await recordHeartbeat("cron:no-video");
 
   // ★ kill switch。NO_VIDEO_PROBE=off → Redeploy で即停止（ルート全体）。
   if (isOff("NO_VIDEO_PROBE")) {

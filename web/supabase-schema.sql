@@ -222,3 +222,18 @@ create table public.alert_log (
 
 alter table public.alert_log enable row level security;
 -- ポリシーなし = service_role（cron）のみが読み書きできる
+
+-- ── ops_heartbeat（cron / VPS見張りの生存記録・2026-08-14）──────────────
+-- 「サイトは開くのに cron だけ黙っている」を検知するための心拍。
+-- 1行/1プロセスしか増えない（name が PK）。詳細は
+-- web/supabase-migration-ops-heartbeat.sql を参照。
+create table if not exists public.ops_heartbeat (
+  name text primary key,                        -- 'cron:cleanup' / 'vps:watchdog' などの識別子
+  last_run_at timestamptz not null default now(),
+  ok boolean not null default true,
+  detail text                                   -- 短い診断メモ（秘密情報は入れない）
+);
+
+alter table public.ops_heartbeat enable row level security;
+-- ポリシーなし = service_role（cron / VPSワーカー）のみが読み書きできる
+revoke all on table public.ops_heartbeat from anon, authenticated;

@@ -3,6 +3,7 @@ import { isArchiveEnabled } from "@/lib/archive-flag";
 import { isLiveArchiveEnabled } from "@/lib/live-archive-flag";
 import { getEgressClient } from "@/lib/livekit-egress";
 import { stopRtmpEgress } from "@/lib/livekit-rtmp-egress";
+import { recordHeartbeat } from "@/lib/ops-heartbeat";
 import { getAdminClient } from "@/lib/supabase-admin";
 import { deleteRecording } from "@/lib/youtube-upload";
 
@@ -21,6 +22,11 @@ export async function GET(request: Request) {
   if (!authorized) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // cron が動いている証拠を1行残す（絶対に throw しない・3秒で打ち切る）。
+  // 認証直後に置くのは、この後の処理に早期 return が多く、末尾に置くと
+  // 「正常に何もしなかった tick」で心拍が飛んでしまうため。
+  await recordHeartbeat("cron:cleanup");
 
   const admin = getAdminClient();
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();

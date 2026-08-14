@@ -1,10 +1,18 @@
 import { timingSafeEqual } from "node:crypto";
 import { Resend } from "resend";
+import { recordHeartbeat } from "@/lib/ops-heartbeat";
 import { getAdminClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 
-const FROM_ADDRESS = "LIVE SPOtCH <onboarding@resend.dev>";
+/**
+ * ★onboarding@resend.dev は Resend の共有テストアドレスで、送信先が
+ *   「Resend アカウント所有者本人のメール」に制限される。宛先がそれ以外だと
+ *   API はエラーを返し、障害アラートは1通も届かないまま静かに失敗し続ける。
+ *   本番は既に RESEND_FROM_EMAIL=noreply@live-spotch.com（ドメイン検証済み）が
+ *   入っているので、他のメールと同じくそれを読む。fallback は従来と同一。
+ */
+const FROM_ADDRESS = process.env.RESEND_FROM_EMAIL || "LIVE SPOtCH <onboarding@resend.dev>";
 
 // 走査範囲の絞り込み。重複通知の防止は alert_log の UNIQUE(kind, ref_id) が担うため、
 // この窓は「古い障害まで毎回スキャンしない」ためのもの。
@@ -43,6 +51,11 @@ export async function GET(request: Request) {
   if (!authorized) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // cron が動いている証拠を1行残す（絶対に throw しない・3秒で打ち切る）。
+  // 認証直後に置くのは、この後の処理に早期 return が多く、末尾に置くと
+  // 「障害ゼロで何もしなかった tick」で心拍が飛んでしまうため。
+  await recordHeartbeat("cron:alerts");
 
   const admin = getAdminClient();
   const since = new Date(Date.now() - LOOKBACK_MS).toISOString();
