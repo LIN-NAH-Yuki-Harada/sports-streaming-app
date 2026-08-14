@@ -40,3 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 web.html
+
+# Finder が作る複製（「○○ 2.ts」等）を取り込まない
+*[0-9].html
+* [0-9].ts
+* [0-9].tsx
