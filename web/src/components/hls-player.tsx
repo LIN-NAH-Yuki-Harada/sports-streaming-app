@@ -145,8 +145,24 @@ function loadHls(): Promise<HlsLike | null> {
   });
 }
 
-export function HlsPlayer({ src }: { src: string }) {
+export function HlsPlayer({
+  src,
+  onPlaybackMode,
+}: {
+  src: string;
+  // どちらの経路で再生したかを親へ知らせる。
+  // 視聴ページはこれを見てスコアオーバーレイの遅延量を切り替える
+  // （hls.js 経路は liveSyncDurationCount のぶん映像が約4秒遅いため）。
+  onPlaybackMode?: (mode: "native" | "hlsjs") => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // 親から渡された通知先を ref に逃がす。再生の effect の依存は [src] のままにしたいので、
+  // コールバックの同一性が変わっても再生をやり直させない。
+  const onPlaybackModeRef = useRef(onPlaybackMode);
+  useEffect(() => {
+    onPlaybackModeRef.current = onPlaybackMode;
+  }, [onPlaybackMode]);
 
   // ★ 2026-08-04: ブラウザの自動再生ルールを満たすため既定でミュートにしているが、
   //   **音を出す案内を一切出していなかった**。祖父母がリンクを開くと映像は出るのに無音で、
@@ -226,6 +242,11 @@ export function HlsPlayer({ src }: { src: string }) {
     //   実測で再現・確認済みのため、切替時のみ全リクエストに使い捨てトークンを付けて回避する。
     //   （通常の視聴者はこの経路を通らないので CDN のキャッシュ効率には影響しない）
     const startHlsJs = (bustCache = false) => {
+      // ★スコア同期用の経路通知。ネイティブから切り替わって来た場合もここを通る。
+      //   なお下の「hls.js が使えない環境」の分岐では video.src 直指定（＝実質ネイティブ）に
+      //   落ちるが、そこでは訂正しない。遅い側（hls.js 相当）に倒しておく方が安全なため
+      //   （早すぎる＝得点のネタバレ／遅すぎる＝ほぼ気づかれない、の非対称リスク）。
+      onPlaybackModeRef.current?.("hlsjs");
       const bustToken = bustCache ? String(Date.now()) : null;
       const bust = (u: string) =>
         bustToken ? `${u}${u.includes("?") ? "&" : "?"}_r=${bustToken}` : u;
@@ -336,6 +357,9 @@ export function HlsPlayer({ src }: { src: string }) {
 
     // === Safari / iOS（Apple WebKit）= ネイティブ HLS ===
     const startNative = () => {
+      // ★スコア同期用の経路通知。ネイティブ再生は hls.js のバッファ設定の影響を受けないため、
+      //   視聴ページ側は従来どおりの遅延量を使う。
+      onPlaybackModeRef.current?.("native");
       // 一度でもメタデータを読めたか。＝「この環境で HLS が本当に再生できたか」の証拠。
       let sawMetadata = false;
 

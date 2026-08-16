@@ -24,9 +24,20 @@ const SITE_URL =
 
 // HLS視聴は映像が数秒〜10秒遅延するため、リアルタイムのスコアをそのまま重ねると
 // 得点が映像より先に出る（ネタバレ）。スコアオーバーレイを映像の遅延ぶん遅らせて同期する。
-// ※固定値（平均的なHLSライブ遅延）。ズレが残るならこの値を調整。LiveKit経路は ~リアルタイム
-//   なので遅延させない（HLS分岐のみ delayedBroadcast を渡す）。
-const OVERLAY_DELAY_MS = 7000;
+// LiveKit経路は ~リアルタイムなので遅延させない（HLS分岐のみ delayedBroadcast を渡す）。
+//
+// ★2026-08-16: 再生経路ごとに値を分けた。
+//   PR #272 (0595411) で hls.js の liveSyncDurationCount を 4→6 に増やし、
+//   映像が約4秒遅くなった。だが**この設定は hls.js 経路にしか効かない**ため、
+//   ネイティブ再生(Safari)は従来のまま・Chrome/Androidだけが遅くなり、
+//   7秒固定では補正が足りずスコアが先に動くようになった（オーナーの実配信で発覚）。
+//   「iOSではずれないのにPCではずれる」の正体がこれ。
+//
+//   ※どちらも実測に基づく推測値。真の解決は hls.playingDate を使った実測同期（大会後）。
+//   ※アプリ側 mobile/screens/WatchScreen.tsx は 7000 のままで、**もう同値ではない**。
+//     アプリは expo-updates が無く、ストア審査を通る新ビルドでしか直せないため。
+const OVERLAY_DELAY_NATIVE_MS = 7000; // Safari等のネイティブHLS（従来どおり・実績値）
+const OVERLAY_DELAY_HLSJS_MS = 11000; // hls.js（7000 + PR #272 で増えた約4秒）
 
 // 配信終了画面のアプリ誘導（配信はネイティブアプリが最も安定するため・2026-07-26）
 const APP_STORE_URL = "https://apps.apple.com/jp/app/live-spotch/id6785001863";
@@ -129,8 +140,15 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   // 焼き込みありの従来配信（既定 true）は従来どおりネイティブ全画面を許可。
   const scoreboardBurnedIn = broadcast?.scoreboard_burned_in ?? true;
   const router = useRouter();
+  // HLS の再生経路。HlsPlayer から通知される。
+  // ★既定は "hlsjs"（＝遅い側）。経路が確定するまでの数百msでスコアが先に出るのを防ぐ
+  //   （早すぎる＝得点のネタバレ／遅すぎる＝ほぼ気づかれない、の非対称リスク）。
+  const [playbackMode, setPlaybackMode] = useState<"native" | "hlsjs">("hlsjs");
   // HLS視聴用：映像遅延に合わせてスコアを遅らせた broadcast（同期表示）
-  const delayedBroadcast = useDelayedBroadcast(broadcast, OVERLAY_DELAY_MS);
+  const delayedBroadcast = useDelayedBroadcast(
+    broadcast,
+    playbackMode === "native" ? OVERLAY_DELAY_NATIVE_MS : OVERLAY_DELAY_HLSJS_MS,
+  );
   const { stageRef, isFullscreen, isFakeFullscreen, toggleFullscreen } =
     useStageFullscreen<HTMLDivElement>({
       allowVideoFallback: scoreboardBurnedIn,
@@ -502,7 +520,7 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
           // オーバーレイ(配信者画面と同デザイン・DBからリアルタイム)を重ねる。
           // ＝端末は焼き込みOFF(scoreboardVisible=false)・provision は burned_in=false。
           <>
-            <HlsPlayer src={hlsUrl} />
+            <HlsPlayer src={hlsUrl} onPlaybackMode={setPlaybackMode} />
             {!scoreboardBurnedIn && (
               <ViewerScoreboardOverlay broadcast={delayedBroadcast ?? broadcast} />
             )}
