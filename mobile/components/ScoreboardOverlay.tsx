@@ -18,6 +18,11 @@ export function ScoreboardOverlay({ b }: { b: WatchBroadcast }) {
   const { width, height } = useWindowDimensions();
   // 短辺 × 係数を 11〜15px に収める（Web の clamp(11px, 2.4vh, 15px) と同等の考え方）。
   const fs = Math.max(11, Math.min(15, Math.round(Math.min(width, height) * 0.034)));
+  // 横画面ではノッチが側面に移るため上インセットは本来ほぼ0。ただし回転時に
+  // 縦持ちの値(〜59pt)が残るケースがあり、高さの浅い横画面では「スコアが画面の
+  // 15%も下に落ちる」見た目になる（2026-07-12 実戦FB）。横画面は上限20ptに抑える。
+  const isLandscape = width > height;
+  const topInset = isLandscape ? Math.min(insets.top, 20) : insets.top;
 
   const elapsed = useElapsedSeconds(b.started_at, b.status === "live");
   const showSets = b.home_sets > 0 || b.away_sets > 0;
@@ -26,7 +31,7 @@ export function ScoreboardOverlay({ b }: { b: WatchBroadcast }) {
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       {/* 左上: スコアボード */}
-      <View style={[styles.topLeft, { top: insets.top + 10, left: 12 }]}>
+      <View style={[styles.topLeft, { top: topInset + 10, left: 12 }]}>
         <View style={styles.scoreRow}>
           <View style={styles.segTeam}>
             <Text style={[styles.team, { fontSize: fs }]} numberOfLines={1}>
@@ -83,6 +88,28 @@ export function ScoreboardOverlay({ b }: { b: WatchBroadcast }) {
             <CountDots label="S" count={b.strikes ?? 0} total={2} color="#facc15" fs={fs} />
             <CountDots label="O" count={b.outs ?? 0} total={2} color="#ef4444" fs={fs} />
             <RunnerDiamond runners={b.runners} fs={fs} />
+          </View>
+        ) : null}
+
+        {/* テニス系: ゲーム内ポイント（0/15/30/40/Ad・タイブレーク/ファイナルのカウント）。
+            配信側エンジンが確定した表示用文字列 game_points をそのまま描く（ルール知識不要・
+            テニス以外では常に null なので競技判定も不要）。Web 版と同じ規範。 */}
+        {b.game_points ? (
+          <View style={styles.gamePointsRow}>
+            <Text style={[styles.gamePointsLabel, { fontSize: fs * 0.7 }]}>
+              {b.game_points.tb
+                ? b.sport === "ソフトテニス"
+                  ? "ファイナル"
+                  : "TB"
+                : "ポイント"}
+            </Text>
+            <Text style={[styles.gamePointsValue, { fontSize: fs }]}>
+              {b.game_points.home}
+            </Text>
+            <Text style={[styles.gamePointsSep, { fontSize: fs * 0.6 }]}>-</Text>
+            <Text style={[styles.gamePointsValue, { fontSize: fs }]}>
+              {b.game_points.away}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -250,6 +277,25 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     gap: 10,
   },
+  gamePointsRow: {
+    marginTop: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(0,0,0,0.8)",
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 6,
+  },
+  gamePointsLabel: { color: "rgba(255,255,255,0.6)", fontWeight: "700" },
+  gamePointsValue: {
+    color: "#fff",
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
+  },
+  gamePointsSep: { color: "rgba(255,255,255,0.6)" },
+
   countGroup: { flexDirection: "row", alignItems: "center", gap: 4 },
   countLabel: { color: "#d1d5db", fontWeight: "700" },
   dotRow: { flexDirection: "row", alignItems: "center" },

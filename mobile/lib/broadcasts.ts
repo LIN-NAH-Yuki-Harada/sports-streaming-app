@@ -93,7 +93,14 @@ export async function startLiveStream(
 //   （broadcasts の status=ended は endBroadcast 側で記録）。
 export async function fetchStreamTarget(
   broadcastId: string,
-): Promise<{ rtmpUrl: string; playbackUrl: string } | null> {
+): Promise<{
+  rtmpUrl: string;
+  playbackUrl: string;
+  // 配信前の映像チェックの厳格度。サーバーが返さなければ undefined（＝呼び出し側で "warn"）。
+  // ★サーバー側だけで無効化/強化できるようにするための受け口。現時点でサーバーは
+  //   このフィールドを返さないが、返し始めたら**アプリを出し直さずに**効く。
+  preflight?: "off" | "warn" | "block";
+} | null> {
   // 弱4Gでも自前配信(provision)を取りに行く猶予を確保（短いとLiveKit旧経路に落ちる）。
   // ボタンが固まらないよう 30 秒で打ち切り。
   const ctrl = new AbortController();
@@ -116,9 +123,21 @@ export async function fetchStreamTarget(
     const json = (await res.json().catch(() => ({}))) as {
       rtmpUrl?: string;
       playbackUrl?: string;
+      preflight?: string;
     };
     if (!json.rtmpUrl) return null;
-    return { rtmpUrl: json.rtmpUrl, playbackUrl: json.playbackUrl ?? "" };
+    // 知らない値が来たら黙って無視する（＝呼び出し側の既定 "warn" になる）。
+    const preflight =
+      json.preflight === "off" ||
+      json.preflight === "warn" ||
+      json.preflight === "block"
+        ? json.preflight
+        : undefined;
+    return {
+      rtmpUrl: json.rtmpUrl,
+      playbackUrl: json.playbackUrl ?? "",
+      preflight,
+    };
   } catch {
     return null;
   } finally {
@@ -180,6 +199,8 @@ export async function updateScore(
     away_sets: number;
     set_results: unknown;
     point_label: string | null;
+    // テニス系のゲーム内ポイント（表示用文字列。ゲーム間/非テニスは null）
+    game_points: { home: string; away: string; tb?: true } | null;
     // 野球カウント（甲子園風 B/S/O＋走者）
     balls: number;
     strikes: number;
@@ -188,6 +209,42 @@ export async function updateScore(
   }>,
 ): Promise<void> {
   await supabase.from("broadcasts").update(patch).eq("share_code", shareCode);
+}
+
+// 現在のお知らせテロップを読む。配信中に画面が再マウントされても（画面ロック復帰の
+// LiveKit 作り直し等）配信者UIの状態をDBの実態に合わせるために使う。
+// これが無いと「お知らせを消す」が消えて視聴者側に出しっぱなしになる事故が起きる。
+export async function getBroadcastNotice(
+  shareCode: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("notice")
+    .eq("share_code", shareCode)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return (data as { notice: string | null }).notice ?? null;
+}
+
+// 配信者から視聴者へのお知らせテロップを更新（null で非表示に戻す）。
+// Web 版 updateBroadcastNotice（web/src/lib/database.ts）と同じ contract。
+// 書き込みは既存 RLS（配信者本人のみ更新可）+ 列レベル GRANT UPDATE (notice) で保護される
+// ため、ここでの追加ガードは不要。視聴側へは broadcasts の Realtime UPDATE で届く。
+export async function updateBroadcastNotice(
+  shareCode: string,
+  notice: string | null,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("broadcasts")
+    .update({ notice })
+    .eq("share_code", shareCode);
+  if (error) {
+    console.error("お知らせ更新エラー:", error.message);
+    return false;
+  }
+  return true;
 }
 
 // 配信終了（status=ended + 終了時刻を ISO-8601 で記録）。share_code で特定。

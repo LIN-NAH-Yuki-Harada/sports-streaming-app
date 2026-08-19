@@ -4,7 +4,12 @@ import {
   Alert,
   Animated,
   AppState,
+  BackHandler,
   Easing,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  PermissionsAndroid,
   Platform,
   Pressable,
   SafeAreaView,
@@ -16,6 +21,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useKeepAwake } from "expo-keep-awake";
 import {
   AudioSession,
@@ -26,8 +32,13 @@ import {
 } from "@livekit/react-native";
 import { Track } from "livekit-client";
 import RtmpPublisherView, {
+  type RtmpPreflightMode,
   type RtmpStatusEvent,
 } from "../modules/rtmp-publisher/src/RtmpPublisherView";
+import {
+  getDeviceStatus,
+  requestDevicePermissions,
+} from "../modules/rtmp-publisher/src/permissions";
 import { supabase } from "../lib/supabase";
 import { LIVEKIT_URL, SITE_URL } from "../config";
 import {
@@ -57,7 +68,19 @@ import {
   addStrike,
   recordOut,
   toggleRunner,
+  tennisPeriods,
 } from "../lib/sports";
+import {
+  HARD_TENNIS_RULES,
+  SOFT_TENNIS_RULES,
+  initialTennisSnapshot,
+  tennisAddPoint,
+  tennisRemovePoint,
+  formatTennisPoints,
+  tennisPointLabel,
+  type TennisRule,
+  type TennisSnapshot,
+} from "../lib/tennis";
 import {
   createBroadcast,
   updateScore,
@@ -68,6 +91,8 @@ import {
   fetchLiveYoutubeId,
   fetchStreamTarget,
   insertScoreEvent,
+  getBroadcastNotice,
+  updateBroadcastNotice,
 } from "../lib/broadcasts";
 import {
   type Plan,
@@ -130,8 +155,27 @@ function formatScoreboardLine(a: {
   if (a.sportKey === "baseball" && a.baseball) {
     line += `  B${a.baseball.balls} S${a.baseball.strikes} O${a.baseball.outs}`;
   }
-  if (a.setBased && a.pointLabel) line += `  ${a.pointLabel}`;
+  // pointLabel は「セット制の競技」か「テニス系」でしか非 null にならないため、ここで
+  // 競技を再判定する必要はない。setBased で絞ると、セット層の無いソフトテニスの
+  // 「ファイナルゲーム」表示が焼き込みから落ちる。
+  if (a.pointLabel) line += `  ${a.pointLabel}`;
   return line;
+}
+
+// ネイティブから来る英語のエラー文字列を、配信者がその場で対処できる日本語に変える。
+// 未知のものは原文を残す（現場のスクリーンショット1枚で切り分けられるようにするため）。
+function rtmpErrorMessage(raw: string | null | undefined): string {
+  const m = raw ?? "接続に失敗しました";
+  if (m.includes("camera-denied")) {
+    return "カメラの使用が許可されていません。設定アプリで「LIVE SPOtCH」のカメラをオンにしてから、もう一度「配信開始」を押してください。";
+  }
+  if (m.includes("camera-not-found")) {
+    return "カメラが見つかりませんでした。他のアプリを終了してから、もう一度「配信開始」を押してください。";
+  }
+  if (m.includes("no-video") || m.includes("camera-attach-failed")) {
+    return "カメラの映像を取得できませんでした。他のカメラアプリ（写真・ビデオ通話など）を終了してから、もう一度「配信開始」を押してください。";
+  }
+  return "配信エラー: " + m;
 }
 
 // セッション継続性: 中断(電話/回線切替/背景)から「同じ配信」へ復帰するための再接続パラメータ。
@@ -139,6 +183,16 @@ function formatScoreboardLine(a: {
 const BACKGROUND_GRACE_MS = 180_000; // 中断(電話/回線/背景)から復帰を待つ総デッドライン(3分)
 const RECONNECT_COOLDOWN_MS = 6_000; // 作り直し試行の最小間隔(乱発=thrash防止)
 const RECONNECT_SETTLE_MS = 1_500; // 切断検知から最初の作り直しまでの待ち(回線/カメラ安定待ち)
+// ★中断(通話等)が解除されないまま何秒待ったら、解除を待たずに作り直しへ進むか。
+//   2026-08-09 の関東大会準決勝で、LINE通話のあと中断フラグが永久に立ちっぱなしになり、
+//   再接続ループが「通話中だから待つ」を無限に繰り返して**残り全部が静止画**になった。
+//   ネイティブ側の復帰処理も直したが、そこが失敗しても必ず復旧できるよう二重にする。
+const INTERRUPT_WAIT_MAX_MS = 20_000;
+// 共有ボタンを押してから「背景化」が飛ぶまでの猶予。これを超える背景化は共有起点とみなさない。
+const SHARE_TRIGGER_WINDOW_MS = 5_000;
+// 共有起点の離席で配信を終了しない猶予。共有先(LINE)は配信中の端末負荷で重く、
+// 3分では送信作業中に配信が殺されうるため長めに取る（board.md 2026-07-15 の結論）。
+const SHARE_AWAY_GRACE_MS = 600_000; // 10分
 const RECONNECT_STABLE_MS = 5_000; // open が来てから「成功」と確定するまでの安定確認(瞬間openで誤確定しない)
 
 export function BroadcastScreen() {
@@ -154,6 +208,10 @@ export function BroadcastScreen() {
   const [shareCode, setShareCode] = useState<string | null>(null);
 
   // 試合セットアップ（配信開始前に入力）
+  const insets = useSafeAreaInsets(); // Android では RN標準の SafeAreaView が効かないため必須
+  // 開始前画面の情報取得（プラン/チーム/YouTube可否/無料残量）が失敗したかどうか
+  const [setupLoadFailed, setSetupLoadFailed] = useState(false);
+  const [setupReloadKey, setSetupReloadKey] = useState(0);
   const [sportKey, setSportKey] = useState<SportKey>("soccer");
   const [homeTeam, setHomeTeam] = useState("ホーム");
   const [awayTeam, setAwayTeam] = useState("アウェイ");
@@ -161,6 +219,22 @@ export function BroadcastScreen() {
   // 競技のルール種別（バレー: 小学生6人制/6人制/9人制、野球: カテゴリ別イニング）
   const [volleyballRuleName, setVolleyballRuleName] = useState(DEFAULT_VOLLEYBALL_RULE);
   const [baseballRuleName, setBaseballRuleName] = useState(DEFAULT_BASEBALL_RULE);
+  // テニス系のルール（硬式=セットマッチ種別 / ソフト=ゲームマッチ種別）
+  // 硬式の既定は「3セットマッチ」。配列先頭は 1セットマッチだが、既定のまま3セットの
+  // 試合を配信すると第1セット終了でマッチ確定してしまうため、実戦で多い方を既定にする。
+  // （tennis.ts の配列順は Web 版と完全同一に保つ必要があるので、既定だけここで変える）
+  const [tennisRuleKey, setTennisRuleKey] = useState(
+    () => HARD_TENNIS_RULES.find((r) => r.key === "tennis-3set")?.key ?? HARD_TENNIS_RULES[0].key,
+  );
+  const [softTennisRuleKey, setSoftTennisRuleKey] = useState(SOFT_TENNIS_RULES[0].key);
+  // テニス系の進行スナップショット（ポイント→ゲーム→セット→マッチをエンジンが確定する）
+  const [tennis, setTennis] = useState<TennisSnapshot>(initialTennisSnapshot());
+
+  // 開始前共有（案C / 2026-08-03 Android共有クレーム対策 ＋ board.md 2026-07-15「配信中にLINEを
+  // 開くと端末負荷で重い」への構造対策）。共有コードを配信開始**前**に確定させ、ready 画面から
+  // 共有できるようにする。配信中に共有シートを開かせないことが目的。
+  const [pendingShareCode, setPendingShareCode] = useState(() => generateShareCode());
+  const [preShared, setPreShared] = useState(false);
 
   // ライブ中のスコア／ピリオド（バレーは home/awayScore = 現在セットの得点）
   const [homeScore, setHomeScore] = useState(0);
@@ -181,14 +255,23 @@ export function BroadcastScreen() {
   // 画面ロック復帰時に LiveKit 接続を“作り直す(remount)”ための状態
   const [liveKey, setLiveKey] = useState(0); // 変えると LiveKitRoom が再マウント＝再接続
   const bgAtRef = useRef(0); // バックグラウンドに入った時刻
+  // 共有ボタンを押した時刻。直後の背景化を「共有起点」と判定するために使う（Android対策）。
+  const shareOpenedAtRef = useRef(0);
   const remountingRef = useRef(false); // 再接続(作り直し)モード中は onDisconnected/closed で終了させない
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interruptedRef = useRef(false); // 通話等で映像キャプチャ中断中＝復帰まで作り直しを待つ
+  const interruptedAtRef = useRef(0); // 中断が始まった時刻（長引いたら待たずに作り直す判定用）
   const wasLiveRef = useRef(false); // 一度でも open(配信確立)したか。配信中エラーは終了せず再接続するため
   const wasInterruptedRef = useRef(false); // 今回の再接続が通話起因か（終了メッセージ出し分け用）
   const recoverDeadlineRef = useRef(0); // 再接続を諦める総デッドライン（この時刻を過ぎたら finishLive）
   const recoverAttemptRef = useRef<() => void>(() => {}); // 直近の「作り直し試行」関数（resumed で即時呼ぶ用）
   const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // open の安定確認タイマー
+  // ★映像が届いていない疑い（ネイティブの novideo 通知）。表示専用で、配信は止めない。
+  const [noVideo, setNoVideo] = useState(false);
+  // 配信前チェックの厳格度。サーバー（/api/stream/provision）が preflight を返せば従い、
+  // 返さなければ "warn"（＝警告のみ・絶対に止めない）。**アプリを出し直さずに
+  // サーバー側だけで無効化/強化できる**ようにするための受け口。
+  const [preflightMode, setPreflightMode] = useState<RtmpPreflightMode>("warn");
   // プラン＆無料トライアル
   const [plan, setPlan] = useState<Plan>("free");
   const [trialRemainingAtStart, setTrialRemainingAtStart] = useState(0);
@@ -212,9 +295,37 @@ export function BroadcastScreen() {
   // セット制（バレー/バド/卓球）の有効ルール。表示と終了時のセット勝利判定に使う。
   const activeSetRule = setBased ? setSportRule(sportKey, volleyballRuleName) : null;
 
+  // テニス系の有効ルール（非テニスでは null）。進行はエンジン（lib/tennis.ts）が担うため
+  // setBased（手動でセットを進める競技）には含めない。参照は定数配列の要素なので安定。
+  const tnRule: TennisRule | null =
+    sportKey === "tennis"
+      ? HARD_TENNIS_RULES.find((r) => r.key === tennisRuleKey) ?? HARD_TENNIS_RULES[0]
+      : sportKey === "soft_tennis"
+        ? SOFT_TENNIS_RULES.find((r) => r.key === softTennisRuleKey) ?? SOFT_TENNIS_RULES[0]
+        : null;
+  // DB へ書く生の値（マッチ確定後は null）。
+  // ★ useMemo 必須: formatTennisPoints は毎回**新しいオブジェクト**を返すため、そのまま
+  //   同期 effect の依存配列に入れると毎レンダー differ 判定されて DB 更新が走り続ける。
+  const tennisPoints = useMemo(
+    () => (tnRule ? formatTennisPoints(tnRule, tennis) : null),
+    [tnRule, tennis],
+  );
+  // 配信者に見せる表示（マッチ確定後は「—」）。こちらは描画専用で依存配列には入れない。
+  const tennisDisplay = tnRule ? tennisPoints ?? { home: "—", away: "—" } : null;
+
+  // 「セット数を出すか」。硬式テニスはセットがあるので出す（ソフトテニスはゲーム先取制で
+  // セット層が無いので出さない）。setBased と分けているのは、setBased が同時に
+  // 「次のセットへ」ボタンの出し分けでもあり、テニスはセット確定が自動だから。
+  const showSets = setBased || tnRule?.kind === "hard";
+
   // finishLive から「最新の得点状態」を参照するための ref（毎レンダー更新・依存配列を膨らませない）。
   // 終了時に、未確定の最終セット得点を set_results へ記録するのに使う。
   const liveScoreRef = useRef({
+    isTennis: !!tnRule,
+    // ソフトテニスだけ「マッチ確定時にエンジンが setResults へ push するのに
+    // hGames/aGames を 0 に戻さない」ため、終了時の追記が二重になる。その判定に使う。
+    tennisKind: tnRule?.kind ?? null,
+    tennisMatchWon: tennis.matchWon,
     setBased,
     homeScore,
     awayScore,
@@ -225,6 +336,9 @@ export function BroadcastScreen() {
     rule: activeSetRule,
   });
   liveScoreRef.current = {
+    isTennis: !!tnRule,
+    tennisKind: tnRule?.kind ?? null,
+    tennisMatchWon: tennis.matchWon,
     setBased,
     homeScore,
     awayScore,
@@ -237,12 +351,19 @@ export function BroadcastScreen() {
 
   // 競技＋ルール種別に応じた有効ピリオド配列（野球はカテゴリでイニング数が変わる）
   const activePeriods = useMemo(
-    () => (sportKey === "baseball" ? baseballPeriods(baseballRuleName) : periodsFor(sportKey)),
-    [sportKey, baseballRuleName],
+    () =>
+      sportKey === "baseball"
+        ? baseballPeriods(baseballRuleName)
+        : tnRule
+          ? tennisPeriods(tnRule)
+          : periodsFor(sportKey),
+    [sportKey, baseballRuleName, tnRule],
   );
 
   // セット/マッチ(ゲーム)ポイント表示（バレー/バドミントン/卓球・ライブ中のみ意味を持つ）
   const pointLabel = (() => {
+    // テニス系はエンジンが「セットポイント/マッチポイント/タイブレーク」を判定する。
+    if (tnRule) return tennisPointLabel(tnRule, tennis);
     if (!setBased || !activeSetRule) return null;
     return setSportPointLabel(sportKey, activeSetRule, homeSets, awaySets, homeScore, awayScore);
   })();
@@ -268,6 +389,20 @@ export function BroadcastScreen() {
         fetchMyProfile(uid),
       ]);
       if (cancelled) return;
+      // ★ 2026-08-05: lib の fetch* は **throw せず既定値を返す**（fetchPlan→"free" /
+      //   fetchMyTeams→[] / fetchMyProfile→null）。supabase-js もネットワーク失敗を
+      //   例外にせず {data:null,error} で返すため、下の .catch は実際には呼ばれず、
+      //   ede9a17 で入れた「取得失敗の警告」は**デッドコード**だった。
+      //   それどころか plan="free" が確定し、有料契約者の開始前画面に
+      //   「無料体験 残り10:00」が出てチーム選択欄も消え、個人配信として始まってしまう。
+      //   → 戻り値で判定する。profiles の行はサインアップ時に必ず作られるので、
+      //     null は「読めなかった」と断定できる（3本の中で最も確実な失敗指標）。
+      if (!profile) {
+        setSetupLoadFailed(true);
+        return; // 誤った既定値（free / チーム無し）を画面に適用しない
+      }
+      // 再読み込みで復旧したときに警告カードを必ず消す（従来は true のままだった）。
+      setSetupLoadFailed(false);
       setPlan(p);
       setMyTeams(teams);
       // YouTube同時配信は「チームプラン＋YouTube連携済み(channel_id)＋連携ON」のときだけ。
@@ -284,17 +419,50 @@ export function BroadcastScreen() {
       } else {
         setTrialRemainingAtStart(0);
       }
-    })().catch(() => {});
+    })().catch(() => {
+      // ★ 2026-08-04: ここで黙って握り潰していたため、弱電波でプラン/チームの取得に
+      //   失敗すると**チーム選択欄が出ないまま**になり、配信者は気づかずに個人配信として
+      //   開始してしまう（チームの試合一覧に出ない）。無料残量も 0 のまま表示される。
+      //   → 取得できなかったことを画面に出し、やり直せるようにする。
+      if (!cancelled) setSetupLoadFailed(true);
+    });
     return () => {
       cancelled = true;
     };
-  }, [phase]);
+  }, [phase, setupReloadKey]);
 
   // 競技/ルールを変えたら、最初のピリオドに合わせる（ready 画面で選択時）
   useEffect(() => {
     if (phase === "live") return;
     setPeriod(activePeriods[0]);
   }, [activePeriods, phase]);
+
+  // ゴースト対策の心拍: 配信中（RTMP / LiveKit 両経路）は 60 秒ごとに last_seen_at を更新。
+  // 異常終了（クラッシュ/電池切れ/圏外）で停止処理が飛ばなくても、サーバー側の掃除
+  // （web cron cleanup / VPS ghost sweep）が途絶を検知して自動で ended に補正できる。
+  // 失敗は次の心拍で再送するだけなので無視（Web版 broadcast/page.tsx と同仕様）。
+  useEffect(() => {
+    if (phase !== "live") return;
+    const beat = async () => {
+      const id = broadcastIdRef.current;
+      if (!id) return;
+      // Android は背景でも JS タイマーが動き続けるため、背景中は心拍を打たない
+      // （凍った配信が「生きている」と誤認されてサーバー掃除を回避するのを防ぐ。
+      //   背景化は別途 BACKGROUND_GRACE_MS=3分 で finishLive される）。
+      if (AppState.currentState !== "active") return;
+      try {
+        await supabase
+          .from("broadcasts")
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq("id", id);
+      } catch {
+        // 失敗は無視（次の心拍で再送）
+      }
+    };
+    void beat();
+    const interval = setInterval(() => void beat(), 60_000);
+    return () => clearInterval(interval);
+  }, [phase]);
 
   // ライブ中、スコア/ピリオド/セットの変更を broadcasts 行へ反映（視聴ページに Realtime で届く）
   useEffect(() => {
@@ -304,7 +472,8 @@ export function BroadcastScreen() {
       away_score: awayScore,
       period,
     };
-    if (setBased) {
+    // テニス系もセット/ゲーム集計を同じ列に載せる（home_sets/away_sets/set_results）。
+    if (setBased || tnRule) {
       patch.home_sets = homeSets;
       patch.away_sets = awaySets;
       patch.set_results = setResults;
@@ -312,9 +481,15 @@ export function BroadcastScreen() {
     updateScore(shareCode, patch);
     // セット/マッチ(ゲーム)ポイントは別更新に分離（万一 point_label 列が無くても
     // 得点更新を巻き添えで失敗させない＝過去のリグレッション再発防止）。
-    // バレーだけでなくバドミントン/卓球も対象。
-    if (setBased) {
+    // バレーだけでなくバドミントン/卓球・テニス系も対象。
+    if (setBased || tnRule) {
       updateScore(shareCode, { point_label: pointLabel });
+    }
+    // テニス系のゲーム内ポイント。同じ理由で更に別更新にする（game_points 列は
+    // 2026-07-26 追加のため、未適用環境でも他の更新を巻き添えにしない）。
+    // 表示用に「—」で埋めた tennisDisplay ではなく、生の値（マッチ確定後は null）を書く。
+    if (tnRule) {
+      updateScore(shareCode, { game_points: tennisPoints });
     }
   }, [
     phase,
@@ -328,6 +503,8 @@ export function BroadcastScreen() {
     setBased,
     sportKey,
     pointLabel,
+    tnRule,
+    tennisPoints,
   ]);
 
   // 配信中の経過時間タイマー（1秒ごと）
@@ -342,12 +519,114 @@ export function BroadcastScreen() {
   const handleStart = useCallback(async () => {
     setBusy(true);
     setMessage(null);
+
+    // ★2026-08-10: Android は配信開始前に自分で実行時許可を取りに行く。
+    //
+    // 【なぜ必要か】このアプリには実行時権限を要求するコードが**1行も無かった**。
+    //   旧 LiveKit 経路では `getUserMedia` がライブラリ内部で許可ダイアログを出していたが、
+    //   **RTMP 経路はそこへ行く前に return する**ため、許可が一度も要求されない。
+    //   RootEncoder は権限を確認せずカメラを開きに行き、蹴られると
+    //   "Open camera 0 failed" とだけ返す（実機で発生・2026-08-10）。
+    //   ＝**新規インストールした端末は全て確実にこの穴に落ちる。**
+    //
+    // ★配信の行を作る前に置くこと。後ろに置くと、許可が下りなかったときに
+    //   配信データだけが作られて宙に浮く。
+    // ★RTMP / LiveKit の分岐より前に置くこと（両経路に効く。LiveKit 側は
+    //   二重に要求されるが、許可済みならダイアログは出ないので無害）。
+    if (Platform.OS === "android") {
+      try {
+        const res = await PermissionsAndroid.requestMultiple([
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        ]);
+        const cam = res[PermissionsAndroid.PERMISSIONS.CAMERA];
+        const mic = res[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
+        if (cam !== "granted" || mic !== "granted") {
+          const never =
+            cam === "never_ask_again" || mic === "never_ask_again";
+          setMessage(
+            never
+              ? "カメラとマイクの使用を許可してください。設定画面を開きます。"
+              : "カメラとマイクの使用が必要です。もう一度「配信開始」を押し、表示される確認で「許可」を選んでください。",
+          );
+          if (never) Linking.openSettings().catch(() => {});
+          setBusy(false);
+          return;
+        }
+      } catch {
+        // 権限APIが失敗しても配信開始そのものは塞がない（従来どおり進んで
+        // ネイティブ側のエラーに委ねる）。ここで止めると回復不能になる。
+      }
+    }
+
+    // ★2026-08-12: iOS にも同じ事前確認を入れる（これまで iOS には権限を確認する
+    //   コードが**1行も無かった**）。
+    //
+    // 【なぜ必要か】iOS では HaishinKit の attachVideo が権限拒否で失敗しても
+    //   例外が握り潰され、**音声だけの配信がそのまま成立していた**。
+    //   配信者の画面には「配信中」と出るので誰も気づけず、視聴者だけが真っ暗を見る。
+    //   実データで同じ配信者が3回（07/12・07/14・08/12）同じ壊れ方をしている。
+    //
+    // ★配信の行を作る**前**に置くこと（Android ブロックと同じ理由）。
+    // ★拒否されていたら必ず日本語の手順と設定アプリへの導線を出す。黙って return しない。
+    //   一度「許可しない」を押されると、アプリからは二度とダイアログを出せない。
+    if (Platform.OS === "ios") {
+      try {
+        let st = await getDeviceStatus();
+        if (st.camera === "undetermined" || st.mic === "undetermined") {
+          st = await requestDevicePermissions();
+        }
+        if (st.camera === "denied" || st.mic === "denied") {
+          const what =
+            st.camera === "denied" && st.mic === "denied"
+              ? "カメラとマイク"
+              : st.camera === "denied"
+                ? "カメラ"
+                : "マイク";
+          setMessage(
+            `${what}の使用が許可されていません。設定画面を開きますので、「LIVE SPOtCH」の${what}をオンにしてから、もう一度「配信開始」を押してください。`,
+          );
+          Linking.openSettings().catch(() => {});
+          setBusy(false);
+          return;
+        }
+      } catch {
+        // 状態が読めなかった場合は**通す**。ここで止めると、確認の仕組み自体の不具合で
+        // 試合が配信できなくなる。映像が来ていなければ後段のプリフライトが警告を出す。
+      }
+    }
+
     let createdCode: string | null = null;
+
+    // 配信の行を作った**後**に失敗したときの後始末。
+    //
+    // ★ 2026-08-04 修正（1.1.5 で入れてしまった後退）:
+    //   1.1.5 で「開始前に共有したコードをそのまま使う」方式にしたが、行を作った後に
+    //   失敗する経路で `pendingShareCode` を採り直していなかった。share_code は unique
+    //   制約なので、2回目の「配信開始」が同じコードで必ず一意制約違反になり、
+    //   「視聴リンクが変わりました」と出て**また始まらない**（3回目でようやく成功）。
+    //   体育館の弱電波で1回目がコケるのは普通に起きるため、試合直前に2連続で失敗していた。
+    //   → 行を終了させたら**必ず次回用のコードを採り直す**。
+    //
+    //   なお開始前共有で配ったリンクはこの時点で使えなくなる（行が ended になるため
+    //   受け取った家族には「この配信は終了しました」が出る）。黙って変えると気づけないので
+    //   共有済みのときだけ明示的に伝える。
+    const failAfterCreate = async (msg: string) => {
+      if (createdCode) await endBroadcast(createdCode).catch(() => {});
+      setPendingShareCode(generateShareCode());
+      setMessage(
+        preShared
+          ? `${msg}\n※ 視聴リンクが新しくなりました。もう一度共有してから配信を開始してください。`
+          : msg,
+      );
+      setPreShared(false);
+    };
+
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const session = sessionData.session;
       if (!session) {
-        setMessage("セッションがありません。再ログインしてください。");
+        setMessage("通信が不安定です。電波の良い場所で再度お試しください。（改善しない場合は一度ログインし直してください）");
         setBusy(false);
         return;
       }
@@ -368,7 +647,9 @@ export function BroadcastScreen() {
       // 異常終了で残った自分のゴースト配信を先に全終了（二重配信の防止）
       await sweepGhostBroadcasts(session.user.id).catch(() => {});
 
-      const code = generateShareCode();
+      // 開始前共有で配布済みのコードをそのまま使う（ここで採番し直すと、先に共有した
+      // リンクが死ぬ）。衝突時のみ後段で採番し直す。
+      const code = pendingShareCode;
       const initialPeriod = activePeriods[0];
 
       // スコア・セット・野球カウントを初期化
@@ -378,6 +659,9 @@ export function BroadcastScreen() {
       setAwaySets(0);
       setSetResults([]);
       setBaseball(emptyBaseballCount());
+      // テニス系の進行（ポイント/ゲーム/セット/マッチ確定）も配信ごとに初期化する。
+      // これが無いと前の試合の matchWon が残り、＋ボタンが無反応になる。
+      setTennis(initialTennisSnapshot());
       setPeriod(initialPeriod);
 
       const created = await createBroadcast({
@@ -391,7 +675,18 @@ export function BroadcastScreen() {
         initialPeriod,
       });
       if (created.error) {
-        setMessage("配信作成エラー: " + created.error);
+        // share_code は unique 制約。開始前共有では採番し直すと共有済みリンクが死ぬため、
+        // 衝突したときだけ新しいコードに切り替え、共有し直しを明示的に促す。
+        if (/duplicate|unique|23505/i.test(created.error)) {
+          const fresh = generateShareCode();
+          setPendingShareCode(fresh);
+          setPreShared(false);
+          setMessage(
+            "視聴リンクが変わりました。お手数ですが、もう一度共有してから配信を開始してください。",
+          );
+        } else {
+          setMessage("配信作成エラー: " + created.error);
+        }
         setBusy(false);
         return;
       }
@@ -408,19 +703,31 @@ export function BroadcastScreen() {
       // まず自前配信サーバー(ネイティブRTMP→MediaMTX＋端末スコア焼き込み)を試す。サーバーフラグ
       // (NEXT_PUBLIC_STREAM_SELFHOST) がOFF/未設定なら null が返るので、従来の LiveKit 経路へ
       // 自動フォールバックする（=本番が壊れない・サーバー側フラグ1つで全体切替）。
-      // RTMP 自前配信は iOS 専用モジュール（modules/rtmp-publisher = apple only）。
-      // Android はサーバーフラグに関わらず必ず LiveKit にフォールバックする
-      // （Android で RTMP を選ぶとネイティブビューが無くクラッシュするため）。
-      const stream =
-        created.id && Platform.OS === "ios"
-          ? await fetchStreamTarget(created.id)
-          : null;
+      // ★2026-08-10: Android にもネイティブ RTMP 実装（RootEncoder 2.6.7・Kotlin）を載せたので
+      //   iOS 限定を解除した。以前は「Android で RTMP を選ぶとネイティブビューが無くクラッシュする」
+      //   ためガードしていたが、modules/rtmp-publisher/android/ を追加済み。
+      //
+      // 【なぜ Android も RTMP にするのか】
+      //   Android の LiveKit(WebRTC) 経路は、電波が苦しくなると**解像度そのものを落とす**
+      //   （実測で 320x180 まで落ちうる＝720p の1/16の情報量）。さらに YouTube へは
+      //   ヘッドレス Chrome で画面を録り直すため、コマ数の食い違いでカクつく。
+      //   2026-08-09 の関東大会（実顧客）で「見るに耐えない」画質になった。
+      //   RTMP は TCP なので、パケットが落ちても**画質を捨てずに再送**する。iOS 実測 3,400-3,505kbps。
+      //
+      // ★サーバーフラグ（NEXT_PUBLIC_STREAM_SELFHOST）が OFF なら従来どおり null が返り
+      //   LiveKit へ自動フォールバックする＝**サーバー側の1フラグで即座に戻せる**。
+      const stream = created.id ? await fetchStreamTarget(created.id) : null;
       if (stream) {
         transportRef.current = "rtmp";
         endedRef.current = false;
         remountingRef.current = false;
         wasLiveRef.current = false;
         bgAtRef.current = 0;
+        setNoVideo(false);
+        // サーバーが指定してくれば従う（未指定なら "warn"＝止めない）。
+        // ★これがサーバー側キルスイッチ。万一この機能が誤爆したら、サーバーが
+        //   "off" を返すだけで**アプリの再提出なしに**全端末で即座に無効化できる。
+        setPreflightMode(stream.preflight ?? "warn");
         liveStartedAtRef.current = Date.now();
         setElapsed(0);
         // RtmpPublisher は AVCaptureSession で自前に音声を扱うため LiveKit の
@@ -458,12 +765,11 @@ export function BroadcastScreen() {
           signal: ctrl.signal,
         });
       } catch {
-        setMessage(
+        await failAfterCreate(
           timedOut
             ? "サーバーの応答がありません。電波の良い場所で再度お試しください。"
             : "通信に失敗しました。電波状況をご確認ください。",
         );
-        await endBroadcast(createdCode).catch(() => {});
         setBusy(false);
         return;
       } finally {
@@ -480,12 +786,11 @@ export function BroadcastScreen() {
       }
       if (!res.ok || !json?.token) {
         const maintenance = res.status === 402 || res.status === 503 || json === null;
-        setMessage(
+        await failAfterCreate(
           maintenance
             ? "ただいまサーバーに接続できません（メンテナンス中の可能性）。少し時間をおいて再度お試しください。"
             : "トークン取得エラー: " + (json?.error ?? "HTTP " + res.status),
         );
-        await endBroadcast(createdCode).catch(() => {});
         setBusy(false);
         return;
       }
@@ -501,9 +806,10 @@ export function BroadcastScreen() {
       setShareCode(code);
       setPhase("live");
     } catch (e) {
-      setMessage("開始エラー: " + (e instanceof Error ? e.message : String(e)));
       await AudioSession.stopAudioSession().catch(() => {});
-      if (createdCode) await endBroadcast(createdCode).catch(() => {});
+      await failAfterCreate(
+        "開始エラー: " + (e instanceof Error ? e.message : String(e)),
+      );
     } finally {
       setBusy(false);
     }
@@ -518,6 +824,8 @@ export function BroadcastScreen() {
     selectedTeamId,
     youtubeEligible,
     youtubeLiveOn,
+    pendingShareCode,
+    preShared,
   ]);
 
   // 配信終了（停止ボタン / 接続エラー / 切断 のいずれからも呼ばれる。二重実行は endedRef でガード）
@@ -573,6 +881,32 @@ export function BroadcastScreen() {
             away_score: ls.awayScore,
             period: ls.period,
           }).catch(() => {});
+
+          // ★ 2026-08-04: テニス系の後始末（Web 版は既にやっている）。
+          //   ①途中で止めると**進行中セットのゲーム数が内訳に残らない**ので追記する。
+          //   ②終了後も game_points / point_label が DB に残り、視聴側や履歴に
+          //     「ポイント 40-30」「マッチポイント」が出しっぱなしになるので消す。
+          if (ls.isTennis) {
+            // ★ 2026-08-05: ソフトテニスで最後まで進めた場合は**追記しない**。
+            //   エンジンはマッチ確定時に setResults へ push する一方 hGames/aGames を
+            //   0 に戻さない（硬式のセット確定側は戻す）。そのまま追記すると
+            //   set_results が ["3-1", "3-1"] と二重になり、Web のスケジュール画面が
+            //   全件描画するため記録が2行出る。＝ソフトテニス専用の抜け。
+            const alreadyRecorded =
+              ls.tennisKind === "soft" && !!ls.tennisMatchWon;
+            if (!alreadyRecorded && (ls.homeScore > 0 || ls.awayScore > 0)) {
+              await updateScore(shareCode, {
+                set_results: [
+                  ...ls.setResults,
+                  { home: ls.homeScore, away: ls.awayScore },
+                ],
+              }).catch(() => {});
+            }
+            await updateScore(shareCode, {
+              game_points: null,
+              point_label: null,
+            }).catch(() => {});
+          }
         }
       }
       if (shareCode) await endBroadcast(shareCode).catch(() => {});
@@ -597,13 +931,17 @@ export function BroadcastScreen() {
         if (used > 0) {
           const { data } = await supabase.auth.getSession();
           const tok = data.session?.access_token;
-          if (tok) await consumeTrial(tok, used).catch(() => {});
+          // 配信IDを渡すとサーバー側で「その配信が実在するか」を検証できる（不正加算の防止）。
+        if (tok) await consumeTrial(tok, used, broadcastIdRef.current ?? undefined).catch(() => {});
         }
       }
       setToken(null);
       setRtmpUrl(null);
       transportRef.current = null;
       setShareCode(null);
+      // 次の試合用に開始前共有コードを採番し直す（前の試合のリンクを使い回さない）。
+      setPendingShareCode(generateShareCode());
+      setPreShared(false);
       if (msg) setMessage(msg);
       setPhase("ready");
     },
@@ -630,8 +968,16 @@ export function BroadcastScreen() {
     }
   }, []);
 
+  // 共有シートを開いた瞬間を記録する。Android では直後に必ず "background" が飛ぶため、
+  // AppState ハンドラがこれを見て「離席」ではなく「共有」と判定する。
+  const markShareOpened = useCallback(() => {
+    shareOpenedAtRef.current = Date.now();
+  }, []);
+
   const startRecovering = useCallback(
-    (reason: string) => {
+    // settleMs: 最初の作り直しまでの待ち時間の上書き。共有シートからの復帰は
+    // 回線もカメラも無事なので 0（即試行）を渡して復帰を速める。
+    (reason: string, settleMs?: number) => {
       if (endedRef.current) return;
       if (remountingRef.current) {
         // 既に再接続中＝デッドラインだけ延長（中断が重なった場合）。試行ループは継続中。
@@ -656,8 +1002,21 @@ export function BroadcastScreen() {
         }
         if (interruptedRef.current) {
           // 通話中＝カメラ使用不可。作り直さずクールダウン後に再チェック。
-          reconnectTimerRef.current = setTimeout(attempt, RECONNECT_COOLDOWN_MS);
-          return;
+          // ★ただし待つのは INTERRUPT_WAIT_MAX_MS まで。中断解除の通知が来ない端末/経路
+          //   （LINE通話等の VoIP は iOS が .shouldResume を付けないことがある）では、
+          //   ここで待ち続けると**永久に復旧しない**。上限を超えたら中断フラグを落として
+          //   通常の作り直しに進む（カメラがまだ使えなければ、その試行が失敗して
+          //   またクールダウンするだけ＝安全に再試行され続ける）。
+          const stuckMs = interruptedAtRef.current
+            ? Date.now() - interruptedAtRef.current
+            : 0;
+          if (stuckMs < INTERRUPT_WAIT_MAX_MS) {
+            reconnectTimerRef.current = setTimeout(attempt, RECONNECT_COOLDOWN_MS);
+            return;
+          }
+          console.log("[recover] 中断が長引いたため待たずに作り直す", stuckMs, "ms");
+          interruptedRef.current = false;
+          interruptedAtRef.current = 0;
         }
         console.log("[recover] remount attempt");
         setLiveKey((k) => k + 1); // 同一 broadcastId/共有コードへ作り直し＝再接続
@@ -669,18 +1028,33 @@ export function BroadcastScreen() {
       // 初回は少し待つ（回線/カメラの安定待ち）。通話中ならクールダウン後に。
       reconnectTimerRef.current = setTimeout(
         attempt,
-        interruptedRef.current ? RECONNECT_COOLDOWN_MS : RECONNECT_SETTLE_MS,
+        interruptedRef.current
+          ? RECONNECT_COOLDOWN_MS
+          : (settleMs ?? RECONNECT_SETTLE_MS),
       );
     },
     [finishLive, stopRecovering],
   );
 
   // 画面ロック/バックグラウンド対応（同じ配信を続ける＝視聴URL不変）:
-  // ・背景化した時刻を記録（共有シートは "inactive" なので発火しない）。
-  // ・復帰("active")時に 90秒以内なら LiveKit 接続を“作り直して(remount)”再開。
+  // ・背景化した時刻を記録し、復帰("active")時に接続を“作り直して(remount)”再開する。
   //   → setLiveKey で LiveKitRoom を再マウント＝サーバーへ確実に再 publish。
   //   → 作り直し中は remountingRef で onDisconnected を抑止（誤終了防止）。
-  // ・90秒超の離脱、または 15秒以内に onConnected が来なければ終了（視聴者を宙ぶらりんにしない）。
+  // ・BACKGROUND_GRACE_MS(3分)超の離脱は終了（視聴者を宙ぶらりんにしない）。
+  //
+  // ★ 2026-08-03 修正（Android実クレーム「共有中に画面が真っ暗」）:
+  //   旧コメントは「共有シートは "inactive" なので発火しない」と書いていたが、これは **iOS だけ**
+  //   の話だった。React Native の Android には "inactive"（前面だが操作不能）が存在せず
+  //   （AppState.js の型定義で inactive は @platform ios、Android ネイティブ側の定数も
+  //   active/background の2つのみ）、Android の共有シートは別Activityとして起動するため
+  //   **必ず "background" が飛ぶ**。結果、共有するたびに再接続が走り、共有先(LINE)に留まって
+  //   3分を超えると配信そのものが終了していた。
+  //
+  //   対策: 共有ボタン起点の離席だけ扱いを変える。
+  //   - 終了しない猶予を SHARE_AWAY_GRACE_MS まで延ばす（共有先で手間取っても配信を殺さない）
+  //   - 復帰後の作り直しを待たずに即試行する（回線断ではなくカメラは無事なので待つ理由がない）
+  //   ※ 「作り直し自体をやめる」ことはしない。Android はバックグラウンドでカメラが実際に
+  //     停止するため、再 publish しないと**黒が戻らなくなる**（今より悪化する）。
   useEffect(() => {
     if (phase !== "live") return;
     const sub = AppState.addEventListener("change", (state) => {
@@ -690,18 +1064,42 @@ export function BroadcastScreen() {
         if (bgAtRef.current === 0) return;
         const awayMs = Date.now() - bgAtRef.current;
         bgAtRef.current = 0;
-        if (awayMs > BACKGROUND_GRACE_MS) {
+        // 共有ボタン直後の背景化か（押してから背景化までの猶予を見て判定）。
+        const sharedAt = shareOpenedAtRef.current;
+        shareOpenedAtRef.current = 0;
+        const fromShare =
+          sharedAt > 0 && Date.now() - awayMs - sharedAt < SHARE_TRIGGER_WINDOW_MS;
+        const graceMs = fromShare ? SHARE_AWAY_GRACE_MS : BACKGROUND_GRACE_MS;
+        if (awayMs > graceMs) {
           finishLive(
             "長時間の離脱で配信を終了しました。再開するには「配信開始」を押してください。",
           );
           return;
         }
         // 接続を作り直して同じ配信を再開（視聴URLは変わらない）
-        startRecovering("foreground");
+        startRecovering(fromShare ? "share" : "foreground", fromShare ? 0 : undefined);
       }
     });
     return () => sub.remove();
   }, [phase, finishLive, startRecovering]);
+
+  // ★ 2026-08-04: Android の「戻る」を配信中だけ乗っ取る。
+  //   横持ちで画面の端をつかんだ拍子に戻る操作が入ると、1回でホーム画面へ飛び
+  //   （配信中はタブバーを隠しているので戻れない）、もう1回でアプリが終了する。
+  //   停止処理が走らないので broadcasts は live のまま残り、**視聴者は止まった映像を
+  //   見続ける**（ゴースト配信）。iPhone にこの操作は無いため誰も踏まない＝iOS前提の穴。
+  //   → 既存の「配信を停止しますか？」に吸わせ、既定の戻る動作は止める。
+  useEffect(() => {
+    if (phase !== "live" || Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      Alert.alert("配信を停止しますか？", "視聴者に配信が終了します。", [
+        { text: "キャンセル", style: "cancel" },
+        { text: "停止する", style: "destructive", onPress: () => finishLive(null) },
+      ]);
+      return true; // true = 既定の戻る動作（画面遷移・アプリ終了）を行わない
+    });
+    return () => sub.remove();
+  }, [phase, finishLive]);
 
   // 回線切替(WiFi↔5G)の主動検知: 回線種別が変わったら古い TCP の timeout を待たず即再接続。
   // ＝同じ共有コードのまま新回線へ再 publish（視聴URL不変）。配信中のみ監視。
@@ -767,7 +1165,7 @@ export function BroadcastScreen() {
   }, [phase, liveYoutubeId]);
 
   // セット/ゲーム制(バレー/バドミントン/卓球): 「次へ」= 現得点を集計→セット数加算→0-0リセット→次の番号へ
-  const handleNextSet = useCallback(() => {
+  const advanceSetNow = useCallback(() => {
     const r = advanceSet({ homeSets, awaySets, setResults }, homeScore, awayScore);
     setHomeSets(r.state.homeSets);
     setAwaySets(r.state.awaySets);
@@ -778,21 +1176,168 @@ export function BroadcastScreen() {
     setPeriod(periodLabelForSet(sportKey, gameNumber));
   }, [homeSets, awaySets, setResults, homeScore, awayScore, sportKey]);
 
+  const handleNextSet = useCallback(() => {
+    // ★ 2026-08-04: 0-0 や同点で押されると、画面上は何も変わらないのに**中身のない
+    //   セットが記録に積まれる**（押すたび増える）。試合後の内訳が
+    //   「25-23 / 0-0 / 0-0 / 25-20」のように壊れるため、入口で止める。
+    if (homeScore === 0 && awayScore === 0) return; // 空押しは黙って無視
+    if (homeScore === awayScore) {
+      Alert.alert(
+        "同点のまま次のセットへ進みますか？",
+        "どちらのセット獲得にもなりません。押し間違いでなければ「進む」を選んでください。",
+        [
+          { text: "キャンセル", style: "cancel" },
+          { text: "進む", onPress: () => advanceSetNow() },
+        ],
+      );
+      return;
+    }
+    advanceSetNow();
+  }, [homeScore, awayScore, advanceSetNow]);
+
+
+  // テニス/ソフトテニス: ＋は「ゲーム」ではなく「ポイント」を進める。
+  // ゲーム/セット/マッチの確定はエンジン（lib/tennis.ts）が自動判定するので、
+  // ここは返ってきたスナップショットを既存の列（得点=ゲーム数 / セット数 / set_results）へ
+  // 写すだけ。DB 反映は既存のスコア同期 effect が拾う。
+  // テニスの状態を画面の各 state へ反映する（＋と Undo の両方から使う共通処理）。
+  const applyTennisSnapshot = useCallback((s: TennisSnapshot) => {
+    setTennis(s);
+    setHomeScore(s.hGames);
+    setAwayScore(s.aGames);
+    setHomeSets(s.hSets);
+    setAwaySets(s.aSets);
+    setSetResults(
+      s.setResults.map((r) => {
+        const [h, a] = r.split("-").map(Number);
+        return { home: h || 0, away: a || 0 };
+      }),
+    );
+  }, []);
+
+  // 直前の ＋ を丸ごと取り消すためのスナップショット（1手ぶん）。
+  // ★ なぜ必要か: 誤タップでゲーム→セット→マッチが一気に確定すると、hSets が増え
+  //   setResults にも1件積まれる。tennisRemovePoint は**ゲーム境界を跨がない**仕様
+  //   （Web版と共通・変更不可）なので、− を押しても hPts===0 で no-op になり
+  //   誤って与えたゲームもセットも戻せない。丸ごと巻き戻す手段が要る。
+  const tennisUndoRef = useRef<TennisSnapshot | null>(null);
+
+  const tennisPoint = useCallback(
+    (side: "home" | "away") => {
+      if (!tnRule) return;
+      if (tennis.matchWon) return; // 確定後は no-op
+      tennisUndoRef.current = tennis; // ＋を押す直前の状態を1手ぶん保持
+      const { next, events } = tennisAddPoint(tnRule, tennis, side);
+      applyTennisSnapshot(next);
+      // セット確定で period を進める。マッチ確定時は進めない
+      //（2-0 で完走したときに「3SET」と出るオフバイワンを防ぐ・Web 版と同じ）。
+      if (events.setWon && !events.matchWon && tnRule.kind === "hard") {
+        const idx = Math.max(
+          0,
+          Math.min(activePeriods.length - 1, next.hSets + next.aSets),
+        );
+        setPeriod(activePeriods[idx] || activePeriods[0]);
+      }
+      // ★ 2026-08-04: マッチ確定を**解除できる導線**を必ず用意する。
+      //   エンジンは matchWon が立つと ＋/−/表示のすべてを止める（Web版と同一仕様）。
+      //   ところがアプリには解除手段が無く、①ソフトテニスの団体戦（同じコートで第2・第3
+      //   対戦が続く）②硬式で既定の1セットマッチのまま3セットの試合を配信 ③相手側の＋を
+      //   1回押し間違えた、のいずれでも**以後スコアを一切動かせなくなる**。
+      //   復旧は配信を止めて再開しかなく、そうすると視聴リンクが変わって家族が見られない。
+      //   → 確定した瞬間に「まだ続ける」を選べるようにする。エンジンには手を入れず、
+      //     画面側で matchWon を落とすだけ（tennis.ts は Web 版と完全同一を保つ）。
+      if (events.matchWon) {
+        Alert.alert(
+          "試合終了の判定です",
+          "このまま終了しますか？ 団体戦などで続ける場合は「まだ続ける」を選んでください。",
+          [
+            {
+              text: "まだ続ける",
+              onPress: () => {
+                // ★ 2026-08-05: matchWon を落とすだけでは**団体戦が成立しない**。
+                //   ソフトテニスはエンジンがマッチ確定時に setResults へ push する一方で
+                //   hGames/aGames を 0 に戻さない（硬式のセット確定側は戻す）。そのため
+                //   3-2 のまま再開し、次の1ゲームを取った瞬間にまた確定して同じアラートが
+                //   出続け、確定のたびに set_results へゴミが積まれて内訳が壊れる
+                //   （"3-2" / "3-3" / … と増える）。
+                //   → 直前の対戦の結果は setResults に残したまま、ゲーム/ポイントだけ
+                //     0-0 に戻す。これで第2対戦を 0-0 から始められる。
+                //   硬式はエンジンが既にゲームを 0 に戻しているので matchWon を落とすだけでよい
+                //   （＝既定の1セットマッチのまま3セット戦うケースがそのまま続行できる）。
+                if (tnRule.kind === "soft") {
+                  applyTennisSnapshot({
+                    ...next,
+                    matchWon: null,
+                    hGames: 0,
+                    aGames: 0,
+                    hPts: 0,
+                    aPts: 0,
+                    inTiebreak: false,
+                  });
+                } else {
+                  applyTennisSnapshot({ ...next, matchWon: null });
+                }
+              },
+            },
+            { text: "試合終了にする", style: "cancel" },
+          ],
+        );
+      }
+    },
+    [tnRule, tennis, activePeriods, applyTennisSnapshot],
+  );
+
+  // ポイントの取り消し（現在のゲーム内のみ）。ゲーム/セット境界は跨がない。
+  const tennisPointMinus = useCallback(
+    (side: "home" | "away") => {
+      if (!tnRule) return;
+      // マッチ確定後の − は「直前の ＋ を丸ごと取り消す」（1手 Undo）。
+      // ★ 2026-08-05: 従来は matchWon を落とすだけだったので、誤タップで
+      //   ゲーム→セット→マッチが一気に確定したとき、増えた hSets と setResults が
+      //   残ったままだった（2回目の − は hPts===0 で完全な no-op）。
+      //   スナップショットへ丸ごと戻せば、誤って与えたゲーム・セット・内訳もまとめて消える。
+      //   上のアラートを閉じてしまった人のための逃げ道でもある（詰みを作らない）。
+      if (tennis.matchWon) {
+        const prev = tennisUndoRef.current;
+        if (prev) {
+          tennisUndoRef.current = null; // 1手ぶんだけ。連打で過去まで遡らせない
+          applyTennisSnapshot(prev);
+        } else {
+          // スナップショットが無い（配信を跨いだ復帰など）ときは、少なくとも確定だけ
+          // 解除して操作不能を回避する（従来挙動へのフォールバック）。
+          setTennis((t) => ({ ...t, matchWon: null }));
+        }
+        return;
+      }
+      if (side === "home" ? tennis.hPts === 0 : tennis.aPts === 0) return;
+      setTennis(tennisRemovePoint(tennis, side));
+    },
+    [tnRule, tennis, applyTennisSnapshot],
+  );
+
   // 野球カウント操作（B/S/O＋走者）。3アウト時はイニング(period)を自動で前進。
   const advanceInning = useCallback(() => {
     setPeriod((p) => nextPeriodIn(activePeriods, p));
   }, [activePeriods]);
   const onBall = useCallback(() => setBaseball((c) => addBall(c)), []);
+  // ★ 2026-08-04: ストライク/アウトだけ「state を直接読んで書き戻す」書き方だったため、
+  //   素早く連打すると**同じ古い値を2回読んで1回分が落ちる**（ボールと走者は関数形式で
+  //   書かれていて安全）。thirdOut を外で使う必要があるため関数形式にはできないので、
+  //   ref に最新値を持って即時反映させることで取りこぼしを防ぐ。
+  const baseballRef = useRef(baseball);
+  baseballRef.current = baseball;
   const onStrike = useCallback(() => {
-    const { count, thirdOut } = addStrike(baseball);
+    const { count, thirdOut } = addStrike(baseballRef.current);
+    baseballRef.current = count; // 次の連打が古い値を読まないよう即時反映
     setBaseball(count);
     if (thirdOut) advanceInning();
-  }, [baseball, advanceInning]);
+  }, [advanceInning]);
   const onOut = useCallback(() => {
-    const { count, thirdOut } = recordOut(baseball);
+    const { count, thirdOut } = recordOut(baseballRef.current);
+    baseballRef.current = count;
     setBaseball(count);
     if (thirdOut) advanceInning();
-  }, [baseball, advanceInning]);
+  }, [advanceInning]);
   const onRunner = useCallback(
     (base: keyof BaseballRunners) => setBaseball((c) => toggleRunner(c, base)),
     [],
@@ -818,7 +1363,9 @@ export function BroadcastScreen() {
         homeScore,
         awayScore,
         period,
-        setBased,
+        // 焼き込み（iOS の RTMP 配信）にもセット数を載せる。テニスの 3 セットマッチで
+        // セットが映像に出ないのを避けるため setBased ではなく showSets を渡す。
+        setBased: showSets,
         homeSets,
         awaySets,
         pointLabel,
@@ -831,7 +1378,7 @@ export function BroadcastScreen() {
       homeScore,
       awayScore,
       period,
-      setBased,
+      showSets,
       homeSets,
       awaySets,
       pointLabel,
@@ -900,9 +1447,35 @@ export function BroadcastScreen() {
           return;
         }
         // 初回接続そのものが失敗（一度も live になっていない）→ 終了。
-        finishLive("配信エラー: " + (e.nativeEvent.message ?? "接続に失敗しました"));
+        finishLive(rtmpErrorMessage(e.nativeEvent.message));
+      } else if (state === "novideo") {
+        // ★映像が届いていない（音声だけ流れている疑い）。**配信は絶対に止めない**。
+        //   画面に赤帯を出して配信者に気づいてもらうだけ。「誰も気づけない」を潰すのが目的。
+        if (endedRef.current) return;
+        setNoVideo(true);
+      } else if (state === "media") {
+        // 映像が戻った。赤帯を消す。
+        if (endedRef.current) return;
+        setNoVideo(false);
       } else if (state === "closed") {
         if (endedRef.current) return; // 停止ボタン等で終了処理中の切断は無視
+        // ★2026-08-12: 「一度も open していない closed」では再接続を始めない。
+        //
+        // 【なぜ必要か】HaishinKit の readyState は AsyncStreamed 実装で、
+        //   **購読した瞬間に現在値を1回流す**。RTMPSession の初期値は .closed なので、
+        //   配信開始のたびに connect の前に closed が1回飛んでくることがある。
+        //   これが startRecovering を起動し、1.5 秒後に View を作り直す＝
+        //   **1本目の publish が張られた直後に2本目が来て自分自身を蹴る**。
+        //   実ログ（2026-08-12 07:26:04 publish → 07:26:06 "closing existing publisher"）
+        //   の2秒差はこれで説明がつく。open が 1.5 秒以内に返る通常時は
+        //   タイマーが解除されるため表面化せず、電波の悪い体育館でだけ起きていた。
+        //
+        // 初回接続が本当に失敗したときは同じ経路で error も飛び、
+        // 下の error 分岐が finishLive で正しく終わらせる（取りこぼしはない）。
+        if (!wasLiveRef.current && !remountingRef.current) {
+          console.log("[rtmp] ignore closed before first open");
+          return;
+        }
         if (remountingRef.current) {
           // 再接続中（安定確認中含む）の closed → 切らずに再試行継続。
           if (stableTimerRef.current) {
@@ -927,12 +1500,14 @@ export function BroadcastScreen() {
         // recover loop が中断中に作り直しを待つための判定にのみ使う。
         if (endedRef.current) return;
         interruptedRef.current = true;
+        if (!interruptedAtRef.current) interruptedAtRef.current = Date.now();
         wasInterruptedRef.current = true;
       } else if (state === "resumed") {
         // 中断解除。一過性(RTMP維持)なら何もしない＝分割を防ぐ。
         // 既に再接続中(=RTMPが実際に切れていた)なら、解除後に作り直しを促す。
         if (endedRef.current) return;
         interruptedRef.current = false;
+        interruptedAtRef.current = 0;
         if (remountingRef.current) {
           if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
           reconnectTimerRef.current = setTimeout(
@@ -954,6 +1529,8 @@ export function BroadcastScreen() {
         rtmpUrl={rtmpUrl}
         scoreboardText={scoreboardLine}
         onStatus={handleRtmpStatus}
+        preflightMode={preflightMode}
+        noVideo={noVideo}
         shareCode={shareCode}
         homeTeam={homeTeam}
         awayTeam={awayTeam}
@@ -961,14 +1538,27 @@ export function BroadcastScreen() {
         awayScore={awayScore}
         period={period}
         setBased={setBased}
+        showSets={showSets}
         unitLabel={setUnitLabel(sportKey)}
         pointLabel={pointLabel}
         elapsed={elapsed}
         trialRemaining={plan === "free" ? Math.max(0, trialRemainingAtStart - elapsed) : null}
         homeSets={homeSets}
         awaySets={awaySets}
-        onHome={(d) => setHomeScore((s) => Math.max(0, s + d))}
-        onAway={(d) => setAwayScore((s) => Math.max(0, s + d))}
+        onHome={(d) =>
+          tnRule
+            ? d > 0
+              ? tennisPoint("home")
+              : tennisPointMinus("home")
+            : setHomeScore((s) => Math.max(0, s + d))
+        }
+        onAway={(d) =>
+          tnRule
+            ? d > 0
+              ? tennisPoint("away")
+              : tennisPointMinus("away")
+            : setAwayScore((s) => Math.max(0, s + d))
+        }
         onPeriod={() => {
           setPeriod((p) => nextPeriodIn(activePeriods, p));
           if (sportKey === "baseball") setBaseball(emptyBaseballCount());
@@ -978,6 +1568,8 @@ export function BroadcastScreen() {
         youtubeShareUrl={null}
         youtubeReadyAt={0}
         scoreSteps={sportKey === "basketball" ? [1, 2, 3] : [1]}
+        tennisPoints={tennisDisplay}
+        onShareOpened={markShareOpened}
         baseballCount={sportKey === "baseball" ? baseball : null}
         onBall={onBall}
         onStrike={onStrike}
@@ -996,6 +1588,21 @@ export function BroadcastScreen() {
         connect={true}
         audio={true}
         video={{ facingMode: "environment" }}
+        // 画質: 現行Web版の生配信経路(livekit-video.tsx・6/21 PR#191)と同じ設定を明示。
+        // SDK既定の simulcast(複数レイヤー並列publish) は 4G 上り変動下で最高レイヤーが
+        // 落ちて「荒れる」ことが実証済みのため off。maxBitrate は上限値であり弱回線では
+        // 帯域推定が自動で絞るため 4Mbps でも弱回線は悪化しない(PR#191 で実証済み)。
+        // この publish が自社プレイヤー視聴と YouTube Egress の唯一の源泉のため上限は高めに。
+        options={{
+          publishDefaults: {
+            simulcast: false,
+            videoCodec: "h264",
+            videoEncoding: { maxBitrate: 4_000_000, maxFramerate: 30 },
+          },
+          videoCaptureDefaults: {
+            resolution: { width: 1280, height: 720, frameRate: 30 },
+          },
+        }}
         onConnected={() => {
           // 再接続（作り直し）成功 → 再接続モード終了・タイマー解除
           stopRecovering();
@@ -1036,14 +1643,27 @@ export function BroadcastScreen() {
           awayScore={awayScore}
           period={period}
           setBased={setBased}
+          showSets={showSets}
           unitLabel={setUnitLabel(sportKey)}
           pointLabel={pointLabel}
           elapsed={elapsed}
           trialRemaining={plan === "free" ? Math.max(0, trialRemainingAtStart - elapsed) : null}
           homeSets={homeSets}
           awaySets={awaySets}
-          onHome={(d) => setHomeScore((s) => Math.max(0, s + d))}
-          onAway={(d) => setAwayScore((s) => Math.max(0, s + d))}
+          onHome={(d) =>
+            tnRule
+              ? d > 0
+                ? tennisPoint("home")
+                : tennisPointMinus("home")
+              : setHomeScore((s) => Math.max(0, s + d))
+          }
+          onAway={(d) =>
+            tnRule
+              ? d > 0
+                ? tennisPoint("away")
+                : tennisPointMinus("away")
+              : setAwayScore((s) => Math.max(0, s + d))
+          }
           onPeriod={() => {
             setPeriod((p) => nextPeriodIn(activePeriods, p));
             // 野球はイニング手動変更でカウントもリセット
@@ -1054,6 +1674,8 @@ export function BroadcastScreen() {
           youtubeShareUrl={liveYoutubeId ? `https://youtu.be/${liveYoutubeId}` : null}
           youtubeReadyAt={youtubeReadyAt}
           scoreSteps={sportKey === "basketball" ? [1, 2, 3] : [1]}
+          tennisPoints={tennisDisplay}
+          onShareOpened={markShareOpened}
           baseballCount={sportKey === "baseball" ? baseball : null}
           onBall={onBall}
           onStrike={onStrike}
@@ -1065,13 +1687,28 @@ export function BroadcastScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        },
+      ]}
+    >
+      {/* iOS: チーム名入力時にキーボードが入力欄に被らないよう KeyboardAvoidingView で避ける。
+          旧実装の automaticallyAdjustKeyboardInsets は、キーボードを閉じた後も下端の
+          content inset が解除されず残る iOS 既知バグがあり、「下までスクロールすると
+          巨大な黒い余白」になるため使わない（1.1.3 で実機報告・1.1.4 で修正）。 */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.flex1}
+      >
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
-        // iOS: チーム名入力時にキーボードが入力欄に被らないよう、キーボード分の余白を自動確保し
-        // フォーカス中の入力欄をキーボードの上へスクロールして見えるようにする。
-        automaticallyAdjustKeyboardInsets={true}
       >
         <Text style={styles.title}>LIVE SPOtCH 配信</Text>
 
@@ -1217,6 +1854,56 @@ export function BroadcastScreen() {
               </>
             )}
 
+            {sportKey === "tennis" && (
+              <>
+                <Text style={styles.label}>テニスのルール</Text>
+                <View style={styles.sportRow}>
+                  {HARD_TENNIS_RULES.map((r) => {
+                    const active = r.key === tennisRuleKey;
+                    return (
+                      <Pressable
+                        key={r.key}
+                        style={[styles.sportChip, active && styles.sportChipActive]}
+                        onPress={() => setTennisRuleKey(r.key)}
+                      >
+                        <Text style={[styles.sportChipText, active && styles.sportChipTextActive]}>
+                          {r.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.ruleHint}>
+                  ＋ボタンは「ポイント」を進めます。ゲーム・セット・マッチの確定は自動です。
+                </Text>
+              </>
+            )}
+
+            {sportKey === "soft_tennis" && (
+              <>
+                <Text style={styles.label}>ソフトテニスのルール</Text>
+                <View style={styles.sportRow}>
+                  {SOFT_TENNIS_RULES.map((r) => {
+                    const active = r.key === softTennisRuleKey;
+                    return (
+                      <Pressable
+                        key={r.key}
+                        style={[styles.sportChip, active && styles.sportChipActive]}
+                        onPress={() => setSoftTennisRuleKey(r.key)}
+                      >
+                        <Text style={[styles.sportChipText, active && styles.sportChipTextActive]}>
+                          {r.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.ruleHint}>
+                  ＋ボタンは「ポイント」を進めます。ゲーム・マッチの確定は自動です。
+                </Text>
+              </>
+            )}
+
             <Text style={styles.label}>ホームチーム</Text>
             <TextInput
               style={styles.input}
@@ -1242,14 +1929,112 @@ export function BroadcastScreen() {
               placeholderTextColor="#666"
             />
 
-            <Pressable style={styles.button} onPress={handleStart} disabled={busy}>
+            {setupLoadFailed ? (
+              <View style={styles.setupErrorCard}>
+                <Text style={styles.setupErrorText}>
+                  プラン・チーム情報を取得できませんでした。このまま開始すると、チームに
+                  紐づかない個人配信になります。
+                </Text>
+                <Pressable
+                  style={styles.setupErrorBtn}
+                  onPress={() => setSetupReloadKey((k) => k + 1)}
+                >
+                  <Text style={styles.setupErrorBtnText}>再読み込み</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {/* 開始前共有（案C）。配信中に共有シートを開かせないための導線。
+                Android は共有シートで必ず背景化して映像が途切れるため、開始前に済ませてもらう。
+                受け取った家族は配信開始前にリンクを開くので、視聴側は「まだ始まっていません」
+                の待機画面で受ける（web/mobile とも実装済み）。 */}
+            <View style={styles.preShareCard}>
+              <Text style={styles.preShareTitle}>📲 視聴リンクを先に共有（おすすめ）</Text>
+              {/* ★ 2026-08-04: 配信を終えると次の試合用にコードを採り直すため、大会日に
+                  「朝に送ったリンクで2試合目も見られる」と思い込む事故が必ず起きる。
+                  家族側には「この配信は終了しました」しか出ない。1回でも配信を終えた
+                  後だけ、配り直しが要ることを明示する。 */}
+              {lastDurationSec > 0 ? (
+                <Text style={styles.preShareWarn}>
+                  ⚠️ 新しい試合のリンクです。前のリンクでは見られません。もう一度共有してください。
+                </Text>
+              ) : null}
+              <Text style={styles.preShareBody}>
+                配信中にLINEを開くと端末が熱くなり、映像が乱れる原因になります。
+                端末によっては映像が一時的に途切れることがあります。開始前の共有がおすすめです。
+              </Text>
+              <Pressable
+                style={styles.preShareBtn}
+                onPress={async () => {
+                  try {
+                    await Share.share({
+                      message: `このあと試合をライブ配信します！\n始まったらこのリンクで見られます\n${SITE_URL}/watch/${pendingShareCode}`,
+                    });
+                    // iOS は共有完了の検知が曖昧なので「シートを開いたら共有済み」とみなす。
+                    setPreShared(true);
+                  } catch {
+                    /* 共有シートを閉じただけ等は無視 */
+                  }
+                }}
+              >
+                <Text style={styles.preShareBtnText}>LINEなどで共有する</Text>
+              </Pressable>
+              {preShared ? (
+                <Text style={styles.preShareDone}>
+                  ✅ 共有しました・このまま配信を開始できます
+                </Text>
+              ) : null}
+            </View>
+
+            {/* ★ 2026-08-04: 無料プランの残り時間が開始前にどこにも出ていなかった。
+                過去に9分30秒使っている人が、チーム名を入れ、家族にリンクを送り、開始を
+                押すと**普通に始まって30秒後に突然切断**される（家族側は試合開始30秒で
+                「終了しました」）。試合はこれから、という最悪の体験になる。
+                → 押す前に必ず見える位置に出し、残り60秒未満は赤字＋確認を出す。 */}
+            {plan === "free" ? (
+              <View style={styles.trialNotice}>
+                <Text
+                  style={[
+                    styles.trialNoticeText,
+                    trialRemainingAtStart < 60 && styles.trialNoticeWarn,
+                  ]}
+                >
+                  無料体験 残り {formatElapsed(trialRemainingAtStart)}
+                </Text>
+                {trialRemainingAtStart < 60 ? (
+                  <Text style={styles.trialNoticeSub}>
+                    まもなく配信が自動で終了します。続けるにはプランのご登録が必要です。
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
+            <Pressable
+              style={styles.button}
+              onPress={() => {
+                if (plan === "free" && trialRemainingAtStart > 0 && trialRemainingAtStart < 60) {
+                  Alert.alert(
+                    "無料体験の残りがわずかです",
+                    `残り ${formatElapsed(trialRemainingAtStart)} で配信が自動終了します。このまま開始しますか？`,
+                    [
+                      { text: "キャンセル", style: "cancel" },
+                      { text: "開始する", onPress: () => handleStart() },
+                    ],
+                  );
+                  return;
+                }
+                handleStart();
+              }}
+              disabled={busy}
+            >
               <Text style={styles.buttonText}>{busy ? "準備中..." : "配信開始"}</Text>
             </Pressable>
           </View>
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
-    </SafeAreaView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -1357,7 +2142,8 @@ type ScoreControlsProps = {
   homeScore: number;
   awayScore: number;
   period: string;
-  setBased: boolean;
+  setBased: boolean; // 「次のセットへ」を手動で押す競技か（テニスは自動確定なので false）
+  showSets: boolean; // セット数を表示するか（バレー等 + 硬式テニス）
   unitLabel: string;
   pointLabel: string | null;
   elapsed: number;
@@ -1372,6 +2158,12 @@ type ScoreControlsProps = {
   youtubeShareUrl: string | null; // YouTube同時配信が起動していれば https://youtu.be/<id>
   youtubeReadyAt: number; // ウォームアップ完了予定時刻(ms)。これを過ぎるまでYouTubeリンクは共有しない
   scoreSteps: number[]; // 得点ボタンの加点ステップ（通常[1]・バスケ[1,2,3]・野球[1,2,3,4]）
+  // テニス系のときのみ。ゲーム内ポイントの表示用文字列（非テニスは null）。
+  // 非 null のとき ＋/− は「得点」ではなく「ポイント」を操作する。
+  tennisPoints: { home: string; away: string; tb?: true } | null;
+  // 共有シートを開く直前に呼ぶ。Android は共有で必ず背景化するため、親が
+  // 「これは離席ではなく共有だ」と判定できるようにする。
+  onShareOpened: () => void;
   baseballCount: BaseballCount | null; // 野球のときのみ B/S/O＋走者
   onBall: () => void;
   onStrike: () => void;
@@ -1390,6 +2182,7 @@ function ScoreControls(props: ScoreControlsProps) {
     awayScore,
     period,
     setBased,
+    showSets,
     unitLabel,
     pointLabel,
     elapsed,
@@ -1404,6 +2197,8 @@ function ScoreControls(props: ScoreControlsProps) {
     youtubeShareUrl,
     youtubeReadyAt,
     scoreSteps,
+    tennisPoints,
+    onShareOpened,
     baseballCount,
     onBall,
     onStrike,
@@ -1432,11 +2227,15 @@ function ScoreControls(props: ScoreControlsProps) {
       if (youtubeShareUrl) {
         message += `\n\n📺 YouTubeでの視聴はこちら（配信後のアーカイブもこちらで確認できます）\n${youtubeShareUrl}`;
       }
+      // Android は共有シートが別Activityで開くため必ず背景化する。押した事実を先に親へ伝え、
+      // 「離席」ではなく「共有」として扱わせる（無いと復帰時に配信が作り直され、
+      //   共有先に3分留まると配信が終了してしまう）。
+      onShareOpened();
       await Share.share({ message });
     } catch {
       // 共有シートを閉じただけ等は無視
     }
-  }, [watchUrl, youtubeShareUrl]);
+  }, [watchUrl, youtubeShareUrl, onShareOpened]);
 
   const confirmStop = useCallback(() => {
     Alert.alert("配信を停止しますか？", "視聴者に配信が終了します。", [
@@ -1449,20 +2248,78 @@ function ScoreControls(props: ScoreControlsProps) {
   const { width: winW, height: winH } = useWindowDimensions();
   const isPortrait = winH >= winW;
 
+  // ★ 2026-08-04: 実ユーザー（2年ビデオ係）から「Androidだと相手方の＋が隠れて押しづらい。
+  //   撮影中もホーム/戻るボタンが出ている」と報告。原因は **RN標準の SafeAreaView が
+  //   iOS でしか効かない**こと（Androidでは padding ゼロのただの View）。操作パネルが
+  //   ナビゲーションバーの下に潜っていた。**横向き配信ではAndroidのナビバーが画面の右端に
+  //   来る機種が多く、右側にあるアウェイの＋が特に当たる**＝報告と一致。
+  //   → SafeAreaView をやめ、両OSで効く useSafeAreaInsets で上下**左右**を空ける。
+  const insets = useSafeAreaInsets();
+
+  // ===== 視聴者へのお知らせテロップ（Web 版 PR#219 のアプリ移植・1.1.5）=====
+  // 画面が狭くキーボードも出るため、Web のインラインパネルではなくモーダルにする。
+  const [notice, setNotice] = useState<string | null>(null);
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [noticeDraft, setNoticeDraft] = useState("");
+
+  // 現在値を DB から読む。画面ロック復帰などで本コンポーネントが作り直されても
+  // 「お知らせを消す」が出続けるようにする（無いと視聴者側に出しっぱなしになる）。
+  useEffect(() => {
+    if (!shareCode) return;
+    let alive = true;
+    getBroadcastNotice(shareCode)
+      .then((v) => {
+        if (alive) setNotice(v);
+      })
+      .catch(() => {
+        /* 取得失敗は無視（未設定として扱う） */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [shareCode]);
+
+  // text=null で非表示に戻す。反映は視聴側の Realtime UPDATE で届く。
+  const applyNotice = useCallback(
+    async (text: string | null) => {
+      if (!shareCode) return;
+      const trimmed = text?.trim() || null;
+      const ok = await updateBroadcastNotice(shareCode, trimmed);
+      if (!ok) {
+        Alert.alert("お知らせを更新できませんでした", "電波の良い場所でもう一度お試しください。");
+        return;
+      }
+      setNotice(trimmed);
+      setNoticeDraft("");
+      setNoticeOpen(false);
+    },
+    [shareCode],
+  );
+
   return (
     <>
       {/* 上: 視聴者に見えているのと同じスコアボードのプレビュー ＋ 停止 */}
-      <SafeAreaView style={styles.topOverlay} pointerEvents="box-none">
+      <View
+        style={[
+          styles.topOverlay,
+          {
+            paddingTop: insets.top + 12,
+            paddingLeft: insets.left + 12,
+            paddingRight: insets.right + 12,
+          },
+        ]}
+        pointerEvents="box-none"
+      >
         <View style={styles.topLeftGroup}>
           <View style={styles.scorePreview}>
             <Text style={[styles.previewTeam, isPortrait && styles.previewTeamPortrait]} numberOfLines={1}>
               {homeTeam}
             </Text>
-            {setBased && <Text style={styles.previewSets}>{homeSets}</Text>}
+            {showSets && <Text style={styles.previewSets}>{homeSets}</Text>}
             <Text style={styles.previewScore}>
               {homeScore} - {awayScore}
             </Text>
-            {setBased && <Text style={styles.previewSets}>{awaySets}</Text>}
+            {showSets && <Text style={styles.previewSets}>{awaySets}</Text>}
             <Text style={[styles.previewTeam, isPortrait && styles.previewTeamPortrait]} numberOfLines={1}>
               {awayTeam}
             </Text>
@@ -1476,6 +2333,18 @@ function ScoreControls(props: ScoreControlsProps) {
               ]}
             >
               <Text style={styles.pointBadgeText}>{pointLabel}</Text>
+            </View>
+          ) : null}
+          {/* テニス系: いま何ポイントかを配信者にも見せる（＋/− は得点でなくポイントを動かす）。
+              スコアプレビューの得点はゲーム数なので、これが無いと操作結果が分からない。 */}
+          {tennisPoints ? (
+            <View style={styles.tnPointsRow}>
+              <Text style={styles.tnPointsLabel}>
+                {tennisPoints.tb ? "TB" : "ポイント"}
+              </Text>
+              <Text style={styles.tnPointsValue}>{tennisPoints.home}</Text>
+              <Text style={styles.tnPointsSep}>-</Text>
+              <Text style={styles.tnPointsValue}>{tennisPoints.away}</Text>
             </View>
           ) : null}
         </View>
@@ -1512,6 +2381,18 @@ function ScoreControls(props: ScoreControlsProps) {
           <Text style={[styles.elapsedText, isPortrait && styles.elapsedTextPortrait]}>
             ⏱ {formatElapsed(elapsed)}
           </Text>
+          {/* 📢 視聴者へのお知らせ。出している間は赤地にして状態が一目で分かるようにする。 */}
+          <Pressable
+            style={[styles.noticeButton, notice ? styles.noticeButtonOn : null]}
+            onPress={() => {
+              setNoticeDraft(notice ?? "");
+              setNoticeOpen(true);
+            }}
+            hitSlop={6}
+            accessibilityLabel="視聴者へのお知らせ"
+          >
+            <Text style={styles.noticeButtonText}>📢</Text>
+          </Pressable>
           <Pressable
             style={[styles.stopButton, isPortrait && styles.stopButtonPortrait]}
             onPress={confirmStop}
@@ -1521,7 +2402,7 @@ function ScoreControls(props: ScoreControlsProps) {
             </Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </View>
 
       {/* 野球: B/S/O カウント＋走者ダイヤ（甲子園TV中継風・下部スコア操作の上に配置） */}
       {baseballCount ? (
@@ -1562,11 +2443,22 @@ function ScoreControls(props: ScoreControlsProps) {
       ) : null}
 
       {/* 下: スコア操作パネル */}
-      <SafeAreaView style={[styles.controls, isPortrait && styles.controlsPortrait]} pointerEvents="box-none">
+      <View
+        style={[
+          styles.controls,
+          isPortrait && styles.controlsPortrait,
+          {
+            paddingBottom: insets.bottom + 12,
+            paddingLeft: insets.left + 12,
+            paddingRight: insets.right + 12,
+          },
+        ]}
+        pointerEvents="box-none"
+      >
         <View style={[styles.teamControl, isPortrait && styles.teamControlPortrait]}>
           <Text style={[styles.controlTeamName, isPortrait && styles.controlTeamNamePortrait]} numberOfLines={1}>
             {homeTeam}
-            {setBased ? `（${homeSets}${unitLabel}）` : ""}
+            {showSets ? `（${homeSets}${unitLabel}）` : ""}
           </Text>
           <View style={styles.scoreRow}>
             <Pressable style={[styles.minusBtn, isPortrait && styles.minusBtnPortrait]} hitSlop={6} onPress={() => onHome(-1)}>
@@ -1614,7 +2506,7 @@ function ScoreControls(props: ScoreControlsProps) {
         <View style={[styles.teamControl, isPortrait && styles.teamControlPortrait]}>
           <Text style={[styles.controlTeamName, isPortrait && styles.controlTeamNamePortrait]} numberOfLines={1}>
             {awayTeam}
-            {setBased ? `（${awaySets}${unitLabel}）` : ""}
+            {showSets ? `（${awaySets}${unitLabel}）` : ""}
           </Text>
           <View style={styles.scoreRow}>
             <Pressable style={[styles.minusBtn, isPortrait && styles.minusBtnPortrait]} hitSlop={6} onPress={() => onAway(-1)}>
@@ -1642,10 +2534,84 @@ function ScoreControls(props: ScoreControlsProps) {
             </View>
           ) : null}
         </View>
-      </SafeAreaView>
+      </View>
 
       {/* 視聴者からの応援スタンプ（pointerEvents none で操作を邪魔しない） */}
       {shareCode ? <BroadcastReactions shareCode={shareCode} /> : null}
+
+      {/* 📢 お知らせ入力（モーダル）。撮影中に開くため、閉じる導線を必ず2つ用意する
+          （背景タップ＋キャンセル）。KeyboardAvoidingView でキーボードに隠れないようにする。 */}
+      {/* ★ supportedOrientations 必須（iOS）: RN の Modal は既定が ["portrait"] のため、
+          これが無いと**横持ちで撮影中に📢を開いた瞬間、モーダルだけ縦向きに提示され
+          画面ごと回ったように見える**（2026-08-05 実利用で報告）。配信は横持ちが基本なので
+          landscape を必ず許可する。Android には効かない prop なので無害。 */}
+      <Modal
+        visible={noticeOpen}
+        transparent
+        animationType="fade"
+        supportedOrientations={["portrait", "landscape"]}
+        onRequestClose={() => setNoticeOpen(false)}
+      >
+        <Pressable
+          style={styles.noticeBackdrop}
+          onPress={() => setNoticeOpen(false)}
+        >
+          {/* ★ 2026-08-04: behavior が iOS だけだったため、**Androidの横持ちでキーボードが
+              画面の半分以上を占めると「表示する」「お知らせを消す」が隠れて押せなくなり、
+              出したお知らせを消せなくなる**（Modal 内は adjustResize が効かない）。
+              Android にも behavior を与え、横持ちでは中央寄せをやめて上に寄せる。 */}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={[
+              styles.noticeCenter,
+              !isPortrait && styles.noticeCenterLandscape,
+            ]}
+          >
+            {/* 内側のタップで閉じないよう、Pressable で伝播を止める */}
+            <Pressable style={styles.noticeSheet} onPress={() => {}}>
+              <Text style={styles.noticeTitle}>視聴者へのお知らせ</Text>
+              <Text style={styles.noticeHint}>
+                映像の上に表示されます（30文字まで）
+              </Text>
+              <TextInput
+                style={styles.noticeInput}
+                value={noticeDraft}
+                onChangeText={setNoticeDraft}
+                maxLength={30}
+                placeholder="例）延長タイブレーク中"
+                placeholderTextColor="#666"
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={() => applyNotice(noticeDraft)}
+              />
+              <Pressable
+                style={[
+                  styles.noticeApply,
+                  !noticeDraft.trim() && styles.noticeApplyDisabled,
+                ]}
+                disabled={!noticeDraft.trim()}
+                onPress={() => applyNotice(noticeDraft)}
+              >
+                <Text style={styles.noticeApplyText}>表示する</Text>
+              </Pressable>
+              {notice ? (
+                <Pressable
+                  style={styles.noticeClear}
+                  onPress={() => applyNotice(null)}
+                >
+                  <Text style={styles.noticeClearText}>お知らせを消す</Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                style={styles.noticeCancel}
+                onPress={() => setNoticeOpen(false)}
+              >
+                <Text style={styles.noticeCancelText}>キャンセル</Text>
+              </Pressable>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
     </>
   );
 }
@@ -1678,16 +2644,21 @@ function RtmpLiveView(
     rtmpUrl: string;
     scoreboardText: string;
     onStatus: (e: RtmpStatusEvent) => void;
+    preflightMode: RtmpPreflightMode;
+    /** 映像が届いていない疑い。赤帯を出すだけで配信は止めない。 */
+    noVideo: boolean;
   },
 ) {
   useKeepAwake();
-  const { rtmpUrl, scoreboardText, onStatus, ...controls } = props;
+  const { rtmpUrl, scoreboardText, onStatus, preflightMode, noVideo, ...controls } =
+    props;
   return (
     <View style={styles.liveRoot}>
       <RtmpPublisherView
         style={styles.video}
         streamUrl={rtmpUrl}
         active={true}
+        preflightMode={preflightMode}
         videoWidth={1280}
         videoHeight={720}
         // 4G/5G(セルラー)前提。上限3.5Mbpsから帯域に応じてネイティブ側がアダプティブに調整。
@@ -1702,14 +2673,39 @@ function RtmpLiveView(
         scoreboardVisible={false}
         onStatus={onStatus}
       />
+      {noVideo ? (
+        // ★配信は続いている。止めない。「気づけない」を潰すためだけの表示。
+        //   pointerEvents="none" でスコア操作の邪魔をしない。
+        <View style={styles.noVideoBanner} pointerEvents="none">
+          <Text style={styles.noVideoTitle}>映像が届いていません</Text>
+          <Text style={styles.noVideoBody}>
+            レンズが手や机で塞がれていないか確認してください。直らない場合は一度停止して、
+            もう一度「配信開始」を押してください。（音声だけが配信されている可能性があります）
+          </Text>
+        </View>
+      ) : null}
       <ScoreControls {...controls} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // 「映像が届いていません」の赤帯（配信中・画面上部）。表示専用。
+  noVideoBanner: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(200,20,30,0.92)",
+    paddingTop: 10,
+    paddingBottom: 10,
+    paddingHorizontal: 16,
+  },
+  noVideoTitle: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  noVideoBody: { color: "#ffe3e3", fontSize: 12, lineHeight: 17, marginTop: 3 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
   container: { flex: 1, backgroundColor: "#0a0a0a" },
+  flex1: { flex: 1 },
   scroll: { padding: 24, flexGrow: 1, justifyContent: "center" },
   title: { color: "#fff", fontSize: 22, fontWeight: "800", textAlign: "center", marginBottom: 20 },
   form: { gap: 8 },
@@ -1729,6 +2725,71 @@ const styles = StyleSheet.create({
   sportChipText: { color: "#ccc", fontSize: 14, fontWeight: "600" },
   sportChipTextActive: { color: "#fff" },
   ruleHint: { color: "#9ab", fontSize: 12, marginTop: 2 },
+  // 開始前共有カード（ready 画面・配信開始ボタンの直上）
+  preShareCard: {
+    marginTop: 22,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(230,57,70,0.35)",
+    backgroundColor: "rgba(230,57,70,0.07)",
+    padding: 14,
+  },
+  preShareTitle: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  preShareWarn: {
+    color: "#f4a300",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+    fontWeight: "700",
+  },
+  setupErrorCard: {
+    marginTop: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(244,163,0,0.5)",
+    backgroundColor: "rgba(244,163,0,0.08)",
+    padding: 12,
+  },
+  setupErrorText: { color: "#f4a300", fontSize: 12, lineHeight: 18 },
+  setupErrorBtn: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  setupErrorBtnText: { color: "#fff", fontWeight: "700", fontSize: 12 },
+  trialNotice: { marginTop: 18, alignItems: "center" },
+  trialNoticeText: { color: "#9ab", fontSize: 13, fontWeight: "700" },
+  trialNoticeWarn: { color: "#e63946" },
+  trialNoticeSub: {
+    color: "#e63946",
+    fontSize: 11,
+    marginTop: 4,
+    textAlign: "center",
+  },
+  preShareBody: {
+    color: "#9ab",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  preShareBtn: {
+    marginTop: 12,
+    backgroundColor: "#e63946",
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+  preShareBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  preShareDone: {
+    color: "#4ade80",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 8,
+    textAlign: "center",
+  },
   ytToggle: {
     borderWidth: 1,
     borderColor: "#444",
@@ -1785,6 +2846,26 @@ const styles = StyleSheet.create({
   previewPeriod: { color: "#ddd", fontSize: 12, marginLeft: 4 },
   topLeftGroup: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, maxWidth: "82%" },
   pointBadge: { backgroundColor: "#f4a300", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
+  // テニス系のゲーム内ポイント（配信者プレビュー用）
+  tnPointsRow: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(0,0,0,0.75)",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 6,
+  },
+  tnPointsLabel: { color: "rgba(255,255,255,0.6)", fontWeight: "700", fontSize: 10 },
+  tnPointsValue: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 15,
+    fontVariant: ["tabular-nums"],
+  },
+  tnPointsSep: { color: "rgba(255,255,255,0.6)", fontSize: 11 },
   pointBadgeMatch: { backgroundColor: "#e63946" },
   pointBadgeText: { color: "#fff", fontWeight: "900", fontSize: 12 },
   stopButton: {
@@ -1797,6 +2878,62 @@ const styles = StyleSheet.create({
   },
   stopText: { color: "#e63946", fontWeight: "800", fontSize: 13 },
   topRightGroup: { flexDirection: "row", alignItems: "center", gap: 8 },
+  // 📢 お知らせボタン（停止ボタンと同じ高さ感で並べる）
+  noticeButton: {
+    backgroundColor: "rgba(0,0,0,0.7)",
+    borderColor: "rgba(255,255,255,0.25)",
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  // お知らせを出している間は赤地にして、消し忘れに気づけるようにする
+  noticeButtonOn: {
+    backgroundColor: "rgba(230,57,70,0.85)",
+    borderColor: "#e63946",
+  },
+  noticeButtonText: { fontSize: 15 },
+  noticeBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)" },
+  noticeCenter: { flex: 1, justifyContent: "center", paddingHorizontal: 28 },
+  // 横持ちはキーボードが高いので、中央寄せをやめて上に寄せる（ボタンが隠れないように）
+  noticeCenterLandscape: { justifyContent: "flex-start", paddingTop: 12 },
+  noticeSheet: {
+    backgroundColor: "#141414",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    padding: 18,
+  },
+  noticeTitle: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  noticeHint: { color: "#888", fontSize: 11, marginTop: 4 },
+  noticeInput: {
+    marginTop: 12,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: "#fff",
+    fontSize: 15,
+  },
+  noticeApply: {
+    marginTop: 12,
+    backgroundColor: "#e63946",
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  noticeApplyDisabled: { opacity: 0.35 },
+  noticeApplyText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  noticeClear: {
+    marginTop: 8,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  noticeClearText: { color: "#ddd", fontWeight: "700", fontSize: 13 },
+  noticeCancel: { marginTop: 10, paddingVertical: 6, alignItems: "center" },
+  noticeCancelText: { color: "#888", fontSize: 13 },
   youtubeStatus: { color: "#ff6b6b", fontWeight: "700" },
   elapsedText: {
     color: "#fff",

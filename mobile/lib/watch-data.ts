@@ -10,8 +10,8 @@ import { SITE_URL } from "../config";
 const WATCH_COLUMNS =
   "id, share_code, broadcaster_id, sport, home_team, away_team, " +
   "home_score, away_score, home_sets, away_sets, tournament, period, point_label, " +
-  "balls, strikes, outs, runners, status, started_at, scoreboard_burned_in, " +
-  "live_youtube_broadcast_id, youtube_video_id, live_status";
+  "balls, strikes, outs, runners, game_points, status, started_at, scoreboard_burned_in, " +
+  "live_youtube_broadcast_id, youtube_video_id, live_status, notice";
 
 export type WatchBroadcast = {
   id: string;
@@ -31,12 +31,17 @@ export type WatchBroadcast = {
   strikes: number | null;
   outs: number | null;
   runners: { first?: boolean; second?: boolean; third?: boolean } | null;
+  // テニス系のゲーム内ポイント（表示用文字列）。配信側エンジンが確定した値をそのまま描く
+  // ため、視聴側はテニスのルールを知らなくてよい。テニス以外では常に null。
+  game_points: { home: string; away: string; tb?: boolean } | null;
   status: "live" | "ended";
   started_at: string;
   scoreboard_burned_in: boolean | null;
   live_youtube_broadcast_id: string | null;
   youtube_video_id: string | null;
   live_status: string | null;
+  // 配信者からのお知らせテロップ（null = 非表示）。Realtime UPDATE でそのまま届く。
+  notice: string | null;
 };
 
 // share_code から配信を1件取得する（同一コード再利用に備え started_at 降順で最新を採る）。
@@ -53,6 +58,27 @@ export async function getBroadcastByCode(
     .maybeSingle();
   if (error || !data) return null;
   return data as unknown as WatchBroadcast;
+}
+
+// 自前配信サーバー(MediaMTX)の HLS 視聴 URL を取得する。
+// Web の getStreamPlaybackUrl と同じく WATCH_COLUMNS には含めず別クエリで引く
+// （stream_playback_url 列が無い環境では error → null → 従来 LiveKit 経路へ
+// フォールバックする migration-safe 設計）。
+// 非 null = アプリ配信(RTMP→MediaMTX)なので HLS プレイヤーで再生する。
+export async function getStreamPlaybackUrl(
+  shareCode: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("stream_playback_url")
+    .eq("share_code", shareCode.toUpperCase())
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return (
+    (data as { stream_playback_url: string | null }).stream_playback_url ?? null
+  );
 }
 
 // 視聴用 LiveKit トークンを取得する（role=viewer・匿名可なので Authorization なし）。

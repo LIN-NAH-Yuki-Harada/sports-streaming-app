@@ -14,21 +14,23 @@ import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Purchases, { type PurchasesPackage } from "react-native-purchases";
 import { supabase } from "../lib/supabase";
-import { waitForPaidPlan } from "../lib/plan";
+import { fetchPlan, waitForPaidPlan } from "../lib/plan";
 import { RC_SUPPORTED, ensureRcIdentity } from "../lib/revenuecat";
 import { SITE_URL } from "../config";
 
 // 商品ID → プラン表示情報。RevenueCat の package.product.identifier で判定する
 // （パッケージ名ではなく商品IDで見分けるので、RevenueCat側のパッケージ命名に依存しない）。
-const TIERS: Record<string, { name: string; features: string[]; order: number }> = {
+const TIERS: Record<string, { name: string; features: string[]; order: number; plan: "broadcaster" | "team" }> = {
   broadcaster_monthly: {
     name: "配信者プラン",
     order: 1,
+    plan: "broadcaster",
     features: ["自社プレイヤーで無制限ライブ配信", "スコアボード・共有コード", "LINE共有"],
   },
   team_monthly: {
     name: "チームプラン",
     order: 2,
+    plan: "team",
     features: ["配信者プランの全機能", "YouTube 自動アーカイブ", "チーム管理・スケジュール"],
   },
 };
@@ -45,12 +47,54 @@ export function PaywallScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // ★ 2026-08-04: 契約中かどうかを一切見ずに「このプランを購入」を出していたため、
+  //   Web(Stripe)で契約済みの人がアプリを入れてここを開くと**そのまま二重課金できてしまう**
+  //   （実際に1件発生）。現在の契約状況を取得して、購入導線を出し分ける。
+  const [currentPlan, setCurrentPlan] = useState<"free" | "broadcaster" | "team" | null>(null);
+  const [billedViaStripe, setBilledViaStripe] = useState(false);
+  const [billedViaIap, setBilledViaIap] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const { data } = await supabase.auth.getSession();
-      if (!cancelled) setUserId(data.session?.user.id ?? null);
+      const uid = data.session?.user.id ?? null;
+      if (!cancelled) setUserId(uid);
+      // 現在の契約状況（プラン／課金元）を取得する。取れなかった場合は購入を止めない
+      // （安全側＝買えなくなるより二重課金の警告が出ない方がまし、という判断ではなく、
+      //   取得失敗で購入不能にすると正当な新規購入まで塞ぐため）。
+      // 🔴 profiles の stripe_subscription_id / iap_product_id は **service_role 専用**で、
+      //    クライアント(authenticated)には列レベル GRANT されていない。
+      //    PostgREST は1列でも権限が無いとクエリ**全体**を 42501 で落とすため、それらを
+      //    混ぜて select すると plan まで取れず prof=null になり、下の出し分けが全て
+      //    素通りして「このプランを購入」に落ちる＝二重課金ガードが 100% 不発になる。
+      //    （本番へ実際にリクエストして確認: select=plan 単独でも 42501、
+      //      select=display_name は 200。許可列だけを指定すること）
+      //    → GRANT 済みの plan は fetchPlan で、課金元は RevenueCat から判定する。
+      if (uid) {
+        const plan = await fetchPlan(uid);
+        if (!cancelled) setCurrentPlan(plan);
+        // 課金元の判定は有料プランのときだけ行う（無料ユーザーに余計な通信をしない）。
+        if (plan !== "free" && RC_SUPPORTED) {
+          try {
+            // ★ getCustomerInfo は「いま RevenueCat にログインしている人」を返す。
+            //    ensureRcIdentity を先に通さないと匿名ユーザーの情報を見てしまい、
+            //    IAP 課金者を「Webで契約中」と誤判定する（購入時 :133 と同じ手順）。
+            const identityOk = await ensureRcIdentity(uid);
+            const info = await Purchases.getCustomerInfo();
+            const hasIap = Object.keys(info.entitlements.active).length > 0;
+            // 本人として照合できたときだけ信用する。照合できなければ両方 false のまま
+            //  ＝「ご利用中のプラン」の出し分けだけが効く安全な状態に留める。
+            if (!cancelled && identityOk) {
+              setBilledViaIap(hasIap);
+              // 有料プランなのに RevenueCat に購読が無い ＝ Web(Stripe) 経由。
+              setBilledViaStripe(!hasIap);
+            }
+          } catch {
+            /* 課金元が判定できなくても購入は塞がない（正当な新規購入を守る） */
+          }
+        }
+      }
       if (!RC_SUPPORTED) {
         if (!cancelled) setError("この端末では購入に対応していません。");
         return;
@@ -213,13 +257,47 @@ export function PaywallScreen() {
                   ・{f}
                 </Text>
               ))}
-              <Pressable
-                style={[styles.buyBtn, busy ? styles.btnDisabled : null]}
-                onPress={() => purchase(pkg)}
-                disabled={!!busy}
-              >
-                <Text style={styles.buyTxt}>このプランを購入</Text>
-              </Pressable>
+              {tier.plan === currentPlan ? (
+                // 契約中のプランは購入させない（同じものを二重に買えてしまうため）
+                <View style={[styles.buyBtn, styles.currentBtn]}>
+                  <Text style={styles.currentTxt}>ご利用中のプラン</Text>
+                </View>
+              ) : billedViaStripe ? (
+                // Web(Stripe)で課金中の人がここで買うと**二重課金**になる（実例あり）。
+                // アプリからの購入は塞ぎ、Web側での変更に誘導する。
+                <Pressable
+                  style={[styles.buyBtn, styles.btnDisabled]}
+                  onPress={() =>
+                    Alert.alert(
+                      "Webサイトでご契約中です",
+                      "このままアプリで購入すると、Webとアプリの両方で毎月お支払いが発生します。プランの変更・解約は、ご契約中のWebサイト（マイページ）から行ってください。",
+                    )
+                  }
+                >
+                  <Text style={styles.buyTxt}>Webでご契約中（購入できません）</Text>
+                </Pressable>
+              ) : billedViaIap && Platform.OS === "android" ? (
+                // Android のプラン変更をアプリ内購入で行うと、旧プランが残ったまま新プランが
+                // 増える恐れがある。Google Play の定期購入画面での変更に誘導する（安全側）。
+                <Pressable
+                  style={styles.buyBtn}
+                  onPress={() =>
+                    Linking.openURL(
+                      "https://play.google.com/store/account/subscriptions",
+                    ).catch(() => {})
+                  }
+                >
+                  <Text style={styles.buyTxt}>Google Play でプランを変更</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={[styles.buyBtn, busy ? styles.btnDisabled : null]}
+                  onPress={() => purchase(pkg)}
+                  disabled={!!busy}
+                >
+                  <Text style={styles.buyTxt}>このプランを購入</Text>
+                </Pressable>
+              )}
             </View>
           );
         })}
@@ -284,6 +362,13 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { opacity: 0.5 },
   buyTxt: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  currentBtn: { backgroundColor: "rgba(255,255,255,0.12)" },
+  currentTxt: {
+    color: "#4ade80",
+    fontWeight: "800",
+    fontSize: 15,
+    textAlign: "center",
+  },
   restoreBtn: { alignItems: "center", paddingVertical: 12, marginTop: 4 },
   restoreTxt: { color: "#7aa2ff", fontSize: 14, fontWeight: "600" },
   note: { color: "#777", fontSize: 11, lineHeight: 18, marginTop: 16 },
