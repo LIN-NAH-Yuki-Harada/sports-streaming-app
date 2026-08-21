@@ -141,24 +141,57 @@ export async function GET(request: Request) {
     }
   }
 
-  // 3. アップロード中のまま 30 分以上経過した stale uploader を pending に戻す
-  // (Sprint B のワーカーがクラッシュ / Vercel Function timeout 等で uploading
-  //  のまま放置された row を自己回復させる。次の youtube-upload cron tick で
-  //  通常通り再取得 → 再アップロードが走る)
+  // 3. アップロード中のまま長時間経過した stale uploader を pending に戻す
+  // (ワーカーがクラッシュ / Vercel Function timeout 等で uploading のまま放置された
+  //  row を自己回復させる。次の youtube-upload cron tick で通常通り再取得される)
+  //
+  // ★2026-08-21: 閾値を**アップロード経路ごとに分けた**。
+  //   従来は経路を問わず一律30分だったが、これは LiveKit 経路（Vercel Function が
+  //   アップロードする。関数の上限は300秒なので30分あれば十分）だけを想定した値だった。
+  //   RTMP/CDN 経路は VPS の archive-worker が**変換してから**アップロードするため、
+  //   長尺は正常でも30分を超える（実測: 1時間42分・2.5GBの変換に57分）。
+  //   その結果、**正常に処理中の行を横から pending に戻していた**。
+  //
+  //   これは単に無駄なだけでなく危険で、worker 側の楽観排他
+  //   （`status is null or pending` を条件に uploading を書く CAS）を無効化する。
+  //   pending に戻された瞬間、次の tick が同じ録画を掴めてしまい **二重アップロード**
+  //   になる（YouTube に同じ試合が2本上がり、DB が知らない動画が残る）。
+  //   2026-08-21 の大会で 28分の配信が実際に 30 分で差し戻された（完了4分前）。
+  //
+  //   RTMP/CDN 側の 4h は worker.js の STALE_UPLOADING_MS と同値。★両方を同時に変えること
+  //   （worker 側は service の TimeoutStartSec(3h) より長い必要がある）。
+  const STALE_UPLOAD_MS_LIVEKIT = 30 * 60 * 1000; // Vercel Function 経路
+  const STALE_UPLOAD_MS_VPS_WORKER = 4 * 60 * 60 * 1000; // VPS archive-worker 経路
   let staleUploadersReverted = 0;
   if (isArchiveEnabled()) {
-    const thirtyMinutesAgo = new Date(
-      Date.now() - 30 * 60 * 1000,
-    ).toISOString();
-    const { data: stale } = await admin
+    // LiveKit 経路（stream_playback_url が無い）= 従来どおり30分
+    const { data: staleLivekit } = await admin
       .from("broadcasts")
       .update({
         youtube_upload_status: "pending",
       })
       .eq("youtube_upload_status", "uploading")
-      .lt("youtube_upload_started_at", thirtyMinutesAgo)
+      .is("stream_playback_url", null)
+      .lt(
+        "youtube_upload_started_at",
+        new Date(Date.now() - STALE_UPLOAD_MS_LIVEKIT).toISOString(),
+      )
       .select("id");
-    staleUploadersReverted = stale?.length ?? 0;
+    // RTMP/CDN 経路（VPS ワーカーが変換込みで処理）= 4時間
+    const { data: staleWorker } = await admin
+      .from("broadcasts")
+      .update({
+        youtube_upload_status: "pending",
+      })
+      .eq("youtube_upload_status", "uploading")
+      .not("stream_playback_url", "is", null)
+      .lt(
+        "youtube_upload_started_at",
+        new Date(Date.now() - STALE_UPLOAD_MS_VPS_WORKER).toISOString(),
+      )
+      .select("id");
+    staleUploadersReverted =
+      (staleLivekit?.length ?? 0) + (staleWorker?.length ?? 0);
     if (staleUploadersReverted > 0) {
       console.info(
         "[cron/cleanup] reverted stale uploaders to pending:",
