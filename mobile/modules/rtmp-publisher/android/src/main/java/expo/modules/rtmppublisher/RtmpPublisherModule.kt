@@ -53,6 +53,10 @@ class RtmpPublisherModule : Module() {
       Prop("cameraPosition") { view: RtmpPublisherView, value: String ->
         view.cameraPosition = value
       }
+      // 撮影ズーム（1.0 = 等倍）。端末の上限は View 側で丸める（iOS と同一契約）。
+      Prop("zoom") { view: RtmpPublisherView, value: Double ->
+        view.zoom = value
+      }
       // 配信前の映像チェックの厳格度（"off" | "warn" | "block"）。既定 warn＝止めない。
       Prop("preflightMode") { view: RtmpPublisherView, value: String? ->
         view.preflightMode = value ?: "warn"

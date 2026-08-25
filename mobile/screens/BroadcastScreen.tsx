@@ -2637,6 +2637,13 @@ function LiveView(props: ScoreControlsProps) {
   );
 }
 
+// 撮影ズームの段。
+// ★デジタルズームのため倍率を上げるほど解像感が落ちる（配信は 1280x720＝2倍で実質 640x360）。
+//   少年サッカーのようにコートが広い競技では「多少粗くても寄りたい」需要が実際にあるため、
+//   画質と引き換えであることを承知のうえで 3 段だけ用意する。上限を増やすのは実機で
+//   見え方を確認してから。★1x を先頭に置き、いつでも等倍へ戻せるようにする。
+const ZOOM_STEPS = [1, 2, 3] as const;
+
 // ネイティブ RTMP 経路（Bunny）: 端末でカメラ＋スコア焼き込みを GPU 合成して RTMP 送信。
 // プレビューは RtmpPublisherView 自身が描画する。操作UIは同じ ScoreControls を重ねる。
 function RtmpLiveView(
@@ -2652,6 +2659,8 @@ function RtmpLiveView(
   useKeepAwake();
   const { rtmpUrl, scoreboardText, onStatus, preflightMode, noVideo, ...controls } =
     props;
+  // 既定は 1（等倍）。この機能を入れても、何も触らなければ画角はこれまでと同一。
+  const [zoom, setZoom] = useState<number>(1);
   return (
     <View style={styles.liveRoot}>
       <RtmpPublisherView
@@ -2666,6 +2675,7 @@ function RtmpLiveView(
         videoBitrate={3_500_000}
         fps={30}
         cameraPosition="back"
+        zoom={zoom}
         scoreboardText={scoreboardText}
         // 端末焼き込み(プレーンテキスト)はOFF。視聴側で綺麗な CSS オーバーレイ
         // (ViewerScoreboardOverlay・DBからリアルタイム)を重ねる方式に統一したため。
@@ -2684,6 +2694,26 @@ function RtmpLiveView(
           </Text>
         </View>
       ) : null}
+      {/* 撮影ズーム。★左端に置く: 上は topOverlay、下は controls が占めており、
+          右端は Android 横向きでナビゲーションバーが重なるため（実機で得点の＋が
+          押しにくくなった前例がある）。 */}
+      <View style={styles.zoomBar} pointerEvents="box-none">
+        {ZOOM_STEPS.map((z) => {
+          const on = zoom === z;
+          return (
+            <Pressable
+              key={z}
+              onPress={() => setZoom(z)}
+              accessibilityRole="button"
+              accessibilityLabel={`ズーム${z}倍`}
+              accessibilityState={{ selected: on }}
+              style={[styles.zoomBtn, on && styles.zoomBtnOn]}
+            >
+              <Text style={[styles.zoomText, on && styles.zoomTextOn]}>{z}x</Text>
+            </Pressable>
+          );
+        })}
+      </View>
       <ScoreControls {...controls} />
     </View>
   );
@@ -2804,6 +2834,27 @@ const styles = StyleSheet.create({
   ytToggleTextOn: { color: "#fff" },
 
   liveRoot: { flex: 1, backgroundColor: "#000" },
+  // 撮影ズームの操作（左端・上下中央）。小さくまとめ、映像をなるべく隠さない。
+  zoomBar: {
+    position: "absolute",
+    left: 10,
+    top: "34%",
+    gap: 8,
+    alignItems: "center",
+  },
+  zoomBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  zoomBtnOn: { backgroundColor: "#e63946", borderColor: "#e63946" },
+  zoomText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  zoomTextOn: { color: "#fff" },
   video: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   connecting: { color: "#fff", marginTop: 8 },
 
