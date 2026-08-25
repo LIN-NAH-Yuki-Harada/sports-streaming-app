@@ -10,6 +10,7 @@ import {
 } from "@/lib/health-probes";
 import { recordHeartbeat } from "@/lib/ops-heartbeat";
 import { getAdminClient } from "@/lib/supabase-admin";
+import { getOAuthClientForProfile } from "@/lib/youtube-upload";
 
 export const runtime = "nodejs";
 /**
@@ -100,6 +101,9 @@ const BACKLOG_MIN_AGE_MS = 3 * 60 * 60 * 1000;
  * 「件数」と「率」の両方を同時に満たしたときだけ鳴らす。
  */
 const ARCHIVE_FAIL_COUNT_ALERT = 5;
+/** YouTube 側の準備を点検する人数の上限。1件1ユニットなのでクォータは軽いが、
+ *  毎朝の点検が長引くのを防ぐため上限を置く（現在のチームプランは20名弱）。 */
+const YOUTUBE_READINESS_MAX_USERS = 50;
 const ARCHIVE_FAIL_RATE_ALERT = 0.5;
 /** ゴースト配信（心拍が途絶えたまま live で残っている）。3層対策が効いていれば常に0。 */
 const GHOST_MIN_AGE_MS = 6 * 60 * 60 * 1000;
@@ -855,6 +859,85 @@ export async function GET(request: Request) {
         };
       }
       return { level: "ok", value: `${value}（平常は14%前後）` };
+    }),
+  );
+
+  // [13.5] YouTube 側の準備（配信者のチャンネルが長尺・ライブを受け付ける状態か）
+  //
+  // ★2026-08-21〜23 の全国大会で、**のべ約12時間・9本**の試合が残らなかった。
+  //   原因はサービス側ではなく、配信者の YouTube チャンネルの**電話番号確認が未完了**。
+  //   YouTube は未確認のチャンネルに対して次を制限する:
+  //     - 15分を超える動画のアップロード（長い試合ほど丸ごと残らない）
+  //     - ライブ配信の利用（同時配信もアーカイブも作られない）
+  //
+  //   これは「配信が終わってから」しか表面化せず、しかも当日は24時間の待ちがあるため
+  //   もう間に合わない。**試合の前に気づく**必要がある。だから毎朝の点検に入れる。
+  //
+  //   判定は channels.list(part=status) の longUploadsStatus。値は
+  //   allowed / eligible / disallowed / longUploadsUnspecified で、**allowed 以外は
+  //   15分超を上げられない**（worker.js の checkLongUploadGate と同じ判定）。
+  //   権限は youtube.readonly で足りるため**再連携は不要**。1件1ユニットでクォータも軽い。
+  checks.push(
+    await safeCheck("youtube_channel_readiness", "YouTube側の準備（配信者）", "重要", async () => {
+      const { data: targets, error } = await admin
+        .from("profiles")
+        .select("id, display_name, youtube_channel_name, youtube_refresh_token")
+        .eq("plan", "team")
+        .not("youtube_channel_id", "is", null)
+        .not("youtube_refresh_token", "is", null)
+        .limit(YOUTUBE_READINESS_MAX_USERS)
+        .abortSignal(AbortSignal.timeout(8000));
+      if (error) throw new Error(error.message);
+      const list = targets ?? [];
+      if (list.length === 0) {
+        return { level: "ok", value: "対象なし（YouTube連携済みのチームプランが0件）" };
+      }
+
+      const notReady: string[] = [];
+      let unchecked = 0;
+      for (const p of list) {
+        // 1件でも詰まると点検全体が遅れるため、締切に近づいたら残りは諦める。
+        if (Date.now() > deadlineAt - 5000) {
+          unchecked = list.length - notReady.length - unchecked;
+          break;
+        }
+        try {
+          const oauth = await getOAuthClientForProfile(
+            p as unknown as Parameters<typeof getOAuthClientForProfile>[0],
+          );
+          const { google } = await import("googleapis");
+          const yt = google.youtube({ version: "v3", auth: oauth });
+          const res = await yt.channels.list({ part: ["status"], mine: true });
+          const st = res.data?.items?.[0]?.status?.longUploadsStatus;
+          // ★取得できなかった場合は鳴らさない（フェイルオープン）。
+          //   判定できないことを理由に「未準備」と断定すると誤報で信用を失う。
+          if (st && st !== "allowed") {
+            notReady.push(
+              `${p.display_name || "（表示名なし）"}（${p.youtube_channel_name || "チャンネル名なし"}／${st}）`,
+            );
+          }
+        } catch {
+          unchecked += 1;
+        }
+      }
+
+      const suffix = unchecked > 0 ? `／${unchecked}件は確認できず` : "";
+      if (notReady.length > 0) {
+        return {
+          level: "alert",
+          value: `${notReady.length}名が未準備（対象${list.length}名${suffix}）`,
+          cause:
+            "この配信者の YouTube チャンネルは、15分を超える動画を受け付けない状態です。" +
+            "長い試合を配信しても、アーカイブが丸ごと残りません。ライブ配信も使えない可能性があります。",
+          action:
+            "該当の配信者に「https://www.youtube.com/verify で電話番号確認をしてください」と" +
+            "ご連絡ください。★有効化には最大24時間かかるため、試合の前日までに必要です。",
+          detail: notReady.join("\n"),
+          subjectHint: "YouTube未準備の配信者",
+          ownerActionable: true,
+        };
+      }
+      return { level: "ok", value: `${list.length}名すべて準備OK${suffix}` };
     }),
   );
 
