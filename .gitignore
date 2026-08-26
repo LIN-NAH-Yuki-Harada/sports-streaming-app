@@ -14,3 +14,16 @@ docs/assets/brand-sources/
 
 # 機密情報を含むドキュメント（外部担当者の連絡先等）
 docs/日本政策金融公庫の担当者.txt
+
+# Claude Code のローカル作業データ。worktree の node_modules を含み **数GB** になる
+# （2026-08-27 時点で 328,122ファイル / 6.9GB）。誤ってコミットするとリポジトリが壊れる。
+.claude/
+
+# デザイン素材（PSD 等）。marketing/ は 187MB、スクショ置き場は 54MB あり Git には大きすぎる。
+# 素材そのものは残すが Git 管理外にする（docs/assets/lp-sources と同じ方針）。
+marketing/
+image(screenshot）/
+
+# 調査用に吐いたデータダンプ。**本番の配信データを含む**ため入れない。
+web/all2.json
+web/wall.json

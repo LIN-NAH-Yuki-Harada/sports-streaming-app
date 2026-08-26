@@ -63,7 +63,7 @@ ws.column_dimensions['E'].width = 16
 
 # タイトル
 ws.merge_cells('A1:E1')
-ws['A1'].value = "LIVE SPOtCH 開発費用見積もり (v2) — 完成分 (5/10 時点 / 126 PR マージ)"
+ws['A1'].value = "LIVE SPOtCH 開発費用見積もり (v2) — 完成分 (2026/6/1 ローンチ済 / 127 PR マージ)"
 ws['A1'].font = f_title
 ws.row_dimensions[1].height = 30
 
@@ -243,7 +243,7 @@ c.font = f_grand; c.fill = fill_grand; c.alignment = align_r; c.border = thick_b
 # ══════════════════════════════════════
 # Sheet 2: 残り開発（5月中完璧化）
 # ══════════════════════════════════════
-ws2 = wb.create_sheet("残り開発（5月中完璧化）")
+ws2 = wb.create_sheet("残り開発（ローンチ後）")
 ws2.sheet_properties.tabColor = "F59E0B"
 
 ws2.column_dimensions['A'].width = 8
@@ -252,7 +252,7 @@ ws2.column_dimensions['C'].width = 16
 ws2.column_dimensions['D'].width = 16
 
 ws2.merge_cells('A1:D1')
-ws2['A1'].value = "残り開発費用見積もり（5月中完璧化 → 6/1 正式ローンチ）"
+ws2['A1'].value = "残り開発費用見積もり（ローンチ後の品質改善：TCP化 + 1ヶ月保守）"
 ws2['A1'].font = f_title; ws2.row_dimensions[1].height = 30
 
 ws2.merge_cells('A2:D2')
@@ -324,7 +324,7 @@ ws3['A1'].value = "LIVE SPOtCH 開発費用見積もり (v2) — 総合計"
 ws3['A1'].font = f_title; ws3.row_dimensions[1].height = 30
 
 ws3.merge_cells('A2:C2')
-ws3['A2'].value = "一般的な開発会社に外注した場合の想定費用 ／ 5/10 時点 / 126 PR マージ反映"; ws3['A2'].font = f_sub
+ws3['A2'].value = "一般的な開発会社に外注した場合の想定費用 ／ 2026/6/7 時点 / 127 PR マージ反映（6/1 正式ローンチ済）"; ws3['A2'].font = f_sub
 ws3.row_dimensions[2].height = 18; ws3.row_dimensions[3].height = 6
 
 for ci, h in enumerate(["項目", "税抜", "税込"], 1):
@@ -335,8 +335,8 @@ TOTAL_EXTAX = COMPLETED_EXTAX + REMAINING_EXTAX
 TOTAL_INCTAX = int(TOTAL_EXTAX * 1.10)
 
 summary = [
-    ("完成分（5/10 時点 / 100% 本番稼働）", COMPLETED_EXTAX, COMPLETED_INCTAX),
-    ("残り開発（5月中完璧化 + 6/1 ローンチ後 1ヶ月保守）", REMAINING_EXTAX, REMAINING_INCTAX),
+    ("完成分（6/1 ローンチ済 / 本番稼働中）", COMPLETED_EXTAX, COMPLETED_INCTAX),
+    ("残り開発（ローンチ後の品質改善：TCP化 + 1ヶ月保守）", REMAINING_EXTAX, REMAINING_INCTAX),
 ]
 for i, (item, ex_tax, inc_tax) in enumerate(summary):
     row = 5 + i
@@ -364,7 +364,7 @@ notes = [
     "上記は国内の中規模 Web 開発会社（従業員 20〜50 名程度）の標準的な見積もり水準です。",
     "大手 SIer（NTT データ、富士通等）の場合、1.5〜2 倍（2,000 万〜3,000 万円）になることもあります。",
     "ライブ映像配信（LiveKit / WebRTC / RTMP push）+ YouTube Live 連携 + iOS Safari 対応は特殊技術のため、対応できる会社が限られ割増傾向です。",
-    "5/10 までの 126 PR を踏まえ、配信品質改善・運用堅牢化・YouTube Live 連携 等の実装増分（+約 500 万円分）を反映した v2 改訂版です。",
+    "5/29 までの 127 PR を踏まえ、配信品質改善・運用堅牢化・YouTube Live 連携 等の実装増分（+約 500 万円分）を反映した v2 改訂版です。",
     "保守・運用費（月額）はローンチ後 1ヶ月分のみ含みます。通常、開発費の 15〜20%/年 が保守費用の相場です。",
     "本見積もりは、AI 開発支援ツールを活用せず従来の手法で開発した場合の想定です。",
     "当社は Claude 等の AI 駆動開発で、上記費用と同等の機能を実コストほぼゼロで実装しております（実績）。",
@@ -411,7 +411,7 @@ ws4.cell(row=12, column=1, value="※ 中間値で算出。大手 SIer の場合
 ws4.cell(row=13, column=1, value="※ WebRTC / 映像配信は LIVE SPOtCH のコア技術領域。対応エンジニアが限られるため割増単価が一般的。").font = f_note
 
 
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LIVE_SPOtCH_開発費用見積もり（参考）.xlsx")
+out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "【提出用】LIVE_SPOtCH_開発費用見積もり（参考）.xlsx")
 wb.save(out)
 print(f"保存完了: {out}")
 print(f"")
