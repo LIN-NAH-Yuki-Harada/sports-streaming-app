@@ -24,7 +24,6 @@ import com.pedro.encoder.input.video.CameraCallbacks
 import com.pedro.encoder.input.video.CameraHelper
 import com.pedro.encoder.utils.gl.TranslateTo
 import com.pedro.library.rtmp.RtmpStream
-import com.pedro.library.util.BitrateAdapter
 import com.pedro.library.util.streamclient.StreamBaseClient
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
@@ -100,12 +99,23 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
 
   private val audioBitrate = 128_000
 
-  // アダプティブビットレート（4G の要): 上り実効スループットに応じて自動昇降。
-  // 上限は setMaxBitrate（映像+音声の合計＝公式パターン）、下限は自前クランプ
-  // （BitrateAdapter には下限が無く、輻輳が続くと際限なく下がるため）。
-  private val bitrateAdapter = BitrateAdapter { bps ->
-    stream?.setVideoBitrateOnFly(bps.coerceAtLeast(MIN_VIDEO_BITRATE))
-  }
+  // ---- アダプティブビットレートの状態（すべて「映像+音声の合計 bps」で持つ）--------------
+  // ライブラリの BitrateAdapter は使わない（理由は adaptBitrate のコメント参照）。
+  /** 上限＝prepare 時に確定する videoBitrate + audioBitrate。0 = 未 prepare。 */
+  private var maxTotalBitrate = 0
+  /** 今の目標値。混雑で下げ、平穏が続けば上げる。 */
+  private var targetTotalBitrate = 0
+  /** 実際にエンコーダへ渡した値（0 = 未適用。配信開始直後に必ず上限を1回適用するため）。 */
+  private var appliedTotalBitrate = 0
+  /** 混雑を検知しなかった連続秒数（上げる判断に使う）。 */
+  private var calmTicks = 0
+  // 配信開始からの経過 tick（＝秒）。開始直後の一時的な滞留で画質を落とさないための助走に使う。
+  private var adaptTicks = 0
+  /** 直前 tick までの累計ドロップ数（この1秒で増えたか＝実際にコマを捨てたかの判定に使う）。 */
+  private var lastDroppedFrames = 0L
+  /** 診断用: 降格した回数と、配信中に到達した最低映像ビットレート。 */
+  private var bitrateDownCount = 0
+  private var lowestVideoBitrate = 0
 
   private val displayListener = object : DisplayManager.DisplayListener {
     override fun onDisplayAdded(displayId: Int) {}
@@ -188,6 +198,7 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     // ★送信キュー上限の適用は「startStream の直前・キューが空のうち」に必ず行う（下の説明参照）。
     peakItemsInCache = 0
     lastStatsLogMs = 0L
+    resetBitrateAdaptation()
     applySendCache(s)
     // ★配信前チェック: プレビューを開始できたなら、カメラが実際に開くのを待ってから publish する。
     //   プレビューを開始できていない（surface 未生成など）ときは待たない
@@ -259,7 +270,7 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     } catch (_: Exception) {
       prepared = false
     }
-    bitrateAdapter.reset()
+    resetBitrateAdaptation()
     Log.i(TAG, "stream stopped: $summary")
     // iOS の stopStreaming と同じく正常停止でも closed を通知（JS は endedRef で無視）。
     // message はキュー統計（JS 側は closed の message を参照しないので挙動は変わらない。
@@ -354,7 +365,9 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
       return false
     }
 
-    bitrateAdapter.setMaxBitrate(videoBitrate + audioBitrate)
+    // アダプティブの上限＝prepare で確定した「映像+音声」の合計。以後この値を超えない。
+    maxTotalBitrate = videoBitrate + audioBitrate
+    resetBitrateAdaptation()
     stream = s
     camera = cam
     prepared = true
@@ -388,24 +401,41 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
   //   なので 400 ÷ 76.875 ≒ 5.2 秒ぶん溜め込める。回線が詰まるとこの行列が伸び、
   //   サーバーには最大 5.2 秒遅れて届く ＝ 閾値 5 秒を超える。5.2 秒 vs 5 秒の紙一重。
   //
-  // 対策:
-  //   キュー上限を「約 1.5 秒ぶん」に縮め、遅れが構造的に 5 秒へ届かないようにする。
-  //   1.5 秒なら閾値まで 3.5 秒の余裕（3.3 倍のマージン）。
-  //   縮めた副作用は「輻輳が 1.5 秒続くとフレームが捨てられる（＝一瞬カクつく）」だが、
-  //   捨てられても接続は切れない。従来は捨てずに溜め込んだ結果サーバー側リセットを招き、
-  //   3 秒の欠落＋録画分割＋スコアずれになっていたので、こちらの方が明確に軽い。
+  // 対策（vc16 / 2026-08-11）:
+  //   キュー上限を「約 1.5 秒ぶん」に縮めた。結果、録画リセットは 136 回 → 39 回（-61%）、
+  //   欠落 10.1% → 5.8% と改善した。
+  //
+  // ★しかし vc16 では「ライブがプツプツ切れる」という新しい問題が出た（2026-08-12 実戦報告）。
+  //   理由はキューを縮めたこと自体ではなく、**ビットレートを下げる判断が遅すぎた**こと:
+  //   ライブラリの BitrateAdapter は内部に「5 回に 1 回だけ判断する」カウンタを持つ
+  //   （onNewBitrate は毎秒なので実質 5 秒に 1 回）。
+  //   キューは 1.5 秒で満杯になるのに降格は最大 5 秒後 ＝ その間ずっとコマを捨て続ける。
+  //   捨てたコマはライブ視聴でそのままカクつきとして見える。
+  //   → 対策は「キューをさらに縮める」ではなく「反応を速くする」。本コミットの主眼。
+  //
+  // 今回（vc17）の設計:
+  //   1) キュー上限を 1.5 秒 → 2.5 秒に**戻す方向で緩める**。
+  //      MediaMTX の閾値 5 秒に対して 2.5 秒＝ちょうど 2 倍の余裕があり、録画リセットは
+  //      引き続き起きない。緩めたぶん「コマを捨てるまでの猶予」が 1.7 倍になる。
+  //   2) ビットレートの判断を**毎秒**に変える（下は即時・上はゆっくり）。adaptBitrate 参照。
+  //   3) 混雑とみなす滞留を 1.0 秒 → 0.7 秒に早める（congestionItems 参照）。
+  //   画質（解像度 / 上限ビットレート / fps / GOP / 音声）は一切変更していない。
 
   /**
-   * 送信キューに積んでよいメディアフレーム数を、実際に prepare した fps から算出する。
-   * 1 秒あたりのフレーム数 = 映像 fps ＋ 音声フレーム/秒(48000 ÷ 1024 = 46.875)。
-   * 本番設定(fps=30) では (30 + 46.875) × 1.5 秒 = 115.3 → 115 個。
+   * 1 秒あたりに送信キューへ積まれるメディアフレーム数。
+   * 映像 fps ＋ 音声フレーム/秒(48000 ÷ 1024 = 46.875)。本番設定(fps=30) では 76.875 個/秒。
+   * ★キュー関連のしきい値はすべて「秒」で定義し、この値で個数へ換算する（単位を1本化）。
    */
-  private fun sendCacheItemsFor(fpsInt: Int): Int {
-    val audioFramesPerSecond = AUDIO_SAMPLE_RATE.toDouble() / AAC_SAMPLES_PER_FRAME // 46.875
-    val framesPerSecond = fpsInt + audioFramesPerSecond
-    return (framesPerSecond * SEND_CACHE_SECONDS).roundToInt()
+  private fun framesPerSecond(): Double =
+    preparedFps + AUDIO_SAMPLE_RATE.toDouble() / AAC_SAMPLES_PER_FRAME
+
+  /**
+   * 送信キューに積んでよいメディアフレーム数（＝上限）。
+   * 本番設定(fps=30) では 76.875 × 2.5 秒 = 192.2 → 192 個（= 2.50 秒ぶん）。
+   */
+  private fun sendCacheItems(): Int =
+    (framesPerSecond() * SEND_CACHE_SECONDS).roundToInt()
       .coerceIn(SEND_CACHE_MIN_ITEMS, SEND_CACHE_MAX_ITEMS)
-  }
 
   /**
    * 送信キュー上限を適用する。
@@ -418,13 +448,14 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
    */
   private fun applySendCache(s: RtmpStream) {
     if (s.isStreaming) return // 送信中は実データが入っており縮小できない（例外になる）
-    val items = sendCacheItemsFor(preparedFps)
+    val items = sendCacheItems()
     appliedSendCacheItems = try {
       s.getStreamClient().resizeCache(items)
       Log.i(
         TAG,
         "send cache resized: $items items" +
           " (~${SEND_CACHE_SECONDS}s at ${preparedFps}fps + ${AUDIO_SAMPLE_RATE}Hz audio," +
+          " congestion trigger=${congestionItems()} items ~${CONGESTION_TRIGGER_SECONDS}s," +
           " library default 400 = ~5.2s)",
       )
       items
@@ -435,41 +466,171 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
   }
 
   /**
-   * 輻輳判定のしきい値（%）。
-   * ライブラリ既定は「キュー上限の 20%」。上限 400 個のときは 80 個＝約 1.04 秒の滞留で
-   * 輻輳とみなしていたが、上限を 115 個に縮めると同じ 20% が 23 個＝約 0.30 秒になり、
-   * キーフレーム送出の一瞬の詰まりでも輻輳と判定されてビットレートが下がりうる
-   * （＝画質が落ちる。オーナー方針に反する）。
-   * ★今回変えたいのは「キューの上限」だけなので、ビットレート適応が働き始める“実時間”は
-   *   従来どおり約 1.0 秒の滞留に据え置く。そのために % を計算し直す。
-   *   1.0 ÷ 1.5 × 100 = 66.7% → 115 個 × 66.7% ≒ 77 個 ≒ 1.0 秒。
+   * 「混雑」とみなす滞留フレーム数。CONGESTION_TRIGGER_SECONDS を個数へ換算する。
+   * 本番設定(fps=30) では 76.875 × 0.7 = 53.8 → 54 個（= 0.70 秒ぶんの遅れ）。
+   *
+   * ★秒→個数で自前に判定する理由: ライブラリの hasCongestion(percent) は
+   *   「今のキュー容量に対する割合」なので、上限を変えるたびに % を計算し直す必要があり、
+   *   さらに resizeCache に失敗した場合（上限 400 のまま）は同じ % が別の実時間を意味してしまう。
+   *   個数で持てば、上限がいくつでも「0.7 秒の遅れ」という意味が変わらない。
+   *   （hasCongestion は queue の実サイズを見るので、resize 成功時は本実装と等価）
+   *
+   * ★1.0 秒 → 0.7 秒に早めた理由: 混雑を検知してから実際にビットレートが下がって
+   *   キューが減り始めるまでには必ず数百 ms の遅れがある。0.7 秒で気づけば、上限 2.5 秒まで
+   *   1.8 秒ぶんの猶予を残して手を打てる（従来は 1.0 秒検知＋最大 5 秒待ちで完全に間に合わなかった）。
+   *   誤検知の余地も十分ある: GOP 2 秒のキーフレームは平均フレームの約 5 倍＝約 0.58Mbit で、
+   *   3.5Mbps の回線なら送出に約 0.17 秒。0.7 秒はその 4 倍で、通常のキーフレーム送出では届かない。
    */
-  private fun congestionPercent(): Float =
-    ((CONGESTION_TRIGGER_SECONDS / SEND_CACHE_SECONDS) * 100.0).toFloat().coerceIn(1f, 100f)
+  private fun congestionItems(): Int =
+    (framesPerSecond() * CONGESTION_TRIGGER_SECONDS).roundToInt().coerceAtLeast(1)
 
-  /** 実機テストの合否判定に使うキュー統計（1行）。重い処理は含めない。 */
+  /**
+   * 「キューが捌けている」とみなす滞留フレーム数（ビットレートを上げてよい条件）。
+   * 本番設定(fps=30) では 76.875 × 0.3 = 23.1 → 23 個（= 0.30 秒）。
+   * ★混雑していない（0.7 秒未満）だけでは上げない。0.5 秒前後で張り付いている状態は
+   *   「回線の限界ちょうど」であり、そこで上げれば必ず混雑に戻るため。
+   */
+  private fun recoveryItems(): Int =
+    (framesPerSecond() * RECOVERY_QUEUE_SECONDS).roundToInt().coerceAtLeast(1)
+
+  /** 配信開始/停止時にアダプティブの状態を初期化する（次の配信を上限から始めるため）。 */
+  private fun resetBitrateAdaptation() {
+    targetTotalBitrate = maxTotalBitrate
+    appliedTotalBitrate = 0 // 0 = 未適用。配信開始後の最初の tick で必ず上限を適用し直す
+    calmTicks = 0
+    adaptTicks = 0
+    lastDroppedFrames = 0L
+    bitrateDownCount = 0
+    lowestVideoBitrate = 0
+  }
+
+  /**
+   * ★毎秒のビットレート適応（本コミットの中核）。onNewBitrate から毎秒呼ばれる。
+   *
+   * なぜライブラリの BitrateAdapter をやめたか:
+   *   BitrateAdapter は内部に cont カウンタを持ち `if (cont >= 5)` でしか判断しない。
+   *   onNewBitrate は毎秒なので実質 5 秒に 1 回。この 5 秒はライブラリ内部の定数で
+   *   外から変更できない。キューが 1.5〜2.5 秒で満杯になる本アプリでは、
+   *   「満杯 → コマ落ち → ライブがカクつく」が最大 5 秒続いてしまう。
+   *
+   * 設計（非対称にするのが要点）:
+   *   下げる = 混雑を検知したその秒に即座に。実効スループット(measured)は回線の実力そのものなので、
+   *            その 0.8 倍を狙えば 1〜2 秒で回線の下に潜り込める。
+   *   上げる = 混雑が RECOVERY_CALM_TICKS 秒（3 秒）続けて無く、かつキューが捌けている時だけ
+   *            1 段（+15%）。急に戻すと再び混雑してカクつきが再発するため。
+   *   ※ 下げ遅れ＝コマ落ち（ライブのカクつき）、上げ急ぎ＝再混雑。だから非対称にする。
+   *
+   * @param measuredTotalBps ライブラリ実測の送信スループット（映像+音声の合計）
+   * @param items 今キューに溜まっているフレーム数
+   * @param droppedDelta この 1 秒で新たに捨てたフレーム数
+   * @return 混雑と判定したか（ログ用）
+   */
+  private fun adaptBitrate(
+    s: RtmpStream,
+    measuredTotalBps: Long,
+    items: Int,
+    droppedDelta: Long,
+  ): Boolean {
+    adaptTicks++
+    // ★開始直後は降格しない（助走）。TCP のスロースタートと最初のキーフレーム送出で
+    //   キューは一時的に膨らむが、これは回線が細いのではなく「立ち上がり」でしかない。
+    //   ここで降格すると、視聴者が入ってくる一番大事な最初の十数秒が半分の画質になる。
+    //   キューは 2.5 秒ぶんあるので、2 tick 待っても MediaMTX の 5 秒閾値には届かない。
+    val warmingUp = adaptTicks <= STARTUP_GRACE_TICKS
+    // ★1 tick 目の droppedDelta は使わない。ライブラリのドロップ累計が stop→start で
+    //   リセットされる保証が無く、前回配信ぶんを「今の混雑」と誤認しうるため。
+    val dropSignal = if (adaptTicks <= 1) false else droppedDelta > 0
+    // 実際にコマを捨てた ＝ 疑いようのない混雑。1 秒に 1 回のサンプリングでは
+    // キューが溜まって捌けた瞬間を取りこぼすことがあるため、この signal も併用する。
+    val congested = items >= congestionItems() || dropSignal
+    if (maxTotalBitrate <= 0) return congested
+    // 助走中は「混雑している」と報告だけして、目標値には手を触れない。
+    if (warmingUp && congested) {
+      calmTicks = 0
+      return true
+    }
+
+    val minTotal = MIN_VIDEO_BITRATE + audioBitrate
+    var next = targetTotalBitrate
+    if (congested) {
+      calmTicks = 0
+      // 実測が今の目標を上回ることがある（キューを吐き出している最中など）ので下限側で採用。
+      val base = minOf(measuredTotalBps.toDouble(), targetTotalBitrate.toDouble())
+      // ★1 tick の下げ幅には床を設ける。回線の瞬断（4G のハンドオーバ等）で measured が
+      //   一瞬ゼロ近くまで落ちると、それを回線の実力と誤認して 500kbps まで落ち、
+      //   戻すのに数十秒かかってしまう。半分までに留めれば最悪でも 2 tick で追従できる。
+      val floor = targetTotalBitrate * BITRATE_MAX_DROP_PER_TICK
+      next = maxOf(base * BITRATE_DECREASE_FACTOR, floor).roundToInt()
+      if (next > targetTotalBitrate) next = targetTotalBitrate // 下げる判断で上げない
+    } else {
+      calmTicks++
+      val canIncrease = targetTotalBitrate < maxTotalBitrate &&
+        calmTicks >= RECOVERY_CALM_TICKS &&
+        items <= recoveryItems()
+      if (canIncrease) {
+        // ★上げ幅の基準は「実測」ではなく「今の目標」。動きの少ない場面では実測が目標を
+        //   大きく下回る（＝正常）ため、実測基準だと上げたつもりで下がり、二度と戻らない。
+        next = (targetTotalBitrate * BITRATE_INCREASE_FACTOR).roundToInt()
+        calmTicks = 0
+      }
+    }
+
+    // coerceIn は「下限 > 上限」で例外を投げる。videoBitrate Prop が下限クランプより小さい
+    // 構成（将来の設定ミス）でも配信を止めないよう、下限は上限を超えないようにしてから使う。
+    val lower = minOf(minTotal, maxTotalBitrate)
+    val clamped = next.coerceIn(lower, maxTotalBitrate)
+    if (clamped < targetTotalBitrate) bitrateDownCount++
+    targetTotalBitrate = clamped
+    // appliedTotalBitrate が 0（配信開始直後）のときは、目標と同じでも必ず 1 回適用する。
+    // 同一 View で stop → start した場合、エンコーダには前回の降格値が残っているため。
+    if (targetTotalBitrate != appliedTotalBitrate) {
+      val video = (targetTotalBitrate - audioBitrate).coerceAtLeast(MIN_VIDEO_BITRATE)
+      try {
+        s.setVideoBitrateOnFly(video)
+        appliedTotalBitrate = targetTotalBitrate
+        if (lowestVideoBitrate == 0 || video < lowestVideoBitrate) lowestVideoBitrate = video
+      } catch (_: Exception) {
+        // 適用に失敗しても配信は続ける（次の tick で再試行される）。
+      }
+    }
+    return congested
+  }
+
+  /** 実機テストの合否判定に使う統計（1行）。重い処理は含めない。 */
   private fun cacheSummary(s: RtmpStream): String = try {
     val client = s.getStreamClient()
     val limit = if (appliedSendCacheItems > 0) appliedSendCacheItems.toString() else "400(default)"
     "cacheLimit=$limit peakItems=$peakItemsInCache" +
-      " droppedVideo=${client.getDroppedVideoFrames()} droppedAudio=${client.getDroppedAudioFrames()}"
+      " droppedVideo=${client.getDroppedVideoFrames()} droppedAudio=${client.getDroppedAudioFrames()}" +
+      " bitrateDown=$bitrateDownCount lowestVideoKbps=${lowestVideoBitrate / 1000}"
   } catch (_: Exception) {
-    "cacheLimit=? peakItems=$peakItemsInCache"
+    "cacheLimit=? peakItems=$peakItemsInCache bitrateDown=$bitrateDownCount"
   }
 
   /**
-   * キュー滞留の観測。onNewBitrate（ライブラリが約1秒ごとに呼ぶ）に相乗りし、
-   * さらに 1 秒未満の連続呼び出しは間引く（配信中に処理を増やさないため）。
+   * 診断ログ（1 秒に 1 行）。次のテストで原因が分からなくならないよう、
+   * 「キュー滞留・現在ビットレート・混雑判定・コマ落ち累計」を必ず 1 行に含める。
    * ※ getCacheSize() はライブラリ側が resizeCache 後も 400 を返す実装（BaseSender の
    *   cacheSize フィールドが更新されない）ため使わない。実測は getItemsInCache() のみ。
    */
-  private fun observeCache(client: StreamBaseClient) {
+  private fun logStats(
+    items: Int,
+    congested: Boolean,
+    measuredTotalBps: Long,
+    droppedTotal: Long,
+    droppedDelta: Long,
+  ) {
     val now = SystemClock.elapsedRealtime()
     if (now - lastStatsLogMs < STATS_LOG_INTERVAL_MS) return
     lastStatsLogMs = now
-    val items = client.getItemsInCache()
-    if (items > peakItemsInCache) peakItemsInCache = items
-    Log.i(TAG, "cache items=$items peak=$peakItemsInCache limit=$appliedSendCacheItems")
+    Log.i(
+      TAG,
+      "adapt items=$items/${if (appliedSendCacheItems > 0) appliedSendCacheItems else 400}" +
+        "(peak=$peakItemsInCache trigger=${congestionItems()})" +
+        " congested=$congested measuredKbps=${measuredTotalBps / 1000}" +
+        " videoKbps=${(targetTotalBitrate - audioBitrate) / 1000}/${videoBitrate / 1000}" +
+        " dropped=$droppedTotal(+$droppedDelta) down=$bitrateDownCount calm=$calmTicks",
+    )
   }
 
   // 実マイク入力を無加工で取る音源を選ぶ。UNPROCESSED(API24+・対応端末)が第一候補、
@@ -607,23 +768,28 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
 
   override fun onAuthSuccess() {}
 
-  // BitrateChecker: 送信実測ビットレート（映像+音声合計）。呼び出しスレッド保証が
-  // ないためメインスレッドへ寄せてから適応させる（公式デモと同じ構成）。
+  // BitrateChecker: 送信実測ビットレート（映像+音声合計）。ライブラリが約1秒ごとに呼ぶ。
+  // 呼び出しスレッド保証がないためメインスレッドへ寄せてから適応させる（公式デモと同じ構成）。
+  // ★ここが「毎秒の判断」の唯一の入口。間引かない（間引くと反応が遅れ、vc16 の再現になる）。
   override fun onNewBitrate(bitrate: Long) {
     mainHandler.post {
       val s = stream ?: return@post
       if (!s.isStreaming) return@post
-      val client = try { s.getStreamClient() } catch (_: Exception) { return@post }
+      val client: StreamBaseClient = try { s.getStreamClient() } catch (_: Exception) { return@post }
       try {
-        // キュー上限を縮められた場合だけ % を読み替える（縮小に失敗＝既定 400 のままなら
-        // ライブラリ既定の 20% をそのまま使う。どちらでも実時間の判定基準は約 1.0 秒）。
-        val congested =
-          if (appliedSendCacheItems > 0) client.hasCongestion(congestionPercent())
-          else client.hasCongestion()
-        bitrateAdapter.adaptBitrate(bitrate, congested)
+        val items = client.getItemsInCache()
+        if (items > peakItemsInCache) peakItemsInCache = items
+        val droppedTotal = client.getDroppedVideoFrames().toLong() +
+          client.getDroppedAudioFrames().toLong()
+        // 再接続でカウンタが 0 に戻る可能性があるため負の差分は 0 とみなす。
+        val droppedDelta = (droppedTotal - lastDroppedFrames).coerceAtLeast(0L)
+        lastDroppedFrames = droppedTotal
+        val congested = adaptBitrate(s, bitrate, items, droppedDelta)
+        // 診断はビットレート適応の後（ログで例外が出ても適応を止めない）。
+        try { logStats(items, congested, bitrate, droppedTotal, droppedDelta) } catch (_: Exception) {}
       } catch (_: Exception) {}
-      // 診断はビットレート適応の後（統計で例外が出ても適応を止めない）。
-      try { observeCache(client) } catch (_: Exception) {}
+      // ★映像なし検知（release/1.1.8 由来）は vc17 の適応ロジックとは独立に必ず走らせる。
+      //   統計ログは上の logStats に一本化したため、旧 observeCache の呼び出しは削除した。
       checkVideoAlive(bitrate)
     }
   }
@@ -671,9 +837,36 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
   companion object {
     private const val TAG = "RtmpPublisher"
 
-    // アダプティブ降格の下限（これ未満は映像が用をなさないため足切り）。
-    // BitrateAdapter.Listener の引数は Int(bps)。
+    // アダプティブ降格の下限（これ未満は映像が用をなさないため足切り）。★変更しないこと。
     private const val MIN_VIDEO_BITRATE = 500_000
+
+    // ---- 調整するならここだけ（すべて「秒」または「倍率」。個数は自動計算される） ----
+    // ★env ではなく定数にしている理由: このアプリは OTA 更新(expo-updates)を持たないため
+    //   env にしても値の変更＝再ビルドで手間は同じ。定数1つの方が誤設定の余地がない。
+    //
+    // 送信キューに溜めてよい時間。サーバー(MediaMTX)は「5 秒」以上の遅れで録画を切り直す。
+    //   2.5 秒＝閾値のちょうど半分。1.5 秒（vc16）より猶予が 1.7 倍あり、
+    //   同じ混雑でもコマを捨て始めるまでが長い＝ライブがカクつきにくい。
+    //   3.0 秒を超えると MediaMTX 閾値までの余裕が 2 秒を切るので上げない。
+    private const val SEND_CACHE_SECONDS = 2.5
+    // 「混雑」とみなす滞留時間。0.7 秒 ＝ 上限 2.5 秒に対し 1.8 秒の対処猶予を残す。
+    //   下げすぎる（0.3 秒未満）とキーフレーム送出の一瞬の詰まりで誤検知し、画質が無駄に落ちる。
+    private const val CONGESTION_TRIGGER_SECONDS = 0.7
+    // ビットレートを上げてよい「キューが捌けている」滞留時間。0.3 秒。
+    private const val RECOVERY_QUEUE_SECONDS = 0.3
+
+    // ---- ビットレート適応（下は即座に・上はゆっくり） ----
+    // 混雑時の目標＝実効スループットの 0.8 倍（ライブラリ既定 decreaseRange と同値）。
+    private const val BITRATE_DECREASE_FACTOR = 0.8
+    // 1 tick（1 秒）で下げてよい最大幅。0.5 = 半分まで。瞬断による過剰降格の保険。
+    private const val BITRATE_MAX_DROP_PER_TICK = 0.5
+    // 復帰時の 1 段の上げ幅（+15%）。ライブラリ既定の 1.2 より控えめ＝再混雑しにくい。
+    private const val BITRATE_INCREASE_FACTOR = 1.15
+    // 上げるまでに必要な「混雑なし」の連続 tick 数（onNewBitrate は毎秒 ＝ 3 秒）。
+    private const val RECOVERY_CALM_TICKS = 3
+    // 配信開始からこの tick 数(=秒)のあいだは降格しない。TCP スロースタートが終わるのに
+    // 十分で、かつキュー 2.5 秒ぶんがあるので録画リセット(5秒)には届かない。
+    private const val STARTUP_GRACE_TICKS = 2
 
     // カメラが開くのを待つ上限。ここを超えたら待たずに配信を始める
     // （待たせ続ける＝試合が始まらない、が最悪の事故なので必ず打ち切る）。
@@ -686,17 +879,6 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     private const val NO_VIDEO_SECONDS = 20
     // 配信開始直後の助走期間（この間は判定しない）。
     private const val NO_VIDEO_WARMUP_MS = 10_000L
-    // ---- 送信キュー上限のパラメータ（値を調整するならここだけ） ----
-    // ★調整する場合は SEND_CACHE_SECONDS だけを 1.0〜2.0 の範囲で書き換える。
-    //   小さすぎる（1.0秒未満）と輻輳時のコマ落ちが増えて映像がカクつき、
-    //   大きすぎる（2.0秒超）とサーバー(MediaMTX)のズレ閾値5秒に対する余裕が減る。
-    //   1.5 秒は「カクつきを増やさない下限側の余裕」と「閾値まで3.5秒のマージン」の両立点。
-    // ★env ではなく定数にしている理由: このアプリは OTA 更新(expo-updates)を持たないため
-    //   env にしても値の変更＝再ビルドで手間は同じ。定数1つの方が誤設定の余地がない。
-    private const val SEND_CACHE_SECONDS = 1.5
-    // ビットレート適応が「輻輳」とみなし始める滞留時間。ライブラリ既定（上限400個の20%＝
-    // 80個＝約1.04秒）と実時間で揃えるための値。キュー上限を変えても適応の挙動を変えない。
-    private const val CONGESTION_TRIGGER_SECONDS = 1.0
     // prepareAudio(48_000, ...) と一致させること（音声フレーム/秒の算出に使う）。
     private const val AUDIO_SAMPLE_RATE = 48_000
     // AAC-LC は 1 フレーム = 1024 サンプル固定（48000 ÷ 1024 = 46.875 フレーム/秒）。
@@ -704,7 +886,8 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     // 下限/上限のクランプ。上限はライブラリ既定＝これ以上は広げない（広げても意味がない）。
     private const val SEND_CACHE_MIN_ITEMS = 60
     private const val SEND_CACHE_MAX_ITEMS = 400
-    // キュー統計ログの間引き間隔（配信中に処理を増やさない）。
-    private const val STATS_LOG_INTERVAL_MS = 1000L
+    // 診断ログの二重出力よけ。onNewBitrate 自体が約1秒周期なので通常は毎回通る。
+    // ★1000 だと呼び出しの揺らぎ（999ms 等）で1行おきに落ちるため 900 にしている。
+    private const val STATS_LOG_INTERVAL_MS = 900L
   }
 }
