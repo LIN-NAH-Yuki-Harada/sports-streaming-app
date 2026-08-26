@@ -162,20 +162,23 @@ cost_mktg = [0] * 36
 for i in range(36):
     cost_mktg[i] = 300000 if i < 3 else (200000 if i < 6 else (150000 if i < 12 else (200000 if i < 24 else 400000)))
 
+# 人件費（CS・運営）: Y1 はオーナー+AI運営でゼロ、Y2 で 1 名（CS）、Y3 で 2〜3 名規模に増員
+# ※ 利益率を現実的なレンジ（Y3 約56%）に補正し、銀行審査で堅実に見えるよう厚めに設定（2026/6/7 B-1）
 cost_hr = [0] * 36
 for i in range(36):
-    cost_hr[i] = 0 if i < 12 else (120000 if i < 24 else 350000)
+    cost_hr[i] = 0 if i < 12 else (300000 if i < 24 else 1000000)
 
 cost_other = [0] * 36
 for i in range(36):
     cost_other[i] = 20000 if i < 12 else (30000 if i < 24 else 50000)
 
-# 借入返済（5年60回、利率2.0%想定、2026/5/末着金 → 2026/6/月から返済開始）
+# 借入返済（5年60回、利率2.0%想定、2026/6中旬着金 → 2026/7（ローンチ翌月）から返済開始）
 LOAN = 7000000
 RATE_M = 0.02 / 12
 TERM = 60
 MONTHLY_REPAY = int(LOAN * RATE_M / (1 - (1 + RATE_M) ** -TERM))
-cost_repay = [MONTHLY_REPAY] * 36  # 3年分（残り2年は計画外）
+# 返済開始は 2026/7（= 月インデックス1）。2026/6（index 0）は着金〜稼働月のため返済なし
+cost_repay = [0] + [MONTHLY_REPAY] * 35  # 3年分（残り2年は計画外）
 
 cost_total = [cost_infra_total[i] + cost_dev[i] + cost_mktg[i] + cost_hr[i] + cost_other[i] for i in range(36)]
 cost_total_with_repay = [cost_total[i] + cost_repay[i] for i in range(36)]
@@ -209,7 +212,7 @@ def create_sheet(ws, title, start_m, end_m, year_label):
     ws.row_dimensions[1].height = 35
 
     ws.merge_cells('A2:O2')
-    c = ws['A2']; c.value = "LIN-NAH株式会社 ／ 単位: 円 ／ v2改訂版（2026/05/11）"; c.font = f_sub
+    c = ws['A2']; c.value = "LIN-NAH株式会社 ／ 単位: 円 ／ v2.1改訂版（2026/06/04・公庫提出版）"; c.font = f_sub
     ws.row_dimensions[2].height = 20
     ws.row_dimensions[3].height = 8
 
@@ -323,7 +326,7 @@ def create_sheet(ws, title, start_m, end_m, year_label):
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=15)
     ws.cell(row=row, column=1).value = (
         "※ 本計画は見込み数値です。借入条件: 公庫350万 + 埼玉りそな350万 = 700万円協調融資 / "
-        "5年返済 / 年利2.0%想定 / 2026年5月末着金 → 6月1日正式ローンチ → 6月から返済開始"
+        "5年返済 / 年利2.0%想定 / 2026年6月中旬着金 → 6月1日サービス稼働 → 7月（ローンチ翌月）から返済開始"
     )
     ws.cell(row=row, column=1).font = f_note
 
@@ -357,7 +360,7 @@ ws0.merge_cells('A1:E1')
 ws0['A1'].value = "LIVE SPOtCH  3年間サマリー（v2）"; ws0['A1'].font = f_title
 ws0.row_dimensions[1].height = 35
 ws0.merge_cells('A2:E2')
-ws0['A2'].value = "LIN-NAH株式会社 ／ 単位: 円 ／ 2026/6/1正式ローンチ起点"; ws0['A2'].font = f_sub
+ws0['A2'].value = "LIN-NAH株式会社 ／ 単位: 円 ／ 2026/6/1サービス稼働起点 ／ v2.1（2026/06/04）"; ws0['A2'].font = f_sub
 ws0.row_dimensions[2].height = 20; ws0.row_dimensions[3].height = 8
 
 for ci, h in enumerate(["項目", "Year 1", "Year 2", "Year 3", "3年合計"], 1):
@@ -446,7 +449,7 @@ row += 1
 ws0.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
 ws0.cell(row=row, column=1).value = (
     "※ 借入条件: 公庫350万 + 埼玉りそな350万 = 700万円 / 5年 / 年利2.0% / "
-    "2026/5/末 着金 → 2026/6/1 ローンチ → 2026/6 から返済開始"
+    "2026/6 中旬 着金 → 2026/6/1 サービス稼働 → 2026/7 から返済開始"
 )
 ws0.cell(row=row, column=1).font = f_note
 ws0.freeze_panes = 'B5'
@@ -463,14 +466,14 @@ ws_a.row_dimensions[1].height = 30
 
 assumptions = [
     ("", ""),
-    ("【ローンチタイムライン (v2)】", ""),
-    ("提案書 v1.0 提出予定", "2026/5/16 (早期提出版)"),
-    ("借入着金予定", "2026/5/末 (公庫350万 + 埼玉りそな350万)"),
-    ("正式ローンチ予定", "2026/6/1"),
-    ("Phase 0 完璧化期", "2026/5/10 - 5/31 (3週)"),
-    ("Phase 1 ローンチ期", "2026/6/1 - 7/31 (8週)"),
-    ("KPI ゲート1: 有料5名", "2026/6/7"),
-    ("KPI ゲート2: 有料20名", "2026/8/6"),
+    ("【ローンチタイムライン (v2.1)】", ""),
+    ("顧問税理士 確認・最終化", "2026/6/1"),
+    ("公庫・埼玉りそな 提出予定", "2026/6 上旬"),
+    ("借入着金予定", "2026/6 中旬 (公庫350万 + 埼玉りそな350万)"),
+    ("サービス稼働", "2026/6/1（本番稼働中）"),
+    ("Phase 1 ローンチ期", "2026/6 - 7/31 (8週)"),
+    ("KPI ゲート1: 有料5名", "2026/7 上旬"),
+    ("KPI ゲート2: 有料20名", "2026/8 上旬"),
     ("", ""),
     ("【料金設定 (v2: 2026/4/30 確定)】", ""),
     ("配信者プラン月額", "¥300 (ライブ専用、アーカイブなし)"),
@@ -513,11 +516,11 @@ assumptions = [
     ("想定利率", "年2.0%"),
     (f"月額返済額", f"¥{MONTHLY_REPAY:,}"),
     (f"年間返済額", f"¥{MONTHLY_REPAY * 12:,}"),
-    ("着金予定", "2026年5月末"),
-    ("返済開始", "2026年6月 (ローンチ同月)"),
+    ("着金予定", "2026年6月中旬"),
+    ("返済開始", "2026年7月 (サービス稼働翌月)"),
     ("", ""),
     ("【その他】", ""),
-    ("正式ローンチ時期", "2026年6月1日"),
+    ("サービス稼働時期", "2026年6月1日（本番稼働中）"),
     ("黒字化目標", "Year 2中盤（18ヶ月目前後）"),
 ]
 
@@ -542,7 +545,7 @@ ws_r.column_dimensions['D'].width = 16
 ws_r.column_dimensions['E'].width = 16
 
 ws_r.merge_cells('A1:E1')
-ws_r['A1'].value = "借入金返済スケジュール（700万円 / 5年 / 年利2.0% / 2026/6 開始）"
+ws_r['A1'].value = "借入金返済スケジュール（700万円 / 5年 / 年利2.0% / 2026/7 開始）"
 ws_r['A1'].font = f_title; ws_r.row_dimensions[1].height = 30
 
 for ci, h in enumerate(["回", "月額返済", "元金", "利息", "残高"], 1):
@@ -589,6 +592,6 @@ print(f"TCP中継 server: 新規 +¥1,500/月")
 print(f"インフラ費 増加 = ¥4,000/月 × 36ヶ月 = ¥144,000 (3年合計)")
 print(f"ローンチ時期: 2026/7 → 2026/6 (1ヶ月前倒し)")
 
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LIVE_SPOtCH_月次PL.xlsx")
+out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "【提出用】LIVE_SPOtCH_月次PL.xlsx")
 wb.save(out)
 print(f"\n保存完了: {out}")
