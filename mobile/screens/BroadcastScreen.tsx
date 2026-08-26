@@ -2660,9 +2660,13 @@ const roundZoom = (v: number) =>
 function ZoomSlider({
   zoom,
   onChange,
+  leftInset,
 }: {
   zoom: number;
   onChange: (z: number) => void;
+  /** セーフエリアの左余白。横向きでは回転方向によってノッチ（通話スピーカー）が
+   *  左右どちらの端にも来るため、固定値ではなく実測値で避ける必要がある。 */
+  leftInset: number;
 }) {
   const [trackH, setTrackH] = useState(0);
   // PanResponder は初回だけ生成するため、最新の値は ref 経由で読む（クロージャの陳腐化対策）。
@@ -2699,7 +2703,7 @@ function ZoomSlider({
   const ratio = (zoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN);
 
   return (
-    <View style={styles.zoomBar}>
+    <View style={[styles.zoomBar, { left: leftInset + 8 }]}>
       <Text style={styles.zoomValue}>{zoom.toFixed(1)}x</Text>
       {/* ★つまみは overflow:hidden の**外**に置く。中に入れると両端で切り取られる。
           タッチを受けるのはこの外枠で、内側の塗り・つまみは pointerEvents="none"。
@@ -2747,6 +2751,9 @@ function RtmpLiveView(
     props;
   // 既定は 1（等倍）。この機能を入れても、何も触らなければ画角はこれまでと同一。
   const [zoom, setZoom] = useState<number>(1);
+  // ★横向きでは回転方向によってノッチ（通話スピーカー）が左右どちらの端にも来る。
+  //   実機(iOS)でズームバーが重なったため、固定 left をやめて実測値で避ける。
+  const insets = useSafeAreaInsets();
   return (
     <View style={styles.liveRoot}>
       <RtmpPublisherView
@@ -2783,7 +2790,7 @@ function RtmpLiveView(
       {/* 撮影ズーム。★左端に置く: 上は topOverlay、下は controls が占めており、
           右端は Android 横向きでナビゲーションバーが重なるため（実機で得点の＋が
           押しにくくなった前例がある）。 */}
-      <ZoomSlider zoom={zoom} onChange={setZoom} />
+      <ZoomSlider zoom={zoom} onChange={setZoom} leftInset={insets.left} />
       <ScoreControls {...controls} />
     </View>
   );
@@ -2906,8 +2913,9 @@ const styles = StyleSheet.create({
   liveRoot: { flex: 1, backgroundColor: "#000" },
   // 撮影ズームの操作（左端・上下中央）。映像をなるべく隠さないよう細く作る。
   zoomBar: {
+    // ★left は指定しない。呼び出し側が insets.left + 8 をインラインで与える
+    //   （横向きのノッチ位置は回転方向で変わるため固定値では避けられない）。
     position: "absolute",
-    left: 8,
     top: "16%",
     alignItems: "center",
     gap: 8,
