@@ -42,6 +42,15 @@ export type RtmpPublisherViewProps = ViewProps & {
   fps?: number;
   /** 既定 "back"。 */
   cameraPosition?: "back" | "front";
+  /**
+   * 撮影ズームの倍率。既定 1.0（＝等倍。これまでと同じ画角）。
+   *
+   * ★**デジタルズーム**（広角の中央を切り出して拡大）であり光学ズームではない。
+   *   配信は 1280x720 なので、2倍にすると実質 640x360 相当まで解像感が落ちる。
+   * ★端末が対応する範囲はネイティブ側で丸める。JS は上限を知らなくてよい
+   *   （上限を問い合わせる往復を作らないための設計）。
+   */
+  zoom?: number;
   /** 配信前の映像チェックの厳格度。既定 "warn"（＝正常な配信者を絶対に止めない）。 */
   preflightMode?: RtmpPreflightMode;
   /**

@@ -12,6 +12,7 @@ import {
   PermissionsAndroid,
   Platform,
   Pressable,
+  PanResponder,
   SafeAreaView,
   ScrollView,
   Share,
@@ -2637,6 +2638,98 @@ function LiveView(props: ScoreControlsProps) {
   );
 }
 
+// 撮影ズームの範囲。ネイティブ側のクランプ（両OSとも 5.0）と一致させること。
+// ★デジタルズームのため倍率を上げるほど解像感が落ちる（配信は 1280x720＝2倍で実質 640x360）。
+//   少年サッカーのようにコートが広い競技では「多少粗くても寄りたい」需要が実際にあるため、
+//   画質と引き換えであることを承知のうえで提供する。
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 5;
+/** 0.1 刻みに丸める。ドラッグ中に毎フレーム Prop を更新するとネイティブ呼び出しが過剰になるため。 */
+const roundZoom = (v: number) =>
+  Math.round(Math.min(Math.max(v, ZOOM_MIN), ZOOM_MAX) * 10) / 10;
+
+/**
+ * 撮影ズームの縦スライダー。
+ *
+ * ★外部ライブラリを使わず PanResponder（RN 標準）で実装している。
+ *   スライダー用のネイティブ依存を足すと prebuild/ビルドの失敗要因が増えるため
+ *   （2026-08-05 に expo.locales で Android のビルドが壊れた前例がある）。
+ *
+ * ★上が望遠・下が等倍。三脚に載せて横持ちした状態で、親指を上げるほど寄る向き。
+ */
+function ZoomSlider({
+  zoom,
+  onChange,
+}: {
+  zoom: number;
+  onChange: (z: number) => void;
+}) {
+  const [trackH, setTrackH] = useState(0);
+  // PanResponder は初回だけ生成するため、最新の値は ref 経由で読む（クロージャの陳腐化対策）。
+  const trackHRef = useRef(0);
+  const onChangeRef = useRef(onChange);
+  trackHRef.current = trackH;
+  onChangeRef.current = onChange;
+
+  const responder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      // ★スコア操作にタッチを渡さない。配信中の誤操作は得点の間違いに直結する。
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (e) => {
+        const h = trackHRef.current;
+        if (h > 0) {
+          onChangeRef.current(
+            roundZoom(ZOOM_MIN + (1 - e.nativeEvent.locationY / h) * (ZOOM_MAX - ZOOM_MIN)),
+          );
+        }
+      },
+      onPanResponderMove: (e) => {
+        const h = trackHRef.current;
+        if (h > 0) {
+          onChangeRef.current(
+            roundZoom(ZOOM_MIN + (1 - e.nativeEvent.locationY / h) * (ZOOM_MAX - ZOOM_MIN)),
+          );
+        }
+      },
+    }),
+  ).current;
+
+  const ratio = (zoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN);
+
+  return (
+    <View style={styles.zoomBar}>
+      <Text style={styles.zoomValue}>{zoom.toFixed(1)}x</Text>
+      {/* ★つまみは overflow:hidden の**外**に置く。中に入れると両端で切り取られる。
+          タッチを受けるのはこの外枠で、内側の塗り・つまみは pointerEvents="none"。
+          こうすることで locationY が常に外枠（＝トラックと同寸）基準になる。 */}
+      <View
+        style={styles.zoomTrackWrap}
+        onLayout={(e) => setTrackH(e.nativeEvent.layout.height)}
+        {...responder.panHandlers}
+      >
+        <View style={styles.zoomTrack} pointerEvents="none">
+          <View style={[styles.zoomFill, { height: `${ratio * 100}%` }]} />
+        </View>
+        <View
+          style={[styles.zoomThumb, { bottom: `${ratio * 100}%` }]}
+          pointerEvents="none"
+        />
+      </View>
+      {/* 等倍へ一発で戻す。配信中に「戻せない」が一番困るため独立したボタンにする。 */}
+      <Pressable
+        onPress={() => onChange(ZOOM_MIN)}
+        accessibilityRole="button"
+        accessibilityLabel="ズームを等倍に戻す"
+        style={styles.zoomReset}
+      >
+        <Text style={styles.zoomResetText}>1x</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 // ネイティブ RTMP 経路（Bunny）: 端末でカメラ＋スコア焼き込みを GPU 合成して RTMP 送信。
 // プレビューは RtmpPublisherView 自身が描画する。操作UIは同じ ScoreControls を重ねる。
 function RtmpLiveView(
@@ -2652,6 +2745,8 @@ function RtmpLiveView(
   useKeepAwake();
   const { rtmpUrl, scoreboardText, onStatus, preflightMode, noVideo, ...controls } =
     props;
+  // 既定は 1（等倍）。この機能を入れても、何も触らなければ画角はこれまでと同一。
+  const [zoom, setZoom] = useState<number>(1);
   return (
     <View style={styles.liveRoot}>
       <RtmpPublisherView
@@ -2666,6 +2761,7 @@ function RtmpLiveView(
         videoBitrate={3_500_000}
         fps={30}
         cameraPosition="back"
+        zoom={zoom}
         scoreboardText={scoreboardText}
         // 端末焼き込み(プレーンテキスト)はOFF。視聴側で綺麗な CSS オーバーレイ
         // (ViewerScoreboardOverlay・DBからリアルタイム)を重ねる方式に統一したため。
@@ -2684,6 +2780,10 @@ function RtmpLiveView(
           </Text>
         </View>
       ) : null}
+      {/* 撮影ズーム。★左端に置く: 上は topOverlay、下は controls が占めており、
+          右端は Android 横向きでナビゲーションバーが重なるため（実機で得点の＋が
+          押しにくくなった前例がある）。 */}
+      <ZoomSlider zoom={zoom} onChange={setZoom} />
       <ScoreControls {...controls} />
     </View>
   );
@@ -2804,6 +2904,54 @@ const styles = StyleSheet.create({
   ytToggleTextOn: { color: "#fff" },
 
   liveRoot: { flex: 1, backgroundColor: "#000" },
+  // 撮影ズームの操作（左端・上下中央）。映像をなるべく隠さないよう細く作る。
+  zoomBar: {
+    position: "absolute",
+    left: 8,
+    top: "16%",
+    alignItems: "center",
+    gap: 8,
+  },
+  zoomValue: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.9)",
+    textShadowRadius: 3,
+  },
+  // ★タッチ領域を確保するため幅を広めに取る（指で掴める最小幅）。
+  zoomTrackWrap: { width: 34, height: 170 },
+  zoomTrack: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 17,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+    justifyContent: "flex-end",
+    overflow: "hidden",
+  },
+  zoomFill: { width: "100%", backgroundColor: "rgba(230,57,70,0.55)" },
+  zoomThumb: {
+    position: "absolute",
+    left: 6, // (34 - 22) / 2 ＝ 横中央。position:absolute では alignSelf が効かないため直接指定。
+    width: 22,
+    height: 22,
+    marginBottom: -11, // つまみの中心を現在値に合わせる
+    borderRadius: 11,
+    backgroundColor: "#fff",
+    borderWidth: 2,
+    borderColor: "#e63946",
+  },
+  zoomReset: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
+  },
+  zoomResetText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   video: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   connecting: { color: "#fff", marginTop: 8 },
 

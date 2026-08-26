@@ -33,6 +33,9 @@ class RtmpPublisherView: ExpoView {
   var videoBitrate: Int = 6_000_000
   var fps: Double = 60
   var cameraPosition: String = "back"
+  /// 撮影ズームの倍率（1.0 = 等倍＝これまでと同じ画角）。
+  /// ★1.0 を既定にすることで、この機能を入れても既存の配信者の画角は1ミリも変わらない。
+  var zoom: Double = 1.0
 
   // 配信前の映像チェックの厳格度。JS から毎回渡す（既定は "warn"）。
   //   "off"   … 何もしない（緊急時の全停止スイッチ）
@@ -49,6 +52,12 @@ class RtmpPublisherView: ExpoView {
   // ＝ブラウザCanvas合成と違い発熱主因にならないかを実機で検証する。
   var scoreboardText: String = ""
   var scoreboardVisible: Bool = true
+
+  /// いま attach しているカメラ。ズームは AVCaptureDevice に対して設定するため保持が要る。
+  /// ★カメラを差し替える（前面/背面の切替や再 attach）たびに更新すること。
+  /// ★強参照でよい: AVCaptureDevice は View を参照し返さないので循環しない。
+  ///   weak にすると解放タイミング次第で黙って nil になり、ズームが無言で効かなくなる。
+  private var currentCamera: AVCaptureDevice?
 
   private var isMixerReady = false
   private var isStreaming = false
@@ -242,6 +251,10 @@ class RtmpPublisherView: ExpoView {
           }
           videoAttached = true
           videoAttachError = nil
+          // ★ズームは attach の**後**に当てる。attach で activeFormat が決まり、
+          //   その際 videoZoomFactor は 1.0 に戻るため、先に設定しても消える。
+          currentCamera = camera
+          applyZoom()
         } catch {
           videoAttached = false
           videoAttachError = "camera-attach-failed: \(error)"
@@ -564,8 +577,37 @@ class RtmpPublisherView: ExpoView {
     Task {
       let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: devicePosition())
       try? await mixer.attachVideo(camera, track: 0)
+      // ★カメラを差し替えるとズームは 1.0 に戻る。前面/背面を切り替えても
+      //   配信者が選んだ倍率が保たれるよう、ここで必ず当て直す。
+      currentCamera = camera
+      applyZoom()
     }
   }
+
+  /// 現在のカメラへズーム倍率を反映する。
+  ///
+  /// ★これは**デジタルズーム**（広角レンズの中央を切り出して拡大）。光学ズームではないため
+  ///   倍率を上げるほど解像感は落ちる。配信は 1280x720 なので、2倍で実質 640x360 相当。
+  ///   将来 .builtInTripleCamera 等の仮想デバイスに変えれば望遠レンズへ光学的に
+  ///   切り替わるが、1.0 の画角が変わり既存配信者に影響するため v1 では採用しない。
+  ///
+  /// 端末が対応する範囲を超える値は黙って丸める（JS 側に上限を問い合わせる往復を作らない）。
+  func applyZoom() {
+    guard let device = currentCamera else { return }
+    let maxFactor = min(device.activeFormat.videoMaxZoomFactor, RtmpPublisherView.zoomCap)
+    let target = max(1.0, min(CGFloat(zoom), maxFactor))
+    do {
+      try device.lockForConfiguration()
+      device.videoZoomFactor = target
+      device.unlockForConfiguration()
+    } catch {
+      // ズームに失敗しても配信は続ける。ここで落とす価値はない。
+    }
+  }
+
+  /// ズームの上限。端末は 100 倍以上を許すことがあるが、720p ではそこまで上げても
+  /// 破綻した映像になるだけなので、実用範囲で頭打ちにする。
+  private static let zoomCap: CGFloat = 5.0
 
   deinit {
     readyStateTask?.cancel()

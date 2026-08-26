@@ -53,6 +53,8 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
   var videoBitrate: Int = 6_000_000
   var fps: Double = 60.0
   var cameraPosition: String = "back"
+  /** 撮影ズームの倍率（1.0 = 等倍＝これまでと同じ画角）。iOS 版と同一契約。 */
+  var zoom: Double = 1.0
   var scoreboardText: String = ""
   var scoreboardVisible: Boolean = true
 
@@ -142,6 +144,8 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
         val s = stream ?: return
         if (prepared && !s.isOnPreview) {
           try { s.startPreview(surfaceView) } catch (_: Exception) {}
+          // ★setZoom はカメラ起動後でないと効かない（Camera2Source.isRunning() ガード）。
+          applyZoom()
         }
       }
 
@@ -169,6 +173,7 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     reconcile()
     applyCameraFacing()
     applyScoreboard()
+    applyZoom()
   }
 
   private fun reconcile() {
@@ -194,6 +199,8 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     applyScoreboard()
     if (surfaceReady && !s.isOnPreview) {
       try { s.startPreview(surfaceView) } catch (_: Exception) {}
+      // ★同上。プレビュー開始のたびに当て直す。
+      applyZoom()
     }
     // ★送信キュー上限の適用は「startStream の直前・キューが空のうち」に必ず行う（下の説明参照）。
     peakItemsInCache = 0
@@ -726,6 +733,30 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     }
   }
 
+  /**
+   * 現在のカメラへズーム倍率を反映する。
+   *
+   * ★これは**デジタルズーム**（広角の中央を切り出して拡大）。光学ズームではないため
+   *   倍率を上げるほど解像感は落ちる。配信は 1280x720 なので 2 倍で実質 640x360 相当。
+   *
+   * ★RootEncoder の Camera2Source.setZoom は `isRunning()`（＝カメラ起動後）でないと
+   *   何もしない。したがってプレビュー開始の**後**にも必ず呼ぶこと。起動前に呼んでも
+   *   無害な no-op なので、呼びすぎる分には問題ない。
+   *
+   * 端末が対応する範囲は getZoomRange() で丸める（iOS と同じく JS に上限を返さない）。
+   */
+  private fun applyZoom() {
+    val cam = camera ?: return
+    try {
+      val range = cam.getZoomRange()
+      val lo = range.lower ?: 1f
+      val hi = minOf(range.upper ?: 1f, ZOOM_CAP)
+      cam.setZoom(zoom.toFloat().coerceIn(lo, maxOf(lo, hi)))
+    } catch (_: Exception) {
+      // ズームに失敗しても配信は続ける。
+    }
+  }
+
   private fun emit(state: String, message: String? = null) {
     if (destroyed) return
     mainHandler.post {
@@ -835,6 +866,8 @@ class RtmpPublisherView(context: Context, appContext: AppContext) :
     if (context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) "ok" else "NG"
 
   companion object {
+    /** ズームの上限。720p では倍率を上げすぎても破綻するだけなので実用範囲で頭打ちにする（iOS と同値）。 */
+    private const val ZOOM_CAP = 5.0f
     private const val TAG = "RtmpPublisher"
 
     // アダプティブ降格の下限（これ未満は映像が用をなさないため足切り）。★変更しないこと。

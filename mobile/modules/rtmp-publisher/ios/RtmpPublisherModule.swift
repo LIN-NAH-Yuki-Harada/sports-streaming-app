@@ -64,6 +64,12 @@ public class RtmpPublisherModule: Module {
         view.cameraPosition = value
         if changed { view.updateCamera() }
       }
+      // 撮影ズーム（1.0 = 等倍）。端末の上限は View 側で丸めるので JS は上限を知らなくてよい。
+      Prop("zoom") { (view: RtmpPublisherView, value: Double) in
+        let changed = view.zoom != value
+        view.zoom = value
+        if changed { view.applyZoom() }
+      }
       // 配信前の映像チェックの厳格度（"off" | "warn" | "block"）。既定は warn＝止めない。
       // ★active より前に届く保証はないが、reconcile は active/streamUrl のセッタでしか
       //   走らないため、実際には「全 Prop 適用後」に近いタイミングで参照される。
