@@ -2,6 +2,9 @@ import ExpoModulesCore
 import HaishinKit
 import RTMPHaishinKit
 import AVFoundation
+// kVTProfileLevel_H264_High_AutoLevel / VTCompressionSession* を使うために必要。
+// HaishinKit は VideoToolbox を @_exported していないため、ここで明示的に import する。
+import VideoToolbox
 import CoreMedia
 import Foundation
 import UIKit
@@ -419,6 +422,61 @@ class RtmpPublisherView: ExpoView {
     scheduleMediaTick(generation: generation)
   }
 
+  // ★この端末の H.264 ハードウェアエンコーダが High プロファイルを本当に受け付けるかを実測する
+  //   （2026-08-13）。
+  //
+  // なぜ「実測」が要るか:
+  // HaishinKit の setVideoSettings() は profileLevel が不正でも throw しない
+  // （throw するのは HEVC 指定時など format が未対応のときだけで、H264 系の文字列では
+  //   VideoCodecSettings.format が .h264 のままなので必ず成功する）。
+  // 実際に効くのは **最初の映像フレームが来たとき**の VTCompressionSessionCreate →
+  // VTSessionSetProperties で、ここが失敗すると VideoCodec.append の catch が
+  // logger.warn するだけで握り潰され、**接続はできているのに映像が1フレームも出ない**
+  // という最悪の壊れ方をする（配信画面は「配信中」に見えるのに視聴側が真っ暗）。
+  //
+  // High は A7 以降のハードウェアエンコーダが対応しており、iOS 16.4 が動く端末は
+  // すべてこれを満たすため実際には落ちない想定。ただし「想定」で全国大会に臨むより、
+  // 使い捨てのエンコーダセッションを1つ作って端末に直接聞く方が確実で、コストも数ミリ秒。
+  // 非対応と分かった場合は profileLevel を触らない ＝ 1.1.7 と完全に同一の挙動に戻る。
+  private static func supportsH264HighProfile(width: Int, height: Int) -> Bool {
+    var probe: VTCompressionSession?
+    let created = VTCompressionSessionCreate(
+      allocator: kCFAllocatorDefault,
+      width: Int32(width),
+      height: Int32(height),
+      codecType: kCMVideoCodecType_H264,
+      encoderSpecification: nil,
+      imageBufferAttributes: nil,
+      compressedDataAllocator: nil,
+      outputCallback: nil,
+      refcon: nil,
+      compressionSessionOut: &probe
+    )
+    guard created == noErr, let probe else { return false }
+    // 実エンコーダセッションが作られる前に必ず破棄する（ハードウェアを掴んだままにしない）。
+    defer { VTCompressionSessionInvalidate(probe) }
+
+    // ★ProfileLevel だけを聞くのでは不十分。本番の HaishinKit は makeOptions() の
+    //   全プロパティを **一括** で投入し、さらに prepareToEncodeFrames まで呼ぶ。
+    //   High を受け付けても CABAC(H264EntropyMode) の同時投入や準備で失敗する端末が
+    //   あった場合、本番の1フレーム目で throw → HaishinKit がログ1行で握り潰し →
+    //   RTMPは繋がったまま「配信中」表示、視聴者は真っ暗、という最悪の壊れ方になる
+    //   （2026-08-12 に別経路で実際に起きた「音声だけpublish」と同じ形）。
+    //   そこで本番と同じ組み合わせを**予行演習**し、通ったときだけ High を採用する。
+    //   増分コストは約1ms。
+    let props: [CFString: Any] = [
+      kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_High_AutoLevel,
+      kVTCompressionPropertyKey_H264EntropyMode: kVTH264EntropyMode_CABAC,
+      kVTCompressionPropertyKey_AllowFrameReordering: kCFBooleanFalse as Any,
+      kVTCompressionPropertyKey_RealTime: kCFBooleanTrue as Any,
+    ]
+    guard VTSessionSetProperties(probe, propertyDictionary: props as CFDictionary) == noErr else {
+      return false
+    }
+    // 準備まで通って初めて「この端末で本番と同じ設定が成立する」と言える。
+    return VTCompressionSessionPrepareToEncodeFrames(probe) == noErr
+  }
+
   private func startStreaming(_ urlStr: String) async {
     guard let url = URL(string: urlStr) else {
       emit("error", "invalid url")
@@ -485,6 +543,45 @@ class RtmpPublisherView: ExpoView {
       vs.videoSize = CGSize(width: videoWidth, height: videoHeight)
       vs.bitRate = videoBitrate
       vs.expectedFrameRate = fps
+
+      // ★H.264 プロファイルを Baseline → High へ（2026-08-13）。
+      //
+      // HaishinKit 2.2.5 の VideoCodecSettings.init の既定値は
+      // `profileLevel: String = kVTProfileLevel_H264_Baseline_3_1` であり、これまで一度も
+      // 上書きしていなかったため **iOS からの配信はずっと Baseline** で出ていた
+      // （8/11 の実配信 HLS を ffprobe して profile=Baseline を確認。同日 Android は High）。
+      //
+      // High にすると VideoCodecSettings.makeOptions() が
+      // `if !isBaseline && profileLevel.contains("H264") { H264EntropyMode = CABAC }`
+      // を通り、エントロピー符号化が CAVLC → CABAC になる。CABAC は同じビットレートでも
+      // 圧縮効率が上がるため、**解像度・ビットレート・fps を一切上げずに画質だけ改善する**。
+      // 体育館のような細かい動き＋観客席のディテールで効きやすい。
+      //
+      // ★AutoLevel を選ぶ理由:
+      // Level を固定（4.0 / 4.1 など）すると、将来 BroadcastScreen 側の解像度や fps を
+      // 変えたときに Level 上限を踏み抜いてエンコーダが弾く事故が起きうる。AutoLevel なら
+      // VideoToolbox が実際の解像度・fps・ビットレートから適切な Level を選ぶので取り違えが無い。
+      // 現行の 1280x720/30fps/3.5Mbps は Level 3.1 の上限にすら収まっており余裕がある。
+      //
+      // ★受け側: 同日の Android(vc15) が既に High で配信し、MediaMTX → HLS → CloudFront →
+      //   Web/アプリ視聴・YouTube アーカイブまで全て正常だった実績があるので下流は問題ない。
+      if Self.supportsH264HighProfile(width: videoWidth, height: videoHeight) {
+        vs.profileLevel = kVTProfileLevel_H264_High_AutoLevel as String
+
+        // ★Bフレーム（フレーム並べ替え）は明示的に無効のままにする。
+        //
+        // makeOptions() は allowFrameReordering が nil のとき **`!isBaseline` にフォールバック**する:
+        //   .init(key: .allowFrameReordering, value: (allowFrameReordering ?? !isBaseline) as NSObject)
+        // つまり profileLevel を High にしただけで nil のまま放置すると、この値が
+        // false → **true に変わり、Bフレームが有効化されてしまう**（High の副作用として自動で付いてくる）。
+        //
+        // Bフレームは表示順と符号化順がずれるため、エンコーダが後続フレームを待つぶん
+        // 送出遅延が増える。本サービスは低遅延が売りではないものの、
+        // 「スコアが映像より先に動く」ズレが既に課題として挙がっており、ここで遅延を
+        // 増やすのは明確なマイナス。圧縮効率の利得は主に CABAC 側で取れるため、
+        // Bフレームは見送って **遅延は 1.1.7 から一切変えない**。
+        vs.allowFrameReordering = false
+      }
       // ★瞬間ビットレートの上限を「最大値基準」で明示的に固定する（2026-08-07）。
       //
       // 既定は [0.0, 0.0]。この 0 は「未指定」を意味し、HaishinKit は
