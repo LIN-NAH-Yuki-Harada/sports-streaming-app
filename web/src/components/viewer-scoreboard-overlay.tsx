@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import type { Broadcast } from "@/lib/database";
+import { formatClock, hasMatchClock, matchElapsedSeconds } from "@/lib/match-clock";
 
 /**
  * 視聴ページ用スコアボード・オーバーレイ（発熱対策 Phase 1-A）。
@@ -25,11 +26,25 @@ import type { Broadcast } from "@/lib/database";
  * あった。横画面では高さが小さい＝映像も小さいので、高さ基準にすると映像サイズに追従する。
  * 子要素のサイズはすべて em（このベース比）で表現し、全体が比率を保って拡縮する。
  */
-export function ViewerScoreboardOverlay({ broadcast }: { broadcast: Broadcast }) {
+export function ViewerScoreboardOverlay({
+  broadcast,
+  delayMs = 0,
+}: {
+  broadcast: Broadcast;
+  /**
+   * 映像の遅延（ms）。HLS 視聴は映像が 7〜11 秒遅れているため、試合タイマーも
+   * 同じだけ遅らせないと**スコアだけ合っていて時計だけ先に進む**状態になる。
+   * スコア自体は watch ページ側の useDelayedBroadcast で既に遅らされているので、
+   * ここでは「今」を巻き戻すことで足並みを揃える。WebRTC 経路は 0。
+   */
+  delayMs?: number;
+}) {
   const elapsed = useElapsedSeconds(
     broadcast.started_at,
     broadcast.status === "live",
   );
+  // 試合タイマー（スコアボード内）。配信者が使っていなければ null＝何も出さない。
+  const matchClock = useMatchClockSeconds(broadcast, delayMs);
 
   const showSets = broadcast.home_sets > 0 || broadcast.away_sets > 0;
   const tournamentLabel = broadcast.tournament || broadcast.sport;
@@ -70,6 +85,13 @@ export function ViewerScoreboardOverlay({ broadcast }: { broadcast: Broadcast })
           <div className="px-[0.6em] py-[0.3em] bg-black/60">
             <span className="tabular-nums font-medium">{broadcast.period}</span>
           </div>
+          {/* 試合タイマー（DAZN のようにスコアボード内に出す）。
+              配信者が開始していなければ描画しない＝従来と同じ見た目のまま。 */}
+          {matchClock !== null && (
+            <div className="px-[0.6em] py-[0.3em] bg-black/60 border-l border-white/15">
+              <span className="tabular-nums font-bold">{formatClock(matchClock)}</span>
+            </div>
+          )}
         </div>
         {broadcast.point_label && (
           <div className="mt-[0.4em]">
@@ -198,6 +220,36 @@ function RunnerDiamond({
  * started_at からの経過秒数を 1 秒ごとに更新して返す（live のときのみ進行）。
  * 実装は配信者側の経過時間タイマー（broadcast/page.tsx）と同じパターンに揃える。
  */
+/**
+ * 試合タイマーの経過秒を1秒ごとに更新して返す。未使用なら null。
+ *
+ * ★止まっているとき（match_clock_started_at が null）はタイマーを回さない。
+ *   停止中は値が変わらないので、毎秒の再描画は無駄なだけ。
+ */
+function useMatchClockSeconds(broadcast: Broadcast, delayMs: number) {
+  const clock = {
+    clockStartedAt: broadcast.match_clock_started_at,
+    offsetSeconds: broadcast.match_clock_offset_seconds,
+  };
+  const running = Boolean(broadcast.match_clock_started_at);
+  const [seconds, setSeconds] = useState<number | null>(() =>
+    matchElapsedSeconds(clock, Date.now() - delayMs),
+  );
+
+  const startedAt = broadcast.match_clock_started_at;
+  const offset = broadcast.match_clock_offset_seconds;
+  useEffect(() => {
+    const c = { clockStartedAt: startedAt, offsetSeconds: offset };
+    const compute = () => setSeconds(matchElapsedSeconds(c, Date.now() - delayMs));
+    compute();
+    if (!running || !hasMatchClock(c)) return;
+    const interval = setInterval(compute, 1000);
+    return () => clearInterval(interval);
+  }, [startedAt, offset, running, delayMs]);
+
+  return seconds;
+}
+
 function useElapsedSeconds(startedAt: string, live: boolean): number | null {
   const [elapsed, setElapsed] = useState<number | null>(null);
 

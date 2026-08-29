@@ -15,11 +15,21 @@ import {
   createBroadcast,
   updateBroadcastScore,
   updateBroadcastNotice,
+  updateBroadcastMatchClock,
   endBroadcast,
   cleanupStaleBroadcasts,
   type Broadcast,
   type Team,
 } from "@/lib/database";
+import {
+  formatClock,
+  matchElapsedSeconds,
+  clockStartPatch,
+  clockPausePatch,
+  clockResumePatch,
+  clockResetPatch,
+  type MatchClockPatch,
+} from "@/lib/match-clock";
 import { pickBroadcastResolution, detectInAppBrowser } from "@/lib/user-agent";
 import type { ScoreboardState } from "@/lib/scoreboard-canvas";
 import { useStageFullscreen } from "@/lib/use-stage-fullscreen";
@@ -504,6 +514,35 @@ function BroadcastPageInner() {
     return () => clearInterval(interval);
   }, [broadcastStartedAt]);
 
+  // ── 試合タイマー（スコアボードの中に出す「試合の経過時間」）──────────────
+  // 上の broadcastElapsed（配信の経過時間）とは**別物**。配信者が「開始」を押した時点から
+  // 数えるので、整列・挨拶から撮り始めても視聴者には試合の経過分が見える。
+  // ★押さなければ何も表示されない＝これまでの配信と見た目は完全に同じ（後方互換の要）。
+  const [matchClock, setMatchClock] = useState<MatchClockPatch>({
+    match_clock_started_at: null,
+    match_clock_offset_seconds: 0,
+  });
+  const [matchClockSeconds, setMatchClockSeconds] = useState<number | null>(null);
+  const [showClockPanel, setShowClockPanel] = useState(false);
+  const clockStartedAt = matchClock.match_clock_started_at;
+  const clockOffset = matchClock.match_clock_offset_seconds;
+  useEffect(() => {
+    const c = { clockStartedAt, offsetSeconds: clockOffset };
+    const compute = () => setMatchClockSeconds(matchElapsedSeconds(c, Date.now()));
+    compute();
+    // 止まっている間は値が変わらないので毎秒の再計算をしない（焼き込みの再描画も走らせない）
+    if (!clockStartedAt) return;
+    const interval = setInterval(compute, 1000);
+    return () => clearInterval(interval);
+  }, [clockStartedAt, clockOffset]);
+
+  // 開始/停止/再開/リセットの4操作。押した瞬間だけ DB に書く（毎秒は書かない）。
+  const applyMatchClock = useCallback((patch: MatchClockPatch) => {
+    setMatchClock(patch);
+    const id = broadcastRef.current?.id;
+    if (id) void updateBroadcastMatchClock(id, patch);
+  }, []);
+
   // ゴースト対策の心拍: 配信中は 60 秒ごとに last_seen_at を更新する。
   // 異常終了（クラッシュ/スリープ/回線断）で停止処理(pagehide/stop)が飛ばなくても、
   // サーバー cron(/api/cron/cleanup) が last_seen の途絶を見て自動で ended に補正できる
@@ -542,6 +581,7 @@ function BroadcastPageInner() {
     // 緊急焼き込み(?burn=1)時もテニスのポイントが映像に出るように
     gamePoints: tnRule ? formatTennisPoints(tnRule, tennis) : null,
     elapsedSeconds: broadcastElapsed,
+    matchClockSeconds,
   };
 
   // 配信中ステージの全画面化（Safari URL バー・タブバーを隠して画面を最大化）。
@@ -1072,6 +1112,9 @@ function BroadcastPageInner() {
     historyRef.current = [];
     setHistoryLength(0);
     setPeriodIndex(0);
+    // 前の試合の時計を次の配信に持ち越さない（持ち越すと開始直後から時間が進んで見える）
+    setMatchClock({ match_clock_started_at: null, match_clock_offset_seconds: 0 });
+    setShowClockPanel(false);
     // 次の配信に備えて Live 中継関連 state をリセット
     setLiveYoutubeBroadcastId(null);
     setYoutubeReadyAt(null);
@@ -1528,6 +1571,60 @@ function BroadcastPageInner() {
           {/* スコア操作パネル — 縦画面では2段構成 */}
           <div className="absolute bottom-[calc(12px+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-sm rounded-lg px-2 sm:px-3 py-2 max-w-[95vw]">
             {/* 視聴者向けお知らせテロップの入力（📢 ボタンで開閉） */}
+            {/* 試合タイマーの操作。4つだけで両方の運用に対応できる:
+                  通し（前半に続けて後半 45:00〜）… 停止 → 再開
+                  後半を 0 分から数え直す運用      … 停止 → リセット → 開始 */}
+            {showClockPanel && (
+              <div className="mb-1.5 pb-1.5 border-b border-white/10">
+                <div className="flex items-center justify-center gap-1.5">
+                  <span className="text-[13px] font-black tabular-nums min-w-[48px] text-center">
+                    {matchClockSeconds !== null ? formatClock(matchClockSeconds) : "--:--"}
+                  </span>
+                  {clockStartedAt ? (
+                    <button
+                      onClick={() =>
+                        applyMatchClock(
+                          clockPausePatch(
+                            { clockStartedAt, offsetSeconds: clockOffset },
+                            Date.now(),
+                          ),
+                        )
+                      }
+                      className="h-8 px-3 rounded bg-white/10 hover:bg-white/20 text-[10px] font-bold text-gray-200 transition active:scale-95"
+                    >
+                      停止
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() =>
+                        applyMatchClock(
+                          matchClockSeconds !== null
+                            ? clockResumePatch(
+                                { clockStartedAt: null, offsetSeconds: clockOffset },
+                                Date.now(),
+                              )
+                            : clockStartPatch(Date.now()),
+                        )
+                      }
+                      className="h-8 px-3 rounded bg-[#e63946] hover:bg-[#d62836] text-[10px] font-bold transition active:scale-95"
+                    >
+                      {matchClockSeconds !== null ? "再開" : "開始"}
+                    </button>
+                  )}
+                  {matchClockSeconds !== null && (
+                    <button
+                      onClick={() => applyMatchClock(clockResetPatch())}
+                      className="h-8 px-2 rounded bg-white/10 hover:bg-white/20 text-[10px] text-gray-300 transition active:scale-95"
+                    >
+                      リセット
+                    </button>
+                  )}
+                </div>
+                <p className="mt-1 text-center text-[9px] text-gray-500">
+                  視聴者のスコアボードに試合の経過時間が出ます（押すまでは表示されません）
+                </p>
+              </div>
+            )}
             {showNoticePanel && (
               <div className="mb-1.5 pb-1.5 border-b border-white/10">
                 <div className="flex items-center justify-center gap-1">
@@ -1720,6 +1817,18 @@ function BroadcastPageInner() {
                 </>
               )}
               <span className="text-gray-600 text-xs mx-0.5">|</span>
+              <button
+                onClick={() => setShowClockPanel((v) => !v)}
+                className={`h-8 px-2 rounded flex items-center justify-center text-sm transition active:scale-90 ${
+                  matchClockSeconds !== null
+                    ? "bg-[#e63946]/30 text-[#ffb3bb]"
+                    : "bg-white/10 hover:bg-white/20 text-gray-300"
+                }`}
+                aria-label="試合タイマーを操作"
+                title="試合タイマー"
+              >
+                ⏱
+              </button>
               <button
                 onClick={() => setShowNoticePanel((v) => !v)}
                 className={`h-8 px-2 rounded flex items-center justify-center text-sm transition active:scale-90 ${
