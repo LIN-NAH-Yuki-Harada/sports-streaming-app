@@ -707,7 +707,7 @@ function HlsStage({
       ) : null}
 
       {/* スコアボード（映像遅延に同期させた値で表示） */}
-      <ScoreboardOverlay b={delayed ?? broadcast} />
+      <ScoreboardOverlay b={delayed ?? broadcast} delayMs={OVERLAY_DELAY_MS} />
 
       {/* 上部中央: 配信者からのお知らせ（変わった瞬間だけポップアップ→常設の帯へ）。
           スコアと違い遅延させない（Web 版が非遅延の broadcast.notice を使うため）。 */}

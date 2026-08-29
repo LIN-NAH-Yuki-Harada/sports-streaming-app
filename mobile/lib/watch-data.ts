@@ -11,7 +11,9 @@ const WATCH_COLUMNS =
   "id, share_code, broadcaster_id, sport, home_team, away_team, " +
   "home_score, away_score, home_sets, away_sets, tournament, period, point_label, " +
   "balls, strikes, outs, runners, game_points, status, started_at, scoreboard_burned_in, " +
-  "live_youtube_broadcast_id, youtube_video_id, live_status, notice";
+  "live_youtube_broadcast_id, youtube_video_id, live_status, notice, " +
+  // 試合タイマー（2026-08-29 追加）
+  "match_clock_started_at, match_clock_offset_seconds";
 
 export type WatchBroadcast = {
   id: string;
@@ -26,6 +28,8 @@ export type WatchBroadcast = {
   away_sets: number;
   tournament: string | null;
   period: string;
+  match_clock_started_at: string | null;
+  match_clock_offset_seconds: number | null;
   point_label: string | null;
   balls: number | null;
   strikes: number | null;

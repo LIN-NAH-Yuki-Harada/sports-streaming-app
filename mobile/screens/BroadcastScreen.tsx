@@ -94,7 +94,17 @@ import {
   insertScoreEvent,
   getBroadcastNotice,
   updateBroadcastNotice,
+  getBroadcastMatchClock,
 } from "../lib/broadcasts";
+import {
+  formatClock,
+  matchElapsedSeconds,
+  clockStartPatch,
+  clockPausePatch,
+  clockResumePatch,
+  clockResetPatch,
+  type MatchClockPatch,
+} from "../lib/match-clock";
 import {
   type Plan,
   fetchPlan,
@@ -2257,6 +2267,54 @@ function ScoreControls(props: ScoreControlsProps) {
   //   → SafeAreaView をやめ、両OSで効く useSafeAreaInsets で上下**左右**を空ける。
   const insets = useSafeAreaInsets();
 
+  // ===== 試合タイマー（スコアボード内の「試合の経過時間」）=====
+  // 上の ⏱（配信の経過時間 elapsed）とは**別物**。elapsed は無料トライアル10分の判定にも
+  // 使われているため触らず、独立した値として足す。押さなければ何も表示されない。
+  const [matchClock, setMatchClock] = useState<MatchClockPatch>({
+    match_clock_started_at: null,
+    match_clock_offset_seconds: 0,
+  });
+  const [clockOpen, setClockOpen] = useState(false);
+  const [matchClockSeconds, setMatchClockSeconds] = useState<number | null>(null);
+  const clockStartedAt = matchClock.match_clock_started_at;
+  const clockOffset = matchClock.match_clock_offset_seconds;
+
+  // 現在値を DB から読む（お知らせと同じ理由）。画面ロック復帰などで本コンポーネントが
+  // 作り直されても、配信者の画面だけ 00:00 に戻る事故を防ぐ。
+  useEffect(() => {
+    if (!shareCode) return;
+    let alive = true;
+    getBroadcastMatchClock(shareCode)
+      .then((c) => {
+        if (alive && c) setMatchClock(c);
+      })
+      .catch(() => {
+        /* 取得失敗は未使用として扱う */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [shareCode]);
+
+  // 表示用の秒数。止まっている間は値が変わらないのでタイマーを回さない。
+  useEffect(() => {
+    const c = { clockStartedAt, offsetSeconds: clockOffset };
+    const compute = () => setMatchClockSeconds(matchElapsedSeconds(c, Date.now()));
+    compute();
+    if (!clockStartedAt) return;
+    const id = setInterval(compute, 1000);
+    return () => clearInterval(id);
+  }, [clockStartedAt, clockOffset]);
+
+  // 開始/停止/再開/リセットの4操作。押した瞬間だけ DB に書く（毎秒は書かない）。
+  const applyMatchClock = useCallback(
+    (patch: MatchClockPatch) => {
+      setMatchClock(patch);
+      if (shareCode) updateScore(shareCode, patch);
+    },
+    [shareCode],
+  );
+
   // ===== 視聴者へのお知らせテロップ（Web 版 PR#219 のアプリ移植・1.1.5）=====
   // 画面が狭くキーボードも出るため、Web のインラインパネルではなくモーダルにする。
   const [notice, setNotice] = useState<string | null>(null);
@@ -2325,6 +2383,10 @@ function ScoreControls(props: ScoreControlsProps) {
               {awayTeam}
             </Text>
             <Text style={styles.previewPeriod}>{period}</Text>
+            {/* 試合タイマー（視聴者のスコアボードに出るのと同じ値）。未使用なら描画しない。 */}
+            {matchClockSeconds !== null ? (
+              <Text style={styles.previewClock}>{formatClock(matchClockSeconds)}</Text>
+            ) : null}
           </View>
           {pointLabel ? (
             <View
@@ -2382,6 +2444,15 @@ function ScoreControls(props: ScoreControlsProps) {
           <Text style={[styles.elapsedText, isPortrait && styles.elapsedTextPortrait]}>
             ⏱ {formatElapsed(elapsed)}
           </Text>
+          {/* ⏱ 試合タイマー。動かしている間は赤地にして状態が一目で分かるようにする。 */}
+          <Pressable
+            style={[styles.noticeButton, matchClockSeconds !== null ? styles.noticeButtonOn : null]}
+            onPress={() => setClockOpen(true)}
+            hitSlop={6}
+            accessibilityLabel="試合タイマー"
+          >
+            <Text style={styles.noticeButtonText}>⏱</Text>
+          </Pressable>
           {/* 📢 視聴者へのお知らせ。出している間は赤地にして状態が一目で分かるようにする。 */}
           <Pressable
             style={[styles.noticeButton, notice ? styles.noticeButtonOn : null]}
@@ -2546,6 +2617,76 @@ function ScoreControls(props: ScoreControlsProps) {
           これが無いと**横持ちで撮影中に📢を開いた瞬間、モーダルだけ縦向きに提示され
           画面ごと回ったように見える**（2026-08-05 実利用で報告）。配信は横持ちが基本なので
           landscape を必ず許可する。Android には効かない prop なので無害。 */}
+      {/* 試合タイマーの操作。4つだけで両方の運用に対応できる:
+            通し（前半に続けて後半 45:00〜）… 停止 → 再開
+            後半を 0 分から数え直す運用      … 停止 → リセット → 開始 */}
+      <Modal
+        visible={clockOpen}
+        transparent
+        animationType="fade"
+        supportedOrientations={["portrait", "landscape"]}
+        onRequestClose={() => setClockOpen(false)}
+      >
+        <Pressable style={styles.noticeBackdrop} onPress={() => setClockOpen(false)}>
+          <View style={[styles.noticeCenter, !isPortrait && styles.noticeCenterLandscape]}>
+            <Pressable style={styles.noticeSheet} onPress={() => {}}>
+              <Text style={styles.noticeTitle}>試合タイマー</Text>
+              <Text style={styles.noticeHint}>
+                視聴者のスコアボードに試合の経過時間が出ます{"\n"}
+                （押すまでは表示されません）
+              </Text>
+              <Text style={styles.clockBig}>
+                {matchClockSeconds !== null ? formatClock(matchClockSeconds) : "--:--"}
+              </Text>
+              {clockStartedAt ? (
+                <Pressable
+                  style={styles.noticeClear}
+                  onPress={() =>
+                    applyMatchClock(
+                      clockPausePatch(
+                        { clockStartedAt, offsetSeconds: clockOffset },
+                        Date.now(),
+                      ),
+                    )
+                  }
+                >
+                  <Text style={styles.noticeClearText}>停止</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={styles.noticeApply}
+                  onPress={() =>
+                    applyMatchClock(
+                      matchClockSeconds !== null
+                        ? clockResumePatch(
+                            { clockStartedAt: null, offsetSeconds: clockOffset },
+                            Date.now(),
+                          )
+                        : clockStartPatch(Date.now()),
+                    )
+                  }
+                >
+                  <Text style={styles.noticeApplyText}>
+                    {matchClockSeconds !== null ? "再開する" : "開始する"}
+                  </Text>
+                </Pressable>
+              )}
+              {matchClockSeconds !== null ? (
+                <Pressable
+                  style={styles.noticeClear}
+                  onPress={() => applyMatchClock(clockResetPatch())}
+                >
+                  <Text style={styles.noticeClearText}>リセット（0に戻す）</Text>
+                </Pressable>
+              ) : null}
+              <Pressable style={styles.noticeCancel} onPress={() => setClockOpen(false)}>
+                <Text style={styles.noticeCancelText}>閉じる</Text>
+              </Pressable>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
       <Modal
         visible={noticeOpen}
         transparent
@@ -3000,6 +3141,24 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   previewPeriod: { color: "#ddd", fontSize: 12, marginLeft: 4 },
+  // 試合タイマー。縦持ちは横幅が厳しい（topLeftGroup が maxWidth 82%）ため、
+  // チーム名側が縮むように flexShrink: 0 で時計だけは縮ませない。
+  previewClock: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    marginLeft: 6,
+    flexShrink: 0,
+    fontVariant: ["tabular-nums"],
+  },
+  clockBig: {
+    color: "#fff",
+    fontSize: 34,
+    fontWeight: "900",
+    textAlign: "center",
+    marginVertical: 12,
+    fontVariant: ["tabular-nums"],
+  },
   topLeftGroup: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, maxWidth: "82%" },
   pointBadge: { backgroundColor: "#f4a300", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
   // テニス系のゲーム内ポイント（配信者プレビュー用）
