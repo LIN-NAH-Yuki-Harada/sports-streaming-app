@@ -82,6 +82,12 @@ export const metadata: Metadata = {
     },
   },
   other: {
+    // ★iOS Safari の Smart App Banner。これ1行で、画面上部に Apple 公式のバナーが出る。
+    //   **インストール済みかどうかを Apple が自動判定**し、未導入なら「入手」、
+    //   導入済みなら「開く」に出し分ける（こちらで判定コードを書く必要がない）。
+    //   2026-08-28 追加: スマホの利用者にアプリを使ってもらう方針のため
+    //   （チーム配信の視聴・将来のプッシュ通知はアプリでないと届かない）。
+    "apple-itunes-app": "app-id=6785001863",
     "apple-mobile-web-app-capable": "yes",
     "mobile-web-app-capable": "yes",
     "apple-mobile-web-app-status-bar-style": "black-translucent",

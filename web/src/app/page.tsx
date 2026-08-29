@@ -201,28 +201,45 @@ export default function LandingPage() {
             <a href="#features" className="text-gray-400 hover:text-white transition">特徴</a>
             <a href="#how" className="text-gray-400 hover:text-white transition">使い方</a>
             <a href="#pricing" className="text-gray-400 hover:text-white transition">料金</a>
+            {/* PC はブラウザで使うのが本線（2026-08-12 の住み分け）。
+                「アプリを開く」だと**ネイティブアプリが開くと誤解される**ため改名した。 */}
             <a
               href="/discover"
               className="bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-4 py-1.5 rounded-full transition shadow-lg shadow-[#e63946]/20"
             >
-              アプリを開く
+              ブラウザで使う
             </a>
           </div>
-          {/* スマホ用ボタン */}
-          <a
-            href="/discover"
-            className="sm:hidden bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-3 py-1.5 rounded-full transition"
-          >
-            アプリを開く
-          </a>
+          {/* スマホ用ボタン
+              ★主導線は**アプリの入手**にする（2026-08-28 方針）。
+                スマホはアプリのほうが配信が安定し、チーム配信の視聴もアプリで完結する。
+                従来は `/discover`（ブラウザ版）しか入口が無く、「アプリを開く」と
+                書いてあるのに Web が開いていた＝名前と挙動が食い違っていた。
+              ★ただし「ブラウザで使う」は必ず残す。**見るだけの人にインストールを強いない**
+                ための逃げ道（視聴はアプリ不要で成立する）。 */}
+          <div className="sm:hidden flex flex-col items-end gap-0.5">
+            <a
+              href="/app"
+              className="bg-[#e63946] hover:bg-[#d62836] text-white text-xs font-semibold px-3 py-1.5 rounded-full transition"
+            >
+              アプリを入手
+            </a>
+            <a
+              href="/discover"
+              className="text-[10px] text-gray-400 hover:text-white underline underline-offset-2 transition"
+            >
+              ブラウザで使う
+            </a>
+          </div>
         </nav>
       </header>
 
       {/* NEW リリースバナー: Android アプリ Google Play 配信開始（iOSと両対応に） */}
+      {/* ★リンク先は /app（端末に応じて App Store / Google Play へ振り分ける）。
+          以前は PLAY_STORE_URL 固定で、**iPhone の利用者がタップすると Google Play が
+          開いていた**（文言には「App Store」と書いてあるのに）。2026-08-28 修正。 */}
       <a
-        href={PLAY_STORE_URL}
-        target="_blank"
-        rel="noopener noreferrer"
+        href="/app"
         className="block bg-gradient-to-r from-[#e63946]/90 via-[#d62836] to-[#e63946]/90 text-white text-center text-[11px] sm:text-xs py-2 px-4 hover:from-[#e63946] hover:to-[#e63946] transition group"
       >
         <span className="inline-flex items-center gap-2 font-semibold">
