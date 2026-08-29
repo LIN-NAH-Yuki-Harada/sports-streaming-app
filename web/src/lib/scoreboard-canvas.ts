@@ -1,3 +1,5 @@
+import { formatClock } from "@/lib/match-clock";
+
 export type ScoreboardState = {
   home_team: string;
   away_team: string;
@@ -13,6 +15,11 @@ export type ScoreboardState = {
   gamePoints?: { home: string; away: string; tb?: boolean } | null;
   /** 配信開始からの経過秒数（null/undefined なら描画しない） */
   elapsedSeconds?: number | null;
+  /**
+   * 試合タイマーの経過秒数（null/undefined なら描画しない）。
+   * 配信開始からの elapsedSeconds とは別物で、配信者が「開始」を押した時点からの試合時間。
+   */
+  matchClockSeconds?: number | null;
 };
 
 const FONT_STACK =
@@ -51,6 +58,7 @@ export function drawScoreboard(
   const fontPeriod = `600 ${Math.round(24 * scale)}px ${FONT_STACK}`;
   const fontPill = `600 ${Math.round(24 * scale)}px ${FONT_STACK}`;
   const fontPoint = `700 ${Math.round(22 * scale)}px ${FONT_STACK}`;
+  const fontClock = `700 ${Math.round(26 * scale)}px ${FONT_STACK}`;
 
   const showSets = state.home_sets > 0 || state.away_sets > 0;
 
@@ -72,11 +80,17 @@ export function drawScoreboard(
   ctx.font = fontPeriod;
   const periodW = ctx.measureText(state.period).width;
 
+  // 試合タイマー（5番目のセグメント）。配信者が開始していなければ幅0＝従来と同じ見た目。
+  const clockText =
+    state.matchClockSeconds != null ? formatClock(state.matchClockSeconds) : null;
+  ctx.font = fontClock;
+  const clockBlockW = clockText ? Math.round(ctx.measureText(clockText).width + pad * 2) : 0;
+
   const homeBlockW = Math.round(homeTeamW + homeSetW + pad * 2);
   const scoreBlockW = Math.round(scoreW + pad * 2);
   const awayBlockW = Math.round(awayTeamW + awaySetW + pad * 2);
   const periodBlockW = Math.round(periodW + pad * 2);
-  const totalW = homeBlockW + scoreBlockW + awayBlockW + periodBlockW;
+  const totalW = homeBlockW + scoreBlockW + awayBlockW + periodBlockW + clockBlockW;
 
   // ===== 左上: スコアボード =====
   const leftX = margin;
@@ -129,6 +143,19 @@ export function drawScoreboard(
   ctx.font = fontPeriod;
   ctx.fillStyle = COLORS.white;
   ctx.fillText(state.period, cursor + pad, topY + h / 2);
+  cursor += periodBlockW;
+
+  // 5) 試合タイマー（DAZN のようにスコアボード内の最後尾）
+  if (clockText) {
+    ctx.fillStyle = COLORS.bgPeriod;
+    ctx.fillRect(cursor, topY, clockBlockW, h);
+    // ピリオドと同じ背景色なので、境目に細い区切り線を入れて別の項目だと分かるようにする
+    ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.fillRect(cursor, topY, Math.max(1, Math.round(2 * scale)), h);
+    ctx.font = fontClock;
+    ctx.fillStyle = COLORS.white;
+    ctx.fillText(clockText, cursor + pad, topY + h / 2);
+  }
 
   // ポイントラベル（セット/マッチポイント等、スコアボードの下に小さく）
   let belowY = topY + h + Math.round(8 * scale);
@@ -224,3 +251,4 @@ function drawRoundedRect(
   ctx.quadraticCurveTo(x, y, x + rr, y);
   ctx.closePath();
 }
+

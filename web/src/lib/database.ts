@@ -60,6 +60,11 @@ export type Broadcast = {
   tournament: string | null;
   venue: string | null;
   period: string;
+  /** 試合タイマー（スコアボード内）。両方が初期値なら未使用＝表示しない。
+   *  ★右上の配信経過時間（started_at 由来）とは別物。あちらは無料トライアル判定にも
+   *    使われているため触っていない。 */
+  match_clock_started_at: string | null;
+  match_clock_offset_seconds: number | null;
   status: "live" | "ended";
   started_at: string;
   ended_at: string | null;
@@ -109,6 +114,9 @@ export type Broadcast = {
 export const BROADCAST_PUBLIC_COLUMNS =
   "id, share_code, broadcaster_id, team_id, sport, home_team, away_team, " +
   "tournament, venue, home_score, away_score, home_sets, away_sets, set_results, period, point_label, " +
+  // 試合タイマー: supabase-migration-broadcasts-match-clock.sql の本番適用が前提
+  // （2026-08-29 適用済み・anon で読めることを実測で確認）
+  "match_clock_started_at, match_clock_offset_seconds, " +
   "balls, strikes, outs, runners, game_points, " +
   "status, started_at, ended_at, scoreboard_burned_in, youtube_video_id, youtube_upload_status, " +
   "live_youtube_broadcast_id, live_status, notice";
@@ -547,6 +555,30 @@ export async function updateBroadcastNotice(
 
   if (error) {
     console.error("お知らせ更新エラー:", error.message);
+    return false;
+  }
+  return true;
+}
+
+// 試合タイマー（スコアボード内の「試合の経過時間」）を更新する。
+// 配信の経過時間（started_at）とは別物で、配信者が「開始」を押したときから数える。
+//
+// ★毎秒書かない。動いている区間の開始時刻と、停止済み区間の累計秒だけを持ち、
+//   表示側（視聴ページ・オーバーレイ）が現在時刻から計算する。
+//   書き込みは開始/停止/再開/リセットの4操作だけ＝DB負荷はスコア更新と同程度。
+// 値の組み立ては match-clock.ts の clock*Patch に集約している（Web/アプリで同一実装）。
+export async function updateBroadcastMatchClock(
+  broadcastId: string,
+  patch: { match_clock_started_at: string | null; match_clock_offset_seconds: number }
+): Promise<boolean> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("broadcasts")
+    .update(patch)
+    .eq("id", broadcastId);
+
+  if (error) {
+    console.error("試合タイマー更新エラー:", error.message);
     return false;
   }
   return true;

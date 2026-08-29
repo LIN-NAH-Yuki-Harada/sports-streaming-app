@@ -145,10 +145,11 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
   //   （早すぎる＝得点のネタバレ／遅すぎる＝ほぼ気づかれない、の非対称リスク）。
   const [playbackMode, setPlaybackMode] = useState<"native" | "hlsjs">("hlsjs");
   // HLS視聴用：映像遅延に合わせてスコアを遅らせた broadcast（同期表示）
-  const delayedBroadcast = useDelayedBroadcast(
-    broadcast,
-    playbackMode === "native" ? OVERLAY_DELAY_NATIVE_MS : OVERLAY_DELAY_HLSJS_MS,
-  );
+  // 映像がどれだけ遅れているか（ms）。スコアを遅らせるのと、
+  // 試合タイマーの「今」を巻き戻すのに同じ値を使う（ずれたら意味がないため一元管理）。
+  const overlayDelayMs =
+    playbackMode === "native" ? OVERLAY_DELAY_NATIVE_MS : OVERLAY_DELAY_HLSJS_MS;
+  const delayedBroadcast = useDelayedBroadcast(broadcast, overlayDelayMs);
   const { stageRef, isFullscreen, isFakeFullscreen, toggleFullscreen } =
     useStageFullscreen<HTMLDivElement>({
       allowVideoFallback: scoreboardBurnedIn,
@@ -522,7 +523,10 @@ export default function WatchPage({ params }: { params: Promise<{ code: string }
           <>
             <HlsPlayer src={hlsUrl} onPlaybackMode={setPlaybackMode} />
             {!scoreboardBurnedIn && (
-              <ViewerScoreboardOverlay broadcast={delayedBroadcast ?? broadcast} />
+              <ViewerScoreboardOverlay
+                broadcast={delayedBroadcast ?? broadcast}
+                delayMs={overlayDelayMs}
+              />
             )}
           </>
         ) : isWatching && viewerToken && isLive ? (

@@ -131,6 +131,10 @@ function scoreboardKey(s: ScoreboardState): string {
     s.sport,
     s.pointLabel ?? "",
     s.elapsedSeconds ?? "",
+    s.matchClockSeconds ?? "",
+    // ★gamePoints はここに無く、テニスのポイントが焼き込み配信で更新されない既存バグだった
+    //   （キーが変わらない＝再描画されない）。試合タイマーを足すついでに直す。
+    s.gamePoints ? `${s.gamePoints.home}/${s.gamePoints.away}/${s.gamePoints.tb ? 1 : 0}` : "",
   ].join("|");
 }
 

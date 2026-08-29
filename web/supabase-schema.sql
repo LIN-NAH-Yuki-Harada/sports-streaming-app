@@ -160,7 +160,14 @@ create table public.broadcasts (
   notice text check (notice is null or char_length(notice) <= 100),
   -- テニス系のゲーム内ポイント表示（{"home":"40","away":"Ad"} / {"home":"6","away":"5","tb":true} / null）
   -- 詳細: supabase-migration-broadcasts-game-points.sql
-  game_points jsonb
+  game_points jsonb,
+  -- 試合タイマー（スコアボード内に出す「試合の経過時間」）。
+  -- 配信の経過時間（started_at）とは別物で、配信者が「開始」を押した時点から数える。
+  -- 毎秒書かないよう「動いている区間の開始時刻」と「停止済み区間の累計秒」で持つ。
+  -- 両方が初期値なら未使用＝表示しない（後方互換）。
+  -- 詳細: supabase-migration-broadcasts-match-clock.sql
+  match_clock_started_at timestamptz,
+  match_clock_offset_seconds integer not null default 0
 );
 
 alter table public.broadcasts enable row level security;
