@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { WatchBroadcast } from "../lib/watch-data";
+import { formatClock, hasMatchClock, matchElapsedSeconds } from "../lib/match-clock";
 
 // 視聴画面のスコアボード・オーバーレイ（ネイティブ版）。
 // Web 版 web/src/components/viewer-scoreboard-overlay.tsx の見た目を移植。
@@ -13,7 +14,18 @@ import type { WatchBroadcast } from "../lib/watch-data";
 //
 // 左上=スコア（チーム/得点/ピリオド）/ その下=セットP・マッチP / さらに下=野球 B/S/O＋走者 /
 // 左下=経過時間。右上の LIVE・視聴者数・試合名は WatchScreen 側で配置する（重なり回避）。
-export function ScoreboardOverlay({ b }: { b: WatchBroadcast }) {
+export function ScoreboardOverlay({
+  b,
+  delayMs = 0,
+}: {
+  b: WatchBroadcast;
+  /**
+   * 映像の遅延（ms）。HLS 視聴は映像が数秒遅れているため、試合タイマーの「今」も
+   * 同じだけ巻き戻さないと**スコアだけ合っていて時計だけ先に進む**状態になる。
+   * スコア自体は WatchScreen の useDelayedBroadcast で既に遅らされている。WebRTC 経路は 0。
+   */
+  delayMs?: number;
+}) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   // 短辺 × 係数を 11〜15px に収める（Web の clamp(11px, 2.4vh, 15px) と同等の考え方）。
@@ -25,6 +37,8 @@ export function ScoreboardOverlay({ b }: { b: WatchBroadcast }) {
   const topInset = isLandscape ? Math.min(insets.top, 20) : insets.top;
 
   const elapsed = useElapsedSeconds(b.started_at, b.status === "live");
+  // 試合タイマー（スコアボード内）。配信者が使っていなければ null＝何も出さない。
+  const matchClock = useMatchClockSeconds(b, delayMs);
   const showSets = b.home_sets > 0 || b.away_sets > 0;
   const isBaseball = b.sport === "野球";
 
@@ -57,6 +71,13 @@ export function ScoreboardOverlay({ b }: { b: WatchBroadcast }) {
           <View style={styles.segPeriod}>
             <Text style={[styles.period, { fontSize: fs }]}>{b.period}</Text>
           </View>
+          {/* 試合タイマー（DAZN のようにスコアボード内の最後尾）。
+              配信者が開始していなければ描画しない＝従来と同じ見た目のまま。 */}
+          {matchClock !== null ? (
+            <View style={styles.segClock}>
+              <Text style={[styles.clock, { fontSize: fs }]}>{formatClock(matchClock)}</Text>
+            </View>
+          ) : null}
         </View>
 
         {b.point_label ? (
@@ -190,6 +211,32 @@ function RunnerDiamond({
 }
 
 // started_at からの経過秒数を 1 秒ごとに更新（live のときのみ進行）。Web 版と同じ実装。
+/**
+ * 試合タイマーの経過秒を1秒ごとに更新して返す。未使用なら null。
+ * Web 版 viewer-scoreboard-overlay.tsx の同名フックと同じ実装。
+ *
+ * ★止まっているとき（match_clock_started_at が null）はタイマーを回さない。
+ *   停止中は値が変わらないので、毎秒の再描画は電池の無駄でしかない。
+ */
+function useMatchClockSeconds(b: WatchBroadcast, delayMs: number): number | null {
+  const startedAt = b.match_clock_started_at;
+  const offset = b.match_clock_offset_seconds;
+  const [seconds, setSeconds] = useState<number | null>(() =>
+    matchElapsedSeconds({ clockStartedAt: startedAt, offsetSeconds: offset }, Date.now() - delayMs),
+  );
+
+  useEffect(() => {
+    const c = { clockStartedAt: startedAt, offsetSeconds: offset };
+    const compute = () => setSeconds(matchElapsedSeconds(c, Date.now() - delayMs));
+    compute();
+    if (!startedAt || !hasMatchClock(c)) return;
+    const interval = setInterval(compute, 1000);
+    return () => clearInterval(interval);
+  }, [startedAt, offset, delayMs]);
+
+  return seconds;
+}
+
 function useElapsedSeconds(startedAt: string, live: boolean): number | null {
   const [elapsed, setElapsed] = useState<number | null>(null);
   useEffect(() => {
@@ -258,6 +305,15 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.6)",
   },
   period: { color: "#fff", fontWeight: "500", fontVariant: ["tabular-nums"] },
+  segClock: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    // ピリオドと同じ背景色なので、境目の線で別項目だと分かるようにする（Web 版と同じ）
+    borderLeftWidth: 1,
+    borderLeftColor: "rgba(255,255,255,0.15)",
+  },
+  clock: { color: "#fff", fontWeight: "700", fontVariant: ["tabular-nums"] },
 
   pointWrap: { marginTop: 5, flexDirection: "row" },
   pointBadge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 },

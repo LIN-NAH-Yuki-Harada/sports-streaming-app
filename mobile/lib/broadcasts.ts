@@ -199,6 +199,9 @@ export async function updateScore(
     away_sets: number;
     set_results: unknown;
     point_label: string | null;
+    // 試合タイマー（スコアボード内）。既存の経過時間とは別物。
+    match_clock_started_at: string | null;
+    match_clock_offset_seconds: number;
     // テニス系のゲーム内ポイント（表示用文字列。ゲーム間/非テニスは null）
     game_points: { home: string; away: string; tb?: true } | null;
     // 野球カウント（甲子園風 B/S/O＋走者）
@@ -226,6 +229,32 @@ export async function getBroadcastNotice(
     .maybeSingle();
   if (error || !data) return null;
   return (data as { notice: string | null }).notice ?? null;
+}
+
+// 現在の試合タイマーを読む。getBroadcastNotice と同じ理由で必要。
+// 画面ロック復帰などで配信UIが作り直されてもローカル state が初期値に戻らないようにする。
+// これが無いと「視聴者には時計が動いているのに配信者の画面だけ 00:00」になり、
+// 配信者が「壊れた」と思ってリセットを押してしまう。
+export async function getBroadcastMatchClock(shareCode: string): Promise<{
+  match_clock_started_at: string | null;
+  match_clock_offset_seconds: number;
+} | null> {
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("match_clock_started_at, match_clock_offset_seconds")
+    .eq("share_code", shareCode)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  const d = data as {
+    match_clock_started_at: string | null;
+    match_clock_offset_seconds: number | null;
+  };
+  return {
+    match_clock_started_at: d.match_clock_started_at ?? null,
+    match_clock_offset_seconds: d.match_clock_offset_seconds ?? 0,
+  };
 }
 
 // 配信者から視聴者へのお知らせテロップを更新（null で非表示に戻す）。
