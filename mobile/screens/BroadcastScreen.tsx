@@ -2361,6 +2361,9 @@ function ScoreControls(props: ScoreControlsProps) {
       <View
         style={[
           styles.topOverlay,
+          // ★縦持ちは上段の横幅が足りず、スコアボードの試合タイマーが押し出されて切れる
+          //   （2026-08-30 実機で確認）。縦のときだけ2段にして、スコアボードに全幅を与える。
+          isPortrait && styles.topOverlayPortrait,
           {
             paddingTop: insets.top + 12,
             paddingLeft: insets.left + 12,
@@ -2369,7 +2372,7 @@ function ScoreControls(props: ScoreControlsProps) {
         ]}
         pointerEvents="box-none"
       >
-        <View style={styles.topLeftGroup}>
+        <View style={[styles.topLeftGroup, isPortrait && styles.topLeftGroupPortrait]}>
           <View style={styles.scorePreview}>
             <Text style={[styles.previewTeam, isPortrait && styles.previewTeamPortrait]} numberOfLines={1}>
               {homeTeam}
@@ -2411,7 +2414,7 @@ function ScoreControls(props: ScoreControlsProps) {
             </View>
           ) : null}
         </View>
-        <View style={styles.topRightGroup}>
+        <View style={[styles.topRightGroup, isPortrait && styles.topRightGroupPortrait]}>
           {youtubeShareUrl ? (
             <Text
               style={[
@@ -3160,6 +3163,20 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
   },
   topLeftGroup: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1, maxWidth: "82%" },
+  // ── 縦持ちの2段レイアウト ────────────────────────────────
+  // 横持ちは「左=スコアボード / 右=操作ボタン」の1段で収まるが、縦持ちは幅が足りず
+  // スコアボードが 82% に圧縮され、最後尾の試合タイマーが枠外に切れていた。
+  // column-reverse にすることで、JSX の並び（左→右）を変えずに
+  // 「上段=操作ボタン / 下段=スコアボード」にできる（DOM順を触らないので影響が局所化する）。
+  topOverlayPortrait: {
+    flexDirection: "column-reverse",
+    alignItems: "stretch",
+    justifyContent: "flex-start",
+    gap: 8,
+  },
+  // 2段にしたので幅の取り合いが無くなる。82% の制限を外して全幅を使わせる。
+  topLeftGroupPortrait: { maxWidth: "100%", alignSelf: "flex-start" },
+  topRightGroupPortrait: { alignSelf: "flex-end" },
   pointBadge: { backgroundColor: "#f4a300", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
   // テニス系のゲーム内ポイント（配信者プレビュー用）
   tnPointsRow: {
