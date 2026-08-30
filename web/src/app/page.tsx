@@ -234,7 +234,9 @@ export default function LandingPage() {
         </nav>
       </header>
 
-      {/* NEW リリースバナー: Android アプリ Google Play 配信開始（iOSと両対応に） */}
+      {/* NEW リリースバナー: 試合タイマー（2026-08-30 Web版で稼働開始）。
+          ★ここは「一度きりの告知」を置く枠ではなく**直近の改善**を出す枠。
+            古い告知が NEW のまま残ると「開発が止まっている」という逆のメッセージになる。 */}
       {/* ★リンク先は /app（端末に応じて App Store / Google Play へ振り分ける）。
           以前は PLAY_STORE_URL 固定で、**iPhone の利用者がタップすると Google Play が
           開いていた**（文言には「App Store」と書いてあるのに）。2026-08-28 修正。 */}
@@ -244,7 +246,7 @@ export default function LandingPage() {
       >
         <span className="inline-flex items-center gap-2 font-semibold">
           <span className="bg-white text-[#e63946] text-[9px] font-black px-1.5 py-0.5 rounded">NEW</span>
-          <span>📱 Android版アプリが登場！App Store / Google Play で配信中</span>
+          <span>⏱ 試合タイマーを追加。キックオフからの経過時間をスコアボードに表示</span>
           <span className="hidden sm:inline opacity-70 group-hover:opacity-100 transition">→ ダウンロード</span>
         </span>
       </a>
@@ -288,9 +290,13 @@ export default function LandingPage() {
                 <span className="inline-flex items-center gap-1.5 bg-white/[0.04] ring-1 ring-white/10 rounded-full px-3 py-1 text-[11px] text-gray-300">
                   <span aria-hidden="true">📺</span> TV中継品質のスコアボード
                 </span>
-                <span className="inline-flex items-center gap-1.5 bg-[#e63946]/10 ring-1 ring-[#e63946]/30 rounded-full px-3 py-1 text-[11px] text-white">
+                <span className="inline-flex items-center gap-1.5 bg-white/[0.04] ring-1 ring-white/10 rounded-full px-3 py-1 text-[11px] text-gray-300">
                   <span aria-hidden="true">📼</span> YouTube 自動アーカイブ
-                  <span className="bg-[#e63946] text-white text-[8px] font-black px-1 py-0.5 rounded ml-0.5">NEW</span>
+                </span>
+                {/* ★「画質を改善しました」ではなく**いま実際に出ている値**を書く（実測 1280x720 / 約3.8Mbps）。
+                    アプリの審査状況に左右されず、常に正しい表記でいられる。 */}
+                <span className="inline-flex items-center gap-1.5 bg-[#e63946]/10 ring-1 ring-[#e63946]/30 rounded-full px-3 py-1 text-[11px] text-white">
+                  <span aria-hidden="true">🎥</span> HD画質（720p）で配信
                 </span>
               </div>
 
@@ -451,11 +457,15 @@ export default function LandingPage() {
       {/* 特徴 */}
       <section id="features" className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-16 sm:py-24 border-t border-white/5">
         <SectionKicker label="特徴" />
-        <h2 className="text-xl sm:text-3xl font-bold tracking-tight mb-8 sm:mb-12">YouTubeライブにはない、試合配信に特化した4つの機能</h2>
-        <div className="grid gap-4 sm:gap-6 grid-cols-2 lg:grid-cols-4">
+        <h2 className="text-xl sm:text-3xl font-bold tracking-tight mb-8 sm:mb-12">YouTubeライブにはない、試合配信に特化した6つの機能</h2>
+        {/* ★4→6に増やしたので lg:grid-cols-4（4+2で余る）から3列（3+3）へ。
+            追加した2つは、競合と比べて不足を指摘された箇所を実際に埋めたもの。 */}
+        <div className="grid gap-4 sm:gap-6 grid-cols-2 lg:grid-cols-3">
           {[
             { headline: "スマホ1台", sub: "機材不要", desc: "プロ機材なしでスマホ1台。手軽にライブ配信。" },
             { headline: "TV品質", sub: "スコアボード常時表示", desc: "チーム名、スコア、時間をオーバーレイ。映像を遮ることなく試合情報が届く。" },
+            { headline: "試合タイマー", sub: "キックオフから計測", desc: "試合の経過時間をスコアボードに表示。途中から見た方にも「いま何分か」が伝わります。" },
+            { headline: "撮影ズーム", sub: "1〜5倍で寄せられる", desc: "配信中に指でなぞるだけ。コートの反対側にいるお子さんも大きく映せます。" },
             { headline: "限定公開", sub: "プライバシーを守る", desc: "共有コードを持つ人だけが視聴可能。お子さまの映像が不特定多数に公開されません。" },
             { headline: "視聴無料", sub: "家族は登録不要でタダ", desc: "見る人は完全無料・登録不要。コードを受け取ったらすぐに観戦できます。" },
           ].map((f) => (
