@@ -14,6 +14,7 @@ const NAV: { href: string; label: string }[] = [
   { href: "/admin/users", label: "ユーザー" },
   { href: "/admin/server", label: "サーバー" },
   { href: "/admin/ads", label: "広告(CM)" },
+  { href: "/admin/email", label: "一斉送信" },
 ];
 
 export default async function AdminLayout({
