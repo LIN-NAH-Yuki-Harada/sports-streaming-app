@@ -102,7 +102,14 @@ const ORGANIZATION_JSONLD = {
   url: SITE_URL,
   logo: `${SITE_URL}/icon-512.png`,
   description: SITE_DESCRIPTION,
-  sameAs: [] as string[],
+  // ★ 公式アカウント/ストアを Google に同一主体として認識させる（ブランド検索・ナレッジパネル）。
+  //   ここに載せるのは「自社が運用している」ものだけ。他人のページを入れてはいけない。
+  sameAs: [
+    "https://apps.apple.com/jp/app/id6785001863",
+    "https://play.google.com/store/apps/details?id=com.linnah.livespotch",
+    "https://x.com/live_spotch",
+    "https://note.com/live_spotch",
+  ] as string[],
   founder: {
     "@type": "Organization",
     name: "LIN-NAH株式会社",
