@@ -112,7 +112,7 @@ export default async function BlogPostPage({ params }: Props) {
           </Link>
         </nav>
 
-        <h1 className="mt-4 text-xl md:text-2xl font-bold leading-snug">
+        <h1 className="mt-4 text-[24px] md:text-[32px] font-bold leading-[1.4]">
           {post.title}
         </h1>
         <time
@@ -132,38 +132,49 @@ export default async function BlogPostPage({ params }: Props) {
           」を運営する LIN-NAH株式会社が書いています。
         </p>
 
-        <div className="mt-8 space-y-4 text-sm md:text-[15px] text-gray-300 leading-relaxed">
+        <div className="mt-8 space-y-5 text-[16px] md:text-[18px] text-gray-200 leading-[1.95]">
           {post.lead.map((p) => (
             <p key={p.slice(0, 24)}>{p}</p>
           ))}
         </div>
 
-        {/* 目次。長い記事なので、読みたい場所へ飛べるようにする */}
-        <nav className="mt-10 rounded-xl border border-white/10 bg-white/[0.02] p-5">
-          <p className="text-xs font-bold text-gray-400">目次</p>
-          <ul className="mt-3 space-y-2">
+        {/* 目次。9項目あると縦に長く本文が押し下がるので、既定で折りたたむ。
+            <details> なのでJSは不要、SSGでもそのまま動く。 */}
+        <details className="mt-10 group rounded-xl border border-white/10 bg-white/[0.03]">
+          <summary className="flex items-center justify-between cursor-pointer list-none px-5 py-4">
+            <span className="text-[13px] font-bold text-gray-300">
+              目次（{post.sections.length}項目）
+            </span>
+            <span
+              className="text-xs text-gray-500 transition-transform duration-300 group-open:rotate-180"
+              aria-hidden="true"
+            >
+              ▼
+            </span>
+          </summary>
+          <ul className="px-5 pb-5 space-y-2.5">
             {post.sections.map((s, i) => (
               <li key={s.heading}>
                 <a
                   href={`#s${i}`}
-                  className="text-sm text-gray-300 hover:text-white transition-colors"
+                  className="text-[14px] text-gray-400 hover:text-white transition-colors leading-relaxed"
                 >
                   {s.heading}
                 </a>
               </li>
             ))}
           </ul>
-        </nav>
+        </details>
 
-        <div className="mt-12 space-y-12">
+        <div className="mt-14 space-y-16">
           {post.sections.map((s, i) => (
             <section key={s.heading} id={`s${i}`} className="scroll-mt-24">
-              <h2 className="text-base md:text-lg font-bold text-white border-l-2 border-[#e63946] pl-3">
+              <h2 className="text-[19px] md:text-[23px] font-bold text-white leading-snug border-l-[3px] border-[#e63946] pl-4">
                 {s.heading}
               </h2>
 
               {s.paragraphs ? (
-                <div className="mt-4 space-y-4 text-sm md:text-[15px] text-gray-300 leading-relaxed">
+                <div className="mt-5 space-y-5 text-[15.5px] md:text-[17px] text-gray-300 leading-[1.95]">
                   {s.paragraphs.map((p) => (
                     <p key={p.slice(0, 24)}>{p}</p>
                   ))}
@@ -171,13 +182,13 @@ export default async function BlogPostPage({ params }: Props) {
               ) : null}
 
               {s.list ? (
-                <ul className="mt-4 space-y-2.5">
+                <ul className="mt-5 space-y-3.5">
                   {s.list.map((item) => (
                     <li
                       key={item.slice(0, 24)}
-                      className="flex gap-2.5 text-sm md:text-[15px] text-gray-300 leading-relaxed"
+                      className="flex gap-3 text-[15px] md:text-[16.5px] text-gray-300 leading-[1.9]"
                     >
-                      <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#e63946]" />
+                      <span className="mt-[10px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#e63946]" />
                       <span>{item}</span>
                     </li>
                   ))}
@@ -185,7 +196,7 @@ export default async function BlogPostPage({ params }: Props) {
               ) : null}
 
               {s.note ? (
-                <p className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-[13px] text-gray-400 leading-relaxed">
+                <p className="mt-5 rounded-lg border-l-2 border-white/20 bg-white/[0.03] px-4 py-3.5 text-[14px] md:text-[15px] text-gray-400 leading-[1.9]">
                   {s.note}
                 </p>
               ) : null}
