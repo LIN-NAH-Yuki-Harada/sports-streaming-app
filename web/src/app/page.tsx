@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
+import Link from "next/link";
+import { getSortedPosts } from "@/lib/blog";
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://live-spotch.com";
@@ -201,6 +203,9 @@ export default function LandingPage() {
             <a href="#features" className="text-gray-400 hover:text-white transition">特徴</a>
             <a href="#how" className="text-gray-400 hover:text-white transition">使い方</a>
             <a href="#pricing" className="text-gray-400 hover:text-white transition">料金</a>
+            {/* ★ブログ導線（2026-09-07）。フッターだけだと最下部まで
+                スクロールしないと辿り着けず、事実上リンクが無いのと同じだった。 */}
+            <a href="/blog" className="text-gray-400 hover:text-white transition">ブログ</a>
             {/* PC はブラウザで使うのが本線（2026-08-12 の住み分け）。
                 「アプリを開く」だと**ネイティブアプリが開くと誤解される**ため改名した。 */}
             <a
@@ -678,6 +683,46 @@ export default function LandingPage() {
             </details>
           ))}
         </div>
+      </section>
+
+      {/* ブログ（2026-09-07）
+          ★フッターのリンクだけでは最下部までスクロールしないと辿り着けず、
+            事実上リンクが無いのと同じだった。検索から来た人にも
+            「読み物がある＝運営が生きている」ことが伝わる位置に置く。 */}
+      <section className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-16 sm:py-24 border-t border-white/5">
+        <SectionKicker label="ブログ" />
+        <h2 className="text-xl sm:text-3xl font-bold tracking-tight mb-3">
+          配信のやり方と、現場で分かったこと
+        </h2>
+        <p className="text-xs sm:text-sm text-gray-400 leading-relaxed mb-8">
+          子どもの試合を配信するときに、実際につまずくところをまとめています。
+        </p>
+
+        <div className="space-y-3">
+          {getSortedPosts().slice(0, 3).map((post) => (
+            <Link
+              key={post.slug}
+              href={`/blog/${post.slug}`}
+              className="block rounded-xl bg-white/[0.03] ring-1 ring-white/10 px-4 sm:px-5 py-4 hover:ring-[#e63946]/40 transition"
+            >
+              <h3 className="text-sm sm:text-base font-bold text-gray-100 leading-snug">
+                {post.title}
+              </h3>
+              <p className="mt-2 text-xs sm:text-sm text-gray-400 leading-relaxed line-clamp-2">
+                {post.excerpt}
+              </p>
+            </Link>
+          ))}
+        </div>
+
+        <p className="mt-6">
+          <Link
+            href="/blog"
+            className="text-xs sm:text-sm text-[#e63946] hover:opacity-80 transition"
+          >
+            記事をすべて見る →
+          </Link>
+        </p>
       </section>
 
       {/* CTA */}
