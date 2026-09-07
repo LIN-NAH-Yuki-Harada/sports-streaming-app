@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   REPORT_REASONS,
   submitReport,
@@ -38,6 +39,11 @@ export function ModerationMenu({
   onBlocked?: (blockedId: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  // ★ 2026-08-04: 下余白が 32 固定で、これは iPhone のホームバーに合わせた値だった。
+  //   Android の3ボタンナビでは「キャンセル」が半分隠れて押しにくい。通報導線は UGC
+  //   ポリシーでストア審査官が必ず触る場所なので、端末の実インセットで空ける。
+  //   ※ 早期 return より前に置くこと（フックは毎レンダー同じ順で呼ぶ必要がある）
+  const insets = useSafeAreaInsets();
 
   if (!target) return null;
   const isSelf = currentUserId != null && currentUserId === target.broadcasterId;
@@ -92,15 +98,22 @@ export function ModerationMenu({
   }
 
   return (
+    // ★ supportedOrientations 必須（iOS）: 既定が ["portrait"] なので、横持ち視聴中に
+    //   通報シートを開くと画面ごと縦に回ったように見える。UGC審査で見られる導線なので
+    //   ここが不自然に見えるのは避ける。Android には効かない prop なので無害。
     <Modal
       visible={visible}
       transparent
       animationType="fade"
+      supportedOrientations={["portrait", "landscape"]}
       onRequestClose={onClose}
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
         {/* シート本体（タップ透過を止める） */}
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable
+          style={[styles.sheet, { paddingBottom: Math.max(32, insets.bottom + 16) }]}
+          onPress={() => {}}
+        >
           <Text style={styles.title}>通報・ブロック</Text>
           <Text style={styles.subtitle} numberOfLines={1}>
             {target.label}

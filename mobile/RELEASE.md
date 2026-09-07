@@ -1,7 +1,7 @@
 # LIVE SPOtCH 配信アプリ — リリース手順書（TestFlight → App Store）
 
 > 目的: ネイティブ配信アプリを TestFlight に提出できる状態まで一貫して進めるための手順。
-> 構成: Expo SDK56 + EAS Build / Submit。bundleId / package = `com.linnah.spotch`。
+> 構成: Expo SDK56 + EAS Build / Submit。bundleId / package = `com.linnah.livespotch`。
 
 ---
 
@@ -44,7 +44,7 @@ https://appstoreconnect.apple.com → マイApp → ＋ → 新規App
 | プラットフォーム | iOS |
 | 名前 | LIVE SPOtCH 配信（重複不可・調整の可能性あり） |
 | プライマリ言語 | 日本語 |
-| バンドルID | `com.linnah.spotch`（Developer ポータルで先に登録が必要な場合あり） |
+| バンドルID | `com.linnah.livespotch`（Developer ポータルで先に登録が必要な場合あり） |
 | SKU | 任意（例: `live-spotch-broadcaster`） |
 
 作成後、以下の3値をメモ → §3 の `eas.json` に転記:
@@ -112,10 +112,10 @@ iOS提出ブロッカーのコードは実装済み。以下はオーナーが�
   set_results 列をクライアントへ開放。未適用でも履歴は正常動作するが、セット別内訳は出ない。
 
 ### 6-2. Sign in with Apple（4.8）
-- **Apple Developer**: Certificates, Identifiers & Profiles → App ID `com.linnah.spotch` →
+- **Apple Developer**: Certificates, Identifiers & Profiles → App ID `com.linnah.livespotch` →
   Capabilities で **Sign In with Apple** を有効化。
 - **Supabase**: Authentication → Providers → **Apple** を有効化し、
-  Authorized Client IDs に `com.linnah.spotch`（ネイティブの bundle ID）を追加。
+  Authorized Client IDs に `com.linnah.livespotch`（ネイティブの bundle ID）を追加。
 - ※EAS iOS ビルドで新規 pod が WebRTC/modular_headers 構成と干渉しないか実検証（最初の関門）。
 
 ### 6-3. App Store Connect（提出時）
