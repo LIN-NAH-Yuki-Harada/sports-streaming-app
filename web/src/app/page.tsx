@@ -15,6 +15,10 @@ const PLAY_STORE_URL =
 
 const FAQ_ITEMS = [
   {
+    q: "「LIVE SPOtCH」はなんと読みますか？",
+    a: "「ライブスポッチ」と読みます。スポーツ（Sports）と、その場所・見どころを意味する Spot をかけた名前です。App Store や Google Play で「ライブスポッチ」と検索してもアプリが見つかります。",
+  },
+  {
     q: "子どもの顔が映るのが心配です。大丈夫ですか？",
     a: "LIVE SPOtCH のプレイヤーでの配信は、共有コードを知る人だけが視聴できる限定公開です。検索や一覧には表示されません。なお、チームプランで「YouTube 自動アーカイブ」をONにした場合は、配信者ご自身のYouTubeチャンネルにも「限定公開」で映像が流れます。YouTubeの限定公開はURLを知っている人なら視聴できる状態のため、共有コードとは保護の仕組みが異なります。YouTube連携は初期状態ではOFFで、配信者ご自身が設定しない限り有効になりません。",
   },
@@ -60,8 +64,13 @@ const FAQ_ITEMS = [
   },
 ];
 
+// ★2026-09-07: ブランド名で検索されたとき Google がタイトルを「LIVE SPOtCH」だけに
+//   書き換えていて、何のサービスか伝わっていなかった。ブランド＋カタカナを先頭に置き、
+//   差別化（スコア付き）と主力KW（子どもの試合をライブ配信）も1行に収める。
+//   ※カタカナ「ライブスポッチ」は可視テキストに1度も無く、Google が
+//     LivePocket の打ち間違いと解釈していた（実測）。
 const LP_TITLE =
-  "子どもの試合をスマホでライブ配信｜スポーツ少年団・部活・地域大会対応";
+  "LIVE SPOtCH（ライブスポッチ）｜スコア付きで子どもの試合をライブ配信";
 const LP_DESCRIPTION =
   "スポーツ少年団・中学部活・高校部活・ジュニアの試合を、保護者のスマホ1台でライブ配信。スコアボード常時表示・限定公開で安心。サッカー・野球・バスケ・バレー・陸上などあらゆるスポーツ対応。初月無料クーポン『SPOT』配布中。";
 
@@ -86,14 +95,16 @@ export const metadata: Metadata = {
   ],
   alternates: { canonical: "/" },
   openGraph: {
-    title: `${LP_TITLE} | LIVE SPOtCH`,
+    // LP_TITLE 自体に「LIVE SPOtCH（ライブスポッチ）」が入っているので
+    // ここでブランド名を足すと二重になる。
+    title: LP_TITLE,
     description: LP_DESCRIPTION,
     url: "/",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: `${LP_TITLE} | LIVE SPOtCH`,
+    title: LP_TITLE,
     description: LP_DESCRIPTION,
   },
 };
@@ -276,8 +287,9 @@ export default function LandingPage() {
                 どこにいても見届ける。
               </h1>
               <p className="mt-5 sm:mt-7 text-gray-300 text-sm sm:text-base max-w-lg leading-relaxed">
+                <strong className="text-white">LIVE SPOtCH（ライブスポッチ）</strong>は、
                 <strong className="text-white">スポーツ少年団・中学部活・高校部活・ジュニアスポーツ</strong>の試合を、
-                保護者のスマホ1台でライブ配信。
+                保護者のスマホ1台でライブ配信できるサービスです。
                 サッカー・野球・バスケ・バレー・陸上など、あらゆるローカル試合をテレビ中継品質でお届けします。
               </p>
               <p className="mt-2.5 text-gray-500 text-xs sm:text-sm max-w-lg leading-relaxed">
@@ -797,7 +809,7 @@ export default function LandingPage() {
       <footer className="border-t border-white/5 py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-6xl">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-400">
-            <p>© 2026 LIVE SPOtCH / LIN-NAH株式会社</p>
+            <p>© 2026 LIVE SPOtCH（ライブスポッチ）/ LIN-NAH株式会社</p>
             <div className="flex flex-wrap gap-4 sm:gap-6 justify-center">
               <a
                 href={APP_STORE_URL}

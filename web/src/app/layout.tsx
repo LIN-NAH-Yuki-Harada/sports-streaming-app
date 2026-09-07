@@ -39,8 +39,9 @@ const SITE_DESCRIPTION =
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "LIVE SPOtCH - 地域の試合をスマホで配信・視聴",
-    template: "%s | LIVE SPOtCH",
+    // ★カタカナ「ライブスポッチ」を含める（Google はカタカナ↔ローマ字を自動で結び付けない）
+    default: "LIVE SPOtCH（ライブスポッチ）- スコア付きで試合をスマホからライブ配信",
+    template: "%s | LIVE SPOtCH（ライブスポッチ）",
   },
   description: SITE_DESCRIPTION,
   applicationName: "LIVE SPOtCH",
@@ -59,7 +60,7 @@ export const metadata: Metadata = {
     "観戦",
   ],
   openGraph: {
-    title: "LIVE SPOtCH - 地域の試合をスマホで配信・視聴",
+    title: "LIVE SPOtCH（ライブスポッチ）- スコア付きで試合をスマホからライブ配信",
     description: SITE_DESCRIPTION,
     url: "/",
     siteName: "LIVE SPOtCH",
@@ -68,7 +69,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "LIVE SPOtCH - 地域の試合をスマホで配信・視聴",
+    title: "LIVE SPOtCH（ライブスポッチ）- スコア付きで試合をスマホからライブ配信",
     description: SITE_DESCRIPTION,
   },
   robots: {
