@@ -2,7 +2,8 @@
 
 import { usePathname } from "next/navigation";
 
-const TEXT_PATHS = ["/terms", "/privacy", "/tokusho", "/account-deletion", "/contact", "/reset-password"];
+// ★ /blog は読み物なので text（max-w-3xl）。1行が長すぎると記事は読みにくい。
+const TEXT_PATHS = ["/terms", "/privacy", "/tokusho", "/account-deletion", "/contact", "/reset-password", "/blog"];
 const WIDE_PREFIXES = ["/search", "/schedule"];
 
 type Variant = "full" | "wide" | "normal" | "text";
