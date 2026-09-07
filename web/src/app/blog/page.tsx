@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { BlogFooter } from "@/components/blog-footer";
 import { Logo } from "@/components/logo";
 import { getSortedPosts } from "@/lib/blog";
 
@@ -29,7 +30,13 @@ export default function BlogIndexPage() {
       </div>
 
       <div className="mx-auto max-w-3xl px-5 md:px-8 py-10 md:py-14 pb-20">
-        <h1 className="text-xl md:text-2xl font-bold">ブログ</h1>
+        <nav aria-label="パンくず" className="text-xs text-gray-500">
+          <Link href="/" className="hover:text-gray-300 transition-colors">
+            ホーム
+          </Link>
+        </nav>
+
+        <h1 className="mt-4 text-xl md:text-2xl font-bold">ブログ</h1>
         <p className="mt-3 text-sm text-gray-400 leading-relaxed">
           子どもの試合のライブ配信について、実際に運営して分かったことをまとめています。
         </p>
@@ -60,6 +67,8 @@ export default function BlogIndexPage() {
           ))}
         </div>
       </div>
+
+      <BlogFooter />
     </div>
   );
 }

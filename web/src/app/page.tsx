@@ -770,6 +770,7 @@ export default function LandingPage() {
               >
                 Androidアプリ（Google Play）
               </a>
+              <a href="/blog" className="hover:text-gray-400 transition">ブログ</a>
               <a href="/terms" className="hover:text-gray-400 transition">利用規約</a>
               <a href="/privacy" className="hover:text-gray-400 transition">プライバシーポリシー</a>
               <a href="/tokusho" className="hover:text-gray-400 transition">特定商取引法に基づく表示</a>
