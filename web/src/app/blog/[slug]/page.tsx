@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { BlogFooter } from "@/components/blog-footer";
 import { Logo } from "@/components/logo";
 import { POSTS, getPost } from "@/lib/blog";
 
@@ -63,12 +64,33 @@ export default async function BlogPostPage({ params }: Props) {
     },
   };
 
+  // パンくず。検索結果にも階層が表示されるようになる。
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "ホーム", item: SITE_URL },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "ブログ",
+        item: `${SITE_URL}/blog`,
+      },
+      { "@type": "ListItem", position: 3, name: post.title },
+    ],
+  };
+
   return (
     <div>
       <script
         type="application/ld+json"
         // biome-ignore lint/security/noDangerouslySetInnerHtml: JSON-LD は静的データのみ
         dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: JSON-LD は静的データのみ
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
 
       <div
@@ -79,12 +101,16 @@ export default async function BlogPostPage({ params }: Props) {
       </div>
 
       <article className="mx-auto max-w-3xl px-5 md:px-8 py-10 md:py-14 pb-20">
-        <Link
-          href="/blog"
-          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-        >
-          ← ブログ一覧
-        </Link>
+        {/* パンくず。検索から直接来た人に「いまどこにいるか」を示す */}
+        <nav aria-label="パンくず" className="text-xs text-gray-500">
+          <Link href="/" className="hover:text-gray-300 transition-colors">
+            ホーム
+          </Link>
+          <span className="mx-1.5">›</span>
+          <Link href="/blog" className="hover:text-gray-300 transition-colors">
+            ブログ
+          </Link>
+        </nav>
 
         <h1 className="mt-4 text-xl md:text-2xl font-bold leading-snug">
           {post.title}
@@ -95,6 +121,16 @@ export default async function BlogPostPage({ params }: Props) {
         >
           {formatDate(post.publishedAt)}
         </time>
+
+        {/* ★検索から来た初見の人に「誰が書いたか」を最初に伝える。
+            実際に運営している当事者が書いていることが、この記事の一番の強み。 */}
+        <p className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-[13px] text-gray-400 leading-relaxed">
+          この記事は、地域スポーツのライブ配信サービス「
+          <Link href="/" className="text-gray-200 hover:text-white underline underline-offset-2">
+            LIVE SPOtCH
+          </Link>
+          」を運営する LIN-NAH株式会社が書いています。
+        </p>
 
         <div className="mt-8 space-y-4 text-sm md:text-[15px] text-gray-300 leading-relaxed">
           {post.lead.map((p) => (
@@ -178,7 +214,18 @@ export default async function BlogPostPage({ params }: Props) {
             LIVE SPOtCH を見る
           </Link>
         </aside>
+
+        <p className="mt-10 text-xs">
+          <Link
+            href="/blog"
+            className="text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            ← ブログ一覧へ戻る
+          </Link>
+        </p>
       </article>
+
+      <BlogFooter />
     </div>
   );
 }

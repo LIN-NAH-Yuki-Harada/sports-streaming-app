@@ -9,7 +9,10 @@ export function BottomNav() {
   // LP（ルート）・法的ページ・視聴ページ・配信中・Egress合成テンプレートでは非表示。
   // /egress-template は LiveKit Cloud の Chrome が録画/RTMP push する合成専用ページなので、
   // ナビが写り込むと YouTube 映像に出てしまう（発熱対策 Phase 1-D）。
-  const hiddenPaths = ["/terms", "/privacy", "/tokusho", "/account-deletion", "/contact", "/watch", "/egress-template"];
+  // ★ /blog を追加(2026-09-07): ブログ記事に来るのは**検索から来た未ログインの初見**が
+  //   大半で、チーム/配信/履歴/マイページは全部ログインが要る＝意味が分からず離脱要因になる。
+  //   代わりに BlogFooter で「ここは何か」「次にどこへ行けるか」を示す。
+  const hiddenPaths = ["/terms", "/privacy", "/tokusho", "/account-deletion", "/contact", "/watch", "/egress-template", "/blog"];
   if (pathname === "/" || hiddenPaths.some((path) => pathname.startsWith(path))) return null;
 
   const tabs = [
