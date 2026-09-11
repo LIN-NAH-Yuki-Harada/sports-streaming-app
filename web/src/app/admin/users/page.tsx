@@ -7,6 +7,7 @@ type Row = {
   display_name: string | null;
   plan: string | null;
   subscription_status: string | null;
+  current_period_end: string | null;
   trial_used: boolean | null;
   youtube_channel_name: string | null;
   youtube_live_enabled: boolean | null;
@@ -37,12 +38,30 @@ function isPaying(r: Row): boolean {
   return r.subscription_status === "active";
 }
 
+/**
+ * クーポン（SPOT 等）の無料期間中。まだ売上は無いが、手動付与とは別物で
+ * **カード登録済み・期限日に自動で課金が始まる**人。手動付与に混ぜると
+ * 「オーナーが付けた無料の人」と読み違えるので、別バッジで期限日を出す。
+ */
+function isTrialing(r: Row): boolean {
+  return r.subscription_status === "trialing";
+}
+
+function formatJstDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
+  });
+}
+
 export default async function AdminUsers() {
   const admin = getAdminClient();
   const { data } = await admin
     .from("profiles")
     .select(
-      "id, display_name, plan, subscription_status, trial_used, youtube_channel_name, youtube_live_enabled, is_platform_admin, created_at",
+      "id, display_name, plan, subscription_status, current_period_end, trial_used, youtube_channel_name, youtube_live_enabled, is_platform_admin, created_at",
     )
     .order("created_at", { ascending: false, nullsFirst: false })
     .limit(1000);
@@ -52,8 +71,10 @@ export default async function AdminUsers() {
   for (const r of rows) grouped[planOf(r.plan)].push(r);
 
   const paidTotal = grouped.team.length + grouped.broadcaster.length;
-  const payingTotal = [...grouped.team, ...grouped.broadcaster].filter(isPaying).length;
-  const grantedTotal = paidTotal - payingTotal;
+  const paidRows = [...grouped.team, ...grouped.broadcaster];
+  const payingTotal = paidRows.filter(isPaying).length;
+  const trialingTotal = paidRows.filter(isTrialing).length;
+  const grantedTotal = paidTotal - payingTotal - trialingTotal;
 
   return (
     <div className="space-y-6">
@@ -62,6 +83,12 @@ export default async function AdminUsers() {
         <p className="mt-1 text-xs text-gray-400">
           全 {rows.length}名 ／ 有料プラン {paidTotal}名（
           <span className="text-emerald-300">課金中 {payingTotal}</span>
+          {trialingTotal > 0 ? (
+            <>
+              {" "}
+              ・<span className="text-sky-300">無料体験中 {trialingTotal}</span>
+            </>
+          ) : null}
           {grantedTotal > 0 ? (
             <>
               {" "}
@@ -75,7 +102,8 @@ export default async function AdminUsers() {
       {GROUPS.map((g) => {
         const list = grouped[g.key];
         const paying = list.filter(isPaying).length;
-        const granted = g.key === "free" ? 0 : list.length - paying;
+        const trialing = list.filter(isTrialing).length;
+        const granted = g.key === "free" ? 0 : list.length - paying - trialing;
         return (
           <section key={g.key}>
             <div className="mb-2 flex items-baseline gap-2 border-b border-white/10 pb-1.5">
@@ -83,6 +111,9 @@ export default async function AdminUsers() {
               <span className="text-[11px] text-gray-500">{g.price}</span>
               <span className="ml-auto text-xs tabular-nums text-gray-400">
                 {list.length}名
+                {trialing > 0 ? (
+                  <span className="ml-2 text-sky-300">（うち無料体験中 {trialing}）</span>
+                ) : null}
                 {granted > 0 ? (
                   <span className="ml-2 text-amber-400">（うち手動付与 {granted}）</span>
                 ) : null}
@@ -104,12 +135,19 @@ export default async function AdminUsers() {
                       )}
                     </span>
 
-                    {/* ★有料プランのときだけ「課金中／手動付与」を出す。
+                    {/* ★有料プランのときだけ「課金中／無料体験中／手動付与」を出す。
                         無料には課金の概念が無いので出さない（意味のないバッジを増やさない）。 */}
                     {g.key !== "free" ? (
                       isPaying(r) ? (
                         <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-300">
                           課金中
+                        </span>
+                      ) : isTrialing(r) ? (
+                        <span
+                          className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] text-sky-300"
+                          title="クーポン等の無料期間中です。期限日に自動で課金が始まります（解約しなければ）"
+                        >
+                          無料体験中 〜{formatJstDate(r.current_period_end)}
                         </span>
                       ) : (
                         <span

@@ -69,9 +69,14 @@ export default async function PlPage() {
   type Cell = { count: number; gross: number };
   const matrix = new Map<string, Cell>();
   let grantedCount = 0; // 手動付与（課金なし）
+  let trialingCount = 0; // クーポン等の無料期間中（期限日に自動課金が始まる）
 
   for (const r of rows) {
     const plan = r.plan as PaidPlan;
+    if (r.subscription_status === "trialing") {
+      trialingCount += 1;
+      continue;
+    }
     if (r.subscription_status !== "active") {
       grantedCount += 1;
       continue;
@@ -247,6 +252,12 @@ export default async function PlPage() {
           </table>
         </div>
 
+        {trialingCount > 0 ? (
+          <p className="mt-2 text-xs text-sky-300">
+            ほかに、無料体験中（クーポン等）の会員が {trialingCount}名 います。
+            今月の売上には数えていませんが、解約しなければ期限日から課金が始まります。
+          </p>
+        ) : null}
         {grantedCount > 0 ? (
           <p className="mt-2 text-xs text-amber-400">
             ほかに、有料プランが付いているが課金されていない会員が {grantedCount}名 います
