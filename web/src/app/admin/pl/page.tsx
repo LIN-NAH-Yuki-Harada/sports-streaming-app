@@ -335,7 +335,7 @@ export default async function PlPage() {
             ) : null}
           </li>
           <li>
-            ・従量課金（LiveKit の超過分、Stripe の決済ごとの固定費など）は含めていません。
+            ・従量課金（LiveKit の超過分、CloudFront の無料枠を超えた分、Stripe の決済ごとの固定費など）は含めていません。
             会員数が増えると実際のコストはこの表より増えます。
           </li>
           <li>
