@@ -52,6 +52,7 @@ export type CostItem = {
 /**
  * 月次の固定費。
  * ★出典: `.company/secretary/notes/running-costs.md`（2026-07-13 棚卸し）＋その後の確認。
+ *   2026-09-14: 実際の請求書・請求画面で EAS / Supabase / CloudFront を確定。
  */
 export const MONTHLY_COSTS: CostItem[] = [
   {
@@ -65,10 +66,12 @@ export const MONTHLY_COSTS: CostItem[] = [
   {
     name: "EAS (Expo) Starter",
     purpose: "iOS / Android のアプリビルド",
-    monthlyJpy: 45 * USD_JPY,
-    raw: "$45/月",
+    monthlyJpy: 19 * USD_JPY,
+    raw: "$19/月",
     confirmed: true,
-    note: "毎月11日にクレジットがリセット。超過分は追加課金",
+    note:
+      "2026-09-14 受領書 #2512-1710 で確定（従来 $45 と記載していたのは誤り）。" +
+      "毎月11日にリセットされるビルド枠 $19 込み。超過分は追加課金",
   },
   {
     name: "Vercel Pro",
@@ -95,12 +98,22 @@ export const MONTHLY_COSTS: CostItem[] = [
     note: "更新日 2027-06-25。これが切れると App Store からアプリが消える",
   },
   {
-    name: "Supabase",
+    name: "Supabase Pro",
     purpose: "データベース・認証・ストレージ",
     monthlyJpy: 25 * USD_JPY,
-    raw: "$25/月（Pro と仮定）",
-    confirmed: false,
-    note: "★Pro か無料枠か未確認。無料枠なら ¥0",
+    raw: "$25/月",
+    confirmed: true,
+    note: "2026-09-13 ダッシュボードで Pro を確認。Compute は Nano（RAM 使用率 55%・伸びたら Micro を検討）",
+  },
+  {
+    name: "AWS CloudFront",
+    purpose: "視聴用の配信網（CDN）。配信サーバーの回線上限を超えないための前段",
+    monthlyJpy: 0,
+    raw: "$0（無料枠内）",
+    confirmed: true,
+    note:
+      "2026-09-14 請求画面で 8月・9月とも $0.00 を確認。恒久無料枠（月1TB・1,000万リクエスト）を超えると従量課金。" +
+      "先に超えるのはリクエスト数の見込み。予算アラート $100 設定済み",
   },
   {
     name: "独自ドメイン live-spotch.com",
