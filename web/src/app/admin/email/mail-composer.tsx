@@ -36,6 +36,9 @@ export function MailComposer() {
   const [body, setBody] = useState("");
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const [testedTo, setTestedTo] = useState<string | null>(null);
+  // 日を分けて送るための設定（Resend 無料プランは1日100通まで）
+  const [onlyUnsent, setOnlyUnsent] = useState(true);
+  const [limit, setLimit] = useState(80);
   const [busy, setBusy] = useState<"" | "test" | "send">("");
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -85,11 +88,17 @@ export function MailComposer() {
     }
   }
 
+  // 実際に送る人数の見込み（上限で頭打ちになる）。未送信のみの場合、残数はサーバーが数える。
+  const planned = Math.min(count, limit);
+
   async function sendReal() {
     if (!campaignId) return;
+    const note = onlyUnsent
+      ? "すでに届いた人は除きます。"
+      : "対象全員に送ります（届いた人にも再度届きます）。";
     if (
       !window.confirm(
-        `本当に ${count} 名へ送信します。\n\n件名: ${subject}\n\nこの操作は取り消せません。`,
+        `最大 ${planned} 名へ送信します。\n${note}\n\n件名: ${subject}\n\nこの操作は取り消せません。`,
       )
     )
       return;
@@ -106,21 +115,28 @@ export function MailComposer() {
           audience,
           campaignId,
           expectedCount: count,
+          onlyUnsent,
+          limit,
         }),
       });
       const json = (await res.json()) as {
         ok?: boolean;
         sent?: number;
         failed?: number;
+        remainingAfter?: number;
         error?: string;
       };
       if (!res.ok || !json.ok) {
         setMsg({ kind: "err", text: json.error ?? "送信に失敗しました" });
         return;
       }
+      const rest =
+        typeof json.remainingAfter === "number" && json.remainingAfter > 0
+          ? `\n未送信があと ${json.remainingAfter} 名います。明日、同じ件名・同じ本文でもう一度送ってください。`
+          : "\n未送信はありません。全員に届きました。";
       setMsg({
         kind: "ok",
-        text: `送信しました。成功 ${json.sent} 件 / 失敗 ${json.failed} 件`,
+        text: `送信しました。成功 ${json.sent} 件 / 失敗 ${json.failed} 件${rest}`,
       });
       invalidate();
     } finally {
@@ -186,6 +202,45 @@ export function MailComposer() {
         </div>
       </div>
 
+      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-2">
+        <label className="flex items-start gap-2 text-xs text-gray-300">
+          <input
+            id="only-unsent"
+            type="checkbox"
+            checked={onlyUnsent}
+            onChange={(e) => {
+              setOnlyUnsent(e.target.checked);
+              invalidate();
+            }}
+            className="mt-0.5"
+          />
+          <span>
+            同じ件名で<strong className="text-white">まだ届いていない人だけ</strong>に送る
+            <span className="block text-[11px] text-gray-500 mt-0.5">
+              日を分けて送るための設定です。すでに届いた人には二度送りません。
+            </span>
+          </span>
+        </label>
+        <div className="flex items-center gap-2 text-xs text-gray-300">
+          <label htmlFor="send-limit">今回送る上限</label>
+          <input
+            id="send-limit"
+            type="number"
+            min={1}
+            max={100}
+            value={limit}
+            onChange={(e) => {
+              setLimit(Number(e.target.value) || 1);
+              invalidate();
+            }}
+            className="w-20 h-8 rounded-md bg-white/[0.06] border border-white/10 px-2 text-sm tabular-nums outline-none focus:border-white/30"
+          />
+          <span className="text-[11px] text-gray-500">
+            通（メール送信の上限は1日100通。障害アラート用に20通ほど空けています）
+          </span>
+        </div>
+      </div>
+
       <div>
         <label className="block text-[11px] text-gray-400 mb-1.5">件名</label>
         <input
@@ -241,7 +296,11 @@ export function MailComposer() {
           disabled={!campaignId || busy !== ""}
           className="h-10 px-4 rounded-md bg-[#e63946] hover:bg-[#d62836] disabled:opacity-30 disabled:cursor-not-allowed text-sm font-bold transition"
         >
-          {busy === "send" ? "送信中…" : `② ${count}名へ本送信`}
+          {busy === "send"
+            ? "送信中…"
+            : onlyUnsent
+              ? `② 未送信の方へ本送信（最大${planned}名）`
+              : `② ${planned}名へ本送信`}
         </button>
       </div>
 
