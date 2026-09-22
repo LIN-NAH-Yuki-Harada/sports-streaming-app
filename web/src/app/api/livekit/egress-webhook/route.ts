@@ -1,6 +1,7 @@
 import { WebhookReceiver } from "livekit-server-sdk";
 import { EgressStatus } from "@livekit/protocol";
 import { getAdminClient } from "@/lib/supabase-admin";
+import { markSelfHostArchiveOnEnd } from "@/lib/self-host-archive";
 
 // livekit-server-sdk の crypto 系が Edge runtime で動かないため Node.js 強制
 export const runtime = "nodejs";
@@ -191,7 +192,7 @@ async function handleLiveEgressEnded(
   const { data: liveBroadcast } = await admin
     .from("broadcasts")
     .select(
-      "id, live_status, live_youtube_broadcast_id, youtube_video_id",
+      "id, share_code, stream_playback_url, live_status, live_youtube_broadcast_id, youtube_video_id",
     )
     .eq("live_egress_id", info.egressId)
     .single();
@@ -199,6 +200,14 @@ async function handleLiveEgressEnded(
   if (!liveBroadcast) {
     return { handled: false, body: {} };
   }
+
+  // ★CAS ガードの **外側**で印を付ける（2026-09-23）。
+  //   下の UPDATE は `live_status` が既に ended/failed なら 0 行で素通りする設計
+  //   （live/stop と二重に書かないため）。しかしアーカイブの印付けをその中に置くと、
+  //   live/stop が先勝ちしたときに**印が付かず録画が孤児になる**。
+  //   印付け自体が `stream_playback_url IS NULL` の冪等 UPDATE なので、
+  //   両方から呼んでも二重にはならない。
+  const archiveMarked = await markSelfHostArchiveOnEnd(admin, liveBroadcast);
 
   const isComplete = info.status === EgressStatus.EGRESS_COMPLETE;
   const newLiveStatus = isComplete ? "ended" : "failed";
@@ -247,7 +256,7 @@ async function handleLiveEgressEnded(
     );
     return {
       handled: true,
-      body: { received: true, kept: liveBroadcast.live_status },
+      body: { received: true, kept: liveBroadcast.live_status, archiveMarked },
     };
   }
 
