@@ -133,6 +133,13 @@ type YoutubeSaveOutcome =
   | "started"
   /** 起動できなかった（未連携 / 保存スイッチOFF / YouTube側でライブ配信が未有効 等） */
   | "failed"
+  /**
+   * YouTube のライブには出せなかったが、自前サーバーに**録画できている**。
+   * 配信終了後に archive-worker が YouTube へアップロードする（2026-09-23〜）。
+   * ★"started" と混ぜないこと。この時点で YouTube 上にはまだ動画が無いため、
+   *   「YouTube Studio から削除してください」を出すと存在しない動画を指すことになる。
+   */
+  | "archiving"
   /** 起動を試みたが結果を確認できなかった（通信断など）。断定しない文言を使う */
   | "unknown"
   /** 今回は YouTube に流さない選択をした（配信前のチェックを外した） */
@@ -995,17 +1002,31 @@ function BroadcastPageInner() {
           if (useLivePipeline) {
             const data = res.ok
               ? ((await res.json().catch(() => null)) as
-                  | { liveBroadcastId?: string; reused?: string; skipped?: string }
+                  | {
+                      liveBroadcastId?: string;
+                      reused?: string;
+                      skipped?: string;
+                      youtubeLive?: boolean;
+                      selfHostArchive?: boolean;
+                    }
                   | null)
               : null;
-            // ★終了モーダルの根拠。live/start は YouTube Live broadcast の作成 →
-            //   bind → Egress 起動まで **全部成功したときだけ** liveBroadcastId を返す
-            //   （再接続で 2 回叩いた場合の冪等 reuse は reused を返す＝既に起動済み）。
-            //   失敗（"The user is not enabled for live streaming." 等）は 5xx、
-            //   未連携 / 保存スイッチOFF は 200 + skipped で返るため、どちらも
-            //   liveBroadcastId も reused も無い＝「YouTube には残らない」と確定できる。
-            youtubeSaveOutcomeRef.current =
-              data?.liveBroadcastId || data?.reused ? "started" : "failed";
+            // ★終了モーダルの根拠（2026-09-23 改訂）。
+            //   live/start は YouTube を best-effort に降格し、**自前サーバーへの
+            //   録画は YouTube の成否と無関係に**行うようになった。そのため
+            //   「YouTube に出たか」と「映像が残るか」は別の話になった:
+            //     youtubeLive=true     … YouTube でライブ中（終了後に自動アーカイブ）
+            //     selfHostArchive=true … 自前サーバーに録画中（終了後に worker が上げる）
+            //   ここを一緒くたにすると、**実際には保存されるのに「保存されません」と
+            //   表示してしまう**（旧実装はまさにそうなる）。
+            //   reused は再接続で二度叩いた場合の冪等応答＝既に起動済み。
+            youtubeSaveOutcomeRef.current = data?.youtubeLive
+              ? "started"
+              : data?.selfHostArchive
+                ? "archiving"
+                : data?.liveBroadcastId || data?.reused
+                  ? "started"
+                  : "failed";
             if (data?.liveBroadcastId) {
               setLiveYoutubeBroadcastId(data.liveBroadcastId);
               // YouTube Live は RTMP 接続 → ingest → CDN 配信開始まで 15-30 秒
@@ -2648,6 +2669,39 @@ function BroadcastPageInner() {
                     className="text-[#e63946] hover:underline"
                   >
                     → YouTube Studio を開く
+                  </a>
+                </p>
+              </div>
+            )}
+
+            {/* C-1a2: YouTube のライブには出せなかったが、自前サーバーに録画できている。
+                ★"started" と分ける理由: この時点で YouTube 上にまだ動画が無いため、
+                　「YouTube Studio から削除」を出すと存在しないものを指してしまう。
+                　また worker の順番待ちがあるので所要時間の案内も別（混雑日は数時間）。 */}
+            {endedSummary.youtubeSave === "archiving" && endedSummary.teamPlan && (
+              <div className="mt-4 bg-[#e63946]/5 ring-1 ring-[#e63946]/20 rounded-lg p-3">
+                <p className="text-[11px] font-semibold text-white leading-relaxed">
+                  📹 録画しました。YouTubeへの保存を準備しています
+                </p>
+                <p className="mt-1.5 text-[11px] text-gray-300 leading-relaxed">
+                  この試合は録画できています。これからYouTubeへアップロードします。試合が重なる日は数時間お待ちいただくことがあります。結果はマイページの配信履歴でご確認ください。
+                </p>
+                <p className="mt-2 text-[11px]">
+                  <Link href="/mypage" className="text-[#e63946] hover:underline">
+                    → マイページの配信履歴を見る
+                  </Link>
+                </p>
+                <p className="mt-2 text-[11px] text-gray-500 leading-relaxed">
+                  YouTubeで「ライブ配信」として同時に流すには、YouTube側で電話番号の確認とライブ配信の有効化が必要です。
+                </p>
+                <p className="mt-1 text-[11px]">
+                  <a
+                    href="https://www.youtube.com/verify"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#e63946] hover:underline"
+                  >
+                    → YouTubeで電話番号を確認する
                   </a>
                 </p>
               </div>
