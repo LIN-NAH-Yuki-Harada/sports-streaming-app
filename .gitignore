@@ -27,3 +27,6 @@ image(screenshot）/
 # 調査用に吐いたデータダンプ。**本番の配信データを含む**ため入れない。
 web/all2.json
 web/wall.json
+
+# 本番の認証情報。ルートで vercel CLI を叩くと .env.local が生まれるため必ず無視する。
+.env*
