@@ -136,8 +136,23 @@ function buildScoreboardSvg(data, opts = {}) {
   if (extra) seg.push(`<rect x="${x + wHome + wScore + wAway + wPeriod}" y="${y0}" width="${wExtra}" height="${h}" fill="#000000" fill-opacity="0.55"/>`);
   parts.push(`<g clip-path="url(#${clipId})">${seg.join("")}</g>`);
 
-  const T = (tx, anchor, txt, fill, weight, size) =>
-    `<text x="${tx}" y="${midY}" font-family="Noto Sans CJK JP, sans-serif" font-size="${size || fs}" font-weight="${weight || 700}" fill="${fill}" text-anchor="${anchor}" dominant-baseline="central">${esc(txt)}</text>`;
+  // ★ベースラインを自分で計算する（2026-09-23）
+  //
+  //   以前は y=枠の中心 ＋ dominant-baseline="central" に任せていたが、
+  //   **librsvg(rsvg-convert) はこの属性を正しく扱わない**。無視されると
+  //   y が「文字の中心」ではなく「ベースライン（文字の足元）」として解釈され、
+  //   文字全体が上に持ち上がる。実際の本番アーカイブで
+  //   **上の余白5px / 下の余白20px** という偏りが出ていた。
+  //
+  //   0.38em は実測で決めた値。枠(52px)の中の文字の上下余白をピクセルで測り、
+  //   0.35→11/13px、0.365→11/13px、**0.38→12/12px(偏りゼロ)**、0.40→12/11px。
+  //   日本語・英字・濁点つきの複数パターンで同じ結果を確認している。
+  //   フォントサイズごとに計算するので、小さい文字(セット数)も同じ基準で揃う。
+  const baselineOf = (size) => midY + size * 0.38;
+  const T = (tx, anchor, txt, fill, weight, size) => {
+    const sz = size || fs;
+    return `<text x="${tx}" y="${baselineOf(sz)}" font-family="Noto Sans CJK JP, sans-serif" font-size="${sz}" font-weight="${weight || 700}" fill="${fill}" text-anchor="${anchor}">${esc(txt)}</text>`;
+  };
 
   // ★チーム名とセット数は「ひとまとまり」として枠の中央に置く（2026-09-23）
   //
