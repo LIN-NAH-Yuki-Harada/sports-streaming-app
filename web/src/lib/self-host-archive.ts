@@ -32,13 +32,41 @@ import { buildSelfHostPlaybackUrl } from "@/lib/livekit-rtmp-egress";
  *   終了時に書けば 1 だけを満たし、2 は `isLive` 条件付きなので参照されず、
  *   3 は status='live' が条件なので永久に一致しない。
  *
- * @returns 実際に印を付けたら true（既に付いていた・env 不足なら false）
+ * ★🔴 YouTube Live が成立した配信には印を付けない（これが無いと同じ試合が2本上がる）
+ *
+ *   YouTube Live で配信できた場合、YouTube 側が**自分でアーカイブ動画を作る**
+ *   （broadcast.id がそのまま動画IDになる）。そこへワーカーが VPS の録画も
+ *   アップロードすると、**同じ試合の動画がチャンネルに2本並ぶ**。
+ *   自前サーバーへの録画は、あくまで
+ *   **「YouTube Live に出せなかったときの保険」**として持つ。
+ *
+ *   判定に使うのは `live_youtube_broadcast_id`（live/start が起動時に書く）。
+ *   `youtube_video_id` は egress-webhook が**この関数より後**に書くので、
+ *   ここで見るとまだ null のことがあり、判定に使えない。
+ *
+ *   ※将来: YouTube Live のアーカイブが「15分ルール」等で消えた場合に限り、
+ *     VPS の録画を後から上げる、という救済は検討の余地がある。
+ *     ただし録画の保持は48時間なので、それまでに検知する仕組みが要る。
+ *
+ * @returns 実際に印を付けたら true（既に付いていた・YouTube Live 成立・env 不足なら false）
  */
 export async function markSelfHostArchiveOnEnd(
   admin: ReturnType<typeof getAdminClient>,
-  broadcast: { id: string; share_code: string; stream_playback_url: string | null },
+  broadcast: {
+    id: string;
+    share_code: string;
+    stream_playback_url: string | null;
+    live_youtube_broadcast_id: string | null;
+  },
 ): Promise<boolean> {
   if (broadcast.stream_playback_url) return false;
+  // ★YouTube Live が成立している＝YouTube 側にアーカイブができる。二重に上げない。
+  if (broadcast.live_youtube_broadcast_id) {
+    console.info(
+      `[self-host-archive] YouTube Live 済みのため印を付けない: ${broadcast.share_code}`,
+    );
+    return false;
+  }
   const playbackUrl = buildSelfHostPlaybackUrl(broadcast.share_code);
   if (!playbackUrl) return false;
 

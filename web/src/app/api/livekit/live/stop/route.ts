@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   const { data: broadcast, error: bErr } = await admin
     .from("broadcasts")
     .select(
-      "id, share_code, broadcaster_id, live_egress_id, live_status, stream_playback_url",
+      "id, share_code, broadcaster_id, live_egress_id, live_status, stream_playback_url, live_youtube_broadcast_id",
     )
     .eq("id", broadcastId)
     .single();
