@@ -51,6 +51,31 @@ export function getReplyTo(): string | undefined {
 export type Recipient = { id: string; email: string; name: string | null };
 
 /**
+ * 同じ件名で**すでに届いた**メールアドレスを集める（小文字で返す）。
+ *
+ * ★なぜ必要か: Resend の無料プランは **1日100通**が上限で、273名には1日で送れない。
+ *   日を分けて送るとき、届いた人へ二重に送らないための除外リストになる。
+ *   失敗した人（ok=false）は**含めない**ので、次回の対象に残る。
+ */
+export async function getDeliveredEmails(subject: string): Promise<Set<string>> {
+  const admin = getAdminClient();
+  const { data } = await admin
+    .from("email_campaigns")
+    .select("results")
+    .eq("subject", subject)
+    .not("sent_at", "is", null)
+    .limit(50);
+  const out = new Set<string>();
+  for (const row of (data ?? []) as { results: unknown }[]) {
+    const list = Array.isArray(row.results) ? row.results : [];
+    for (const r of list as { email?: string; ok?: boolean }[]) {
+      if (r?.ok && typeof r.email === "string") out.add(r.email.trim().toLowerCase());
+    }
+  }
+  return out;
+}
+
+/**
  * 送信対象を解決する。
  *
  * ★重要: 宛先は**必ずサーバー側で組み立てる**。画面から渡されたリストを信用しない

@@ -2,6 +2,7 @@ import { requireAdmin } from "@/lib/admin-auth";
 import { getAdminClient } from "@/lib/supabase-admin";
 import {
   AUDIENCE_LABEL,
+  getDeliveredEmails,
   getFromAddress,
   getReplyTo,
   isAudience,
@@ -33,7 +34,21 @@ type PostBody = {
   audience?: string;
   campaignId?: string;
   expectedCount?: number;
+  /** 同じ件名ですでに届いた人を除く（日を分けて送るため） */
+  onlyUnsent?: boolean;
+  /** 1回の送信上限。Resend 無料プランの1日100通を超えないための安全弁 */
+  limit?: number;
 };
+
+/**
+ * 1回の送信上限の既定値。
+ *
+ * ★80 の根拠: Resend 無料プランは **1日100通**。障害アラート（平均7.7通/日・多い日21通）と
+ *   毎朝の稼働レポート1通が同じ枠を使うため、20通ぶんを監視用に空けておく。
+ *   これを超えると監視メールが止まり、保存失敗などを見逃す（2026-09-20 に実際に73名が未達）。
+ */
+const DEFAULT_SEND_LIMIT = 80;
+const MAX_SEND_LIMIT = 100;
 
 /** 送信対象の人数（画面の表示用）。 */
 export async function GET(request: Request) {
@@ -178,12 +193,37 @@ export async function POST(request: Request) {
     );
   }
 
-  const recipients = await resolveRecipients(audience);
+  const all = await resolveRecipients(audience);
+
+  // ── 日を分けて送るための絞り込み ────────────────────────────────
+  // ★Resend 無料プランは1日100通。273名は1日で送れないため、
+  //   「同じ件名ですでに届いた人」を除いて、残りを少しずつ送る。
+  const delivered = body.onlyUnsent
+    ? await getDeliveredEmails(subject)
+    : new Set<string>();
+  const remaining = all.filter(
+    (r) => !delivered.has(r.email.trim().toLowerCase()),
+  );
+  const limit = Math.min(
+    MAX_SEND_LIMIT,
+    Math.max(1, Math.floor(body.limit ?? DEFAULT_SEND_LIMIT)),
+  );
+  const recipients = remaining.slice(0, limit);
+
   if (recipients.length === 0) {
-    return Response.json({ error: "宛先が0件です" }, { status: 400 });
+    return Response.json(
+      {
+        error: body.onlyUnsent
+          ? "未送信の宛先がありません（全員に届いています）"
+          : "宛先が0件です",
+      },
+      { status: 400 },
+    );
   }
   // 画面が表示していた人数と食い違う＝画面が古い。送らずに中止する。
+  // ★分割送信のときは毎回変わるので、この照合は行わない（上限で守る）。
   if (
+    !body.onlyUnsent &&
     typeof body.expectedCount === "number" &&
     body.expectedCount !== recipients.length
   ) {
@@ -231,6 +271,8 @@ export async function POST(request: Request) {
     recipientCount: recipients.length,
     sent,
     failed,
+    // 分割送信のとき、あと何名残っているか（画面に出して次回の判断に使う）
+    remainingAfter: Math.max(0, remaining.length - recipients.length + failed),
     failures: results.filter((r) => !r.ok).slice(0, 20),
   });
 }
