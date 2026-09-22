@@ -99,6 +99,11 @@ const CANON = new Set();
 // 見送り、MediaMTX の HLS 分割・視聴 egress・上り帯域・ディスクIO をライブに明け渡す。
 // 【rollout】未実測事項(ライブ中に stream_playback_url が set 済みか)が残るため既定 OFF。
 // VPS の .env で明示 "1" にして数日観測してから本採用する（＝opt-in / 攻めすぎ回避）。
+// アーカイブ変換を行うか。0 にすると ghost sweep / metrics / watchdog だけ実行する。
+// 配信サーバー(1台目)を「配信専任」にするためのスイッチ（詳細は main 内のコメント）。
+const ARCHIVE_PROCESSING_ENABLED =
+  process.env.ARCHIVE_PROCESSING_ENABLED !== "0";
+
 const LIVE_BACKOFF_ENABLED = process.env.LIVE_BACKOFF_ENABLED === "1";
 // starvation 回避の猶予。ended_at からこの時間以上待たされたら、ライブ並走でも強制処理する
 // (遅延の絶対上限を保証する安全弁)。既定 45分。
@@ -2068,6 +2073,26 @@ async function main() {
     } catch (e) {
       log("watchdog failed (ignored):", String(e).slice(0, 120));
     }
+  }
+
+  // ★アーカイブ変換だけを止めるスイッチ（2026-09-23）
+  //
+  //   配信サーバー(1台目)は「配信を受けること」に専念させたい。変換はCPUを食い、
+  //   **一度始まると途中で止まらない**（ライブ並走バックオフは開始前に1回
+  //   判定するだけ）。そのため「空いた隙に始めた30分の変換が、直後に始まった
+  //   配信と30分間ぶつかる」という事故が起きる。9/20の load 220% はこれ。
+  //
+  //   かといってタイマーごと止めると、この関数が持つ**他の仕事まで死ぬ**:
+  //     ghost sweep … MediaMTX の実体を見て死んだ配信を終わらせる（1台目でしかできない）
+  //     metrics     … 配信サーバーの負荷記録（1台目の数字でないと意味がない）
+  //     watchdog    … Vercel が止まったとき鳴らせる唯一の経路
+  //   なので「変換だけ」を切れるようにする。
+  //
+  //   ARCHIVE_PROCESSING_ENABLED=0 … 上記の保守処理だけ行い、変換はしない
+  //   未設定/0以外                 … 従来どおり変換する
+  if (!ARCHIVE_PROCESSING_ENABLED) {
+    log("archive processing disabled (maintenance tasks only)");
+    return;
   }
 
   // 1. 対象 = 終了した自前配信(stream_playback_url 有)で未処理(null/pending)・retry 未超過
