@@ -53,6 +53,7 @@ export type CostItem = {
  * 月次の固定費。
  * ★出典: `.company/secretary/notes/running-costs.md`（2026-07-13 棚卸し）＋その後の確認。
  *   2026-09-14: 実際の請求書・請求画面で EAS / Supabase / CloudFront を確定。
+ *   2026-09-27: 1台目 VPS を実額 ¥1,980 に訂正し、2台目（アーカイブ専用）を追加。
  */
 export const MONTHLY_COSTS: CostItem[] = [
   {
@@ -82,12 +83,24 @@ export const MONTHLY_COSTS: CostItem[] = [
     note: "無料プランは cron が1日1回に制限されるため戻せない",
   },
   {
-    name: "Xserver VPS (2GB)",
-    purpose: "配信サーバー（MediaMTX）とアーカイブ変換ワーカー",
-    monthlyJpy: 1496,
-    raw: "¥1,496/月（1ヶ月契約）",
+    name: "Xserver VPS (2GB) ＝1台目",
+    purpose: "配信サーバー（MediaMTX の受信・録画・HLS 配信）。2026-09-23 から変換はしない",
+    monthlyJpy: 1980,
+    raw: "¥1,980/月（1ヶ月契約）",
     confirmed: true,
-    note: "36ヶ月契約なら ¥990。2026-09-01 に全プラン値上げ",
+    note:
+      "2026-09-22 請求書「VPS契約更新／(VPS 2GB)」で確定（従来 ¥1,496 は 9/01 値上げ前の額）。" +
+      "2GB プランは新規受付停止中＝同じプランは追加できない",
+  },
+  {
+    name: "Xserver VPS クラウド (4GB) ＝2台目",
+    purpose: "アーカイブ専用サーバー（録画の変換・スコア焼き込み・YouTube アップロード）",
+    monthlyJpy: 729,
+    raw: "¥3,136（2026/9/22〜2027/1/31 分を前払い）",
+    confirmed: true,
+    note:
+      "2026-09-22 契約。初回 ¥3,136 を 4.3ヶ月で割った実質額（3ヶ月延長キャンペーン込み）。" +
+      "★2027-02-01 から ¥2,480/月 に上がる。1月中に継続を判断する",
   },
   {
     name: "Apple Developer Program",
