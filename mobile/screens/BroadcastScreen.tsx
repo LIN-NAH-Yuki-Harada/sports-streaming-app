@@ -301,6 +301,13 @@ export function BroadcastScreen() {
   const [youtubeLiveOn, setYoutubeLiveOn] = useState(true); // トグル状態（既定ON）
   const [liveYoutubeId, setLiveYoutubeId] = useState<string | null>(null); // 起動成功時のYouTube video ID
   const [youtubeReadyAt, setYoutubeReadyAt] = useState(0); // ウォームアップ完了予定時刻(ms)
+  // ★2026-09-27: チームプランなのに YouTube 未連携＝この配信は YouTube に保存されない。
+  //   連携は Web でしかできず、アプリで課金した人はその手順に気づかないまま配信を重ねる
+  //   （金蘭会様: 9/19〜9/26 の8本・最長61分が全て保存対象外になっていた）。
+  //   VPS ワーカーは未連携の録画を即削除するため、後から救えない。開始前に必ず知らせる。
+  const [youtubeUnlinked, setYoutubeUnlinked] = useState(false);
+  // 未連携の確認は画面を開いている間に1回だけ（大会日に毎試合止めない）。
+  const youtubeUnlinkedAckRef = useRef(false);
 
   const setBased = isSetBased(sportKey);
   // セット制（バレー/バド/卓球）の有効ルール。表示と終了時のセット勝利判定に使う。
@@ -424,6 +431,7 @@ export function BroadcastScreen() {
           !!profile?.youtube_channel_id &&
           profile?.youtube_live_enabled === true,
       );
+      setYoutubeUnlinked(p === "team" && !profile?.youtube_channel_id);
       if (p === "free") {
         const used = await fetchTrialUsedSeconds(uid);
         if (!cancelled) setTrialRemainingAtStart(Math.max(0, FREE_TRIAL_TOTAL_SECONDS - used));
@@ -2020,9 +2028,39 @@ export function BroadcastScreen() {
               </View>
             ) : null}
 
+            {youtubeUnlinked ? (
+              <View style={styles.setupErrorCard}>
+                <Text style={styles.ytUnlinkedTitle}>
+                  YouTubeが未連携のため、この配信は保存されません
+                </Text>
+                <Text style={styles.setupErrorText}>
+                  試合をYouTubeに残すには、スマホやパソコンのブラウザで live-spotch.com
+                  にログインし、マイページの「YouTube連携」から連携してください（最初の1回だけです）。
+                  連携した後の配信から、自動で保存されます。
+                </Text>
+              </View>
+            ) : null}
+
             <Pressable
               style={styles.button}
               onPress={() => {
+                if (youtubeUnlinked && !youtubeUnlinkedAckRef.current) {
+                  Alert.alert(
+                    "この配信はYouTubeに保存されません",
+                    "YouTubeが未連携です。ライブ配信はできますが、試合の録画は残りません。\n\n保存するには、ブラウザで live-spotch.com のマイページから「YouTube連携」を行ってください。",
+                    [
+                      { text: "キャンセル", style: "cancel" },
+                      {
+                        text: "保存なしで配信する",
+                        onPress: () => {
+                          youtubeUnlinkedAckRef.current = true;
+                          handleStart();
+                        },
+                      },
+                    ],
+                  );
+                  return;
+                }
                 if (plan === "free" && trialRemainingAtStart > 0 && trialRemainingAtStart < 60) {
                   Alert.alert(
                     "無料体験の残りがわずかです",
@@ -3002,6 +3040,7 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   setupErrorText: { color: "#f4a300", fontSize: 12, lineHeight: 18 },
+  ytUnlinkedTitle: { color: "#f4a300", fontSize: 14, fontWeight: "800", marginBottom: 6 },
   setupErrorBtn: {
     marginTop: 10,
     alignSelf: "flex-start",
