@@ -81,23 +81,44 @@ function buildBuckets(
   });
 }
 
-export default async function AdminGrowthPage() {
+// ★Supabase(PostgREST) は1回の問い合わせで最大1000行しか返さない（サーバー側の max_rows）。
+//   `.limit(100000)` を付けてもこの上限は超えられず、黙って1000行で切れる。
+//   2026-09-27、累計配信が「1,000」から動かなくなって発覚（実数1,377）。
+//   どの1000行が返るかも不定なので、日次グラフも欠けていた。→ 1000行ずつ全ページを取る。
+const PAGE = 1000;
+async function fetchAllRows<T>(
+  table: "profiles" | "broadcasts" | "teams",
+  columns: string,
+): Promise<T[]> {
   const admin = getAdminClient();
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await admin
+      .from(table)
+      .select(columns)
+      .order("id", { ascending: true }) // ページ間で重複・欠落しないよう順序を固定
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`${table} の取得に失敗しました: ${error.message}`);
+    rows.push(...((data ?? []) as unknown as T[]));
+    if (!data || data.length < PAGE) return rows;
+  }
+}
 
-  const [profilesRes, broadcastsRes, teamsRes] = await Promise.all([
-    admin.from("profiles").select("plan, created_at").limit(100000),
-    admin.from("broadcasts").select("started_at").limit(100000),
-    admin.from("teams").select("created_at").limit(100000),
+export default async function AdminGrowthPage() {
+  const [profileRows, broadcastRows, teamRows] = await Promise.all([
+    fetchAllRows<{ plan: string | null; created_at: string | null }>("profiles", "plan, created_at"),
+    fetchAllRows<{ started_at: string | null }>("broadcasts", "started_at"),
+    fetchAllRows<{ created_at: string | null }>("teams", "created_at"),
   ]);
 
-  const members = (profilesRes.data ?? [])
+  const members = profileRows
     .filter((r): r is { plan: string | null; created_at: string } => !!r.created_at)
     .map((r) => ({ plan: planOf(r.plan), d: toJst(r.created_at) }));
-  const broadcasts = (broadcastsRes.data ?? [])
+  const broadcasts = broadcastRows
     .map((r) => r.started_at)
     .filter((s): s is string => !!s)
     .map((s) => toJst(s));
-  const teams = (teamsRes.data ?? [])
+  const teams = teamRows
     .map((r) => r.created_at)
     .filter((s): s is string => !!s)
     .map((s) => toJst(s));
