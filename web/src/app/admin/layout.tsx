@@ -45,8 +45,11 @@ export default async function AdminLayout({
           2026-08-06 に「サーバー」タブの最後のグラフが切れて発覚。他ページも pb-20〜24 で
           同じ対処をしている（discover / broadcast / contact 等）。
           ★ <main> ではなく <div>: MainContainer が既に <main> を出しているため、
-          ここで <main> を使うと入れ子になる（1ページに1つが正しい）。 */}
-      <div className="p-4 md:p-6 pb-24 max-w-5xl mx-auto">{children}</div>
+          ここで <main> を使うと入れ子になる（1ページに1つが正しい）。
+          ★ md:pb-24 も必須（2026-09-27）: `md:p-6` はメディアクエリ付きなので CSS 上で
+          `pb-24` より後に来て、PC 幅では下余白を 24px に上書きしていた。
+          ＝スマホでは見えるのに **PC だけ**ページ末尾がナビの裏に隠れる。 */}
+      <div className="p-4 pb-24 md:p-6 md:pb-24 max-w-5xl mx-auto">{children}</div>
     </div>
   );
 }
