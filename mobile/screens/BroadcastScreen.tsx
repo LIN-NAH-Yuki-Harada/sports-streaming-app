@@ -2041,6 +2041,24 @@ export function BroadcastScreen() {
               </View>
             ) : null}
 
+            {/* ★ 2026-10-03: 配信者プラン（¥300）はライブ専用で、録画は終了後に残らない。
+                アプリにはその表示がどこにも無く、気づかないまま配信を重ねる方がいた
+                （コニシ様: 48本・478分が全て保存対象外）。
+                プランの仕様であって異常ではないので、確認ダイアログでは止めず
+                （毎回止めると、ライブ専用と分かって使っている方の邪魔になる）、
+                開始ボタンの直前に常に見える形で出す。 */}
+            {plan === "broadcaster" ? (
+              <View style={styles.setupErrorCard}>
+                <Text style={styles.ytUnlinkedTitle}>
+                  配信者プランはライブ専用のため、この配信は保存されません
+                </Text>
+                <Text style={styles.setupErrorText}>
+                  配信中はご覧いただけますが、終了すると見返すことができなくなります。
+                  試合の映像を残したい場合は、チームプランをご利用ください。
+                </Text>
+              </View>
+            ) : null}
+
             <Pressable
               style={styles.button}
               onPress={() => {
