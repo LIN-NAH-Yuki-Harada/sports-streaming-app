@@ -282,6 +282,66 @@ function pickNext(rows) {
   return items[0].r;
 }
 
+// ===========================================================================
+// YouTube の上限に当たった配信を、上限が明けるまで選ばない（2026-10-02 追加）
+//
+// 上限に当たった行は pending のまま残すので、何もしないと毎tick選び直して
+// videos.insert を叩き続ける。**失敗した呼び出しも1日100本の全体枠を消費する**ため、
+// 1名のチャンネル上限が全員のアーカイブを止める（10/1〜10/2 に実際に起きた）。
+//
+// 新しい列は足さず、既存の2列で「いつ・何の上限に当たったか」を読む:
+//   youtube_upload_error      … 下の定型文のどちらか
+//   youtube_upload_started_at … 最後に試した時刻（claim のたびに更新される）
+//
+//   全体枠      → 太平洋時間の0時（日本時間16時/冬17時）に枠が戻るまで、誰も処理しない
+//   チャンネル上限 → その配信者の配信だけ QUOTA_CHANNEL_WAIT_MS 待つ。他の配信者は通す
+// ===========================================================================
+const QUOTA_PROJECT_MSG =
+  "YouTube APIの1日のアップロード上限に達しました。翌日16時以降に自動で再開します。";
+const QUOTA_CHANNEL_MSG =
+  "YouTubeチャンネル側の1日の投稿本数の上限に達しました。時間をおいて自動で再開します。";
+// チャンネル上限は24時間の移動窓で明ける。3時間おき＝1チャンネルあたり1日8回まで。
+const QUOTA_CHANNEL_WAIT_MS =
+  Number(process.env.QUOTA_CHANNEL_WAIT_MS) || 3 * 60 * 60 * 1000;
+
+// 直近の「太平洋時間0時」＝YouTube の1日の枠が戻った時刻（夏時間はOSの時刻表に任せる）
+function lastQuotaResetMs(nowMs) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    hourCycle: "h23",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(new Date(nowMs));
+  const n = (t) => Number(parts.find((p) => p.type === t).value);
+  return nowMs - (n("hour") * 3600 + n("minute") * 60 + n("second")) * 1000;
+}
+
+function applyQuotaGate(rows, nowMs) {
+  const triedAt = (r) => Date.parse(r.youtube_upload_started_at) || 0;
+  const resetMs = lastQuotaResetMs(nowMs);
+  const projectHit = rows.find(
+    (r) => r.youtube_upload_error === QUOTA_PROJECT_MSG && triedAt(r) >= resetMs,
+  );
+  if (projectHit) {
+    return { rows: [], why: `project quota exhausted (${projectHit.share_code})` };
+  }
+  const waiting = new Set(
+    rows
+      .filter(
+        (r) =>
+          r.youtube_upload_error === QUOTA_CHANNEL_MSG &&
+          triedAt(r) >= nowMs - QUOTA_CHANNEL_WAIT_MS,
+      )
+      .map((r) => r.broadcaster_id),
+  );
+  if (waiting.size === 0) return { rows, why: "" };
+  return {
+    rows: rows.filter((r) => !waiting.has(r.broadcaster_id)),
+    why: `channel upload limit: ${waiting.size} broadcaster(s) waiting`,
+  };
+}
+
 function dropRecordings(shareCode, reason) {
   if (!DROP_UNARCHIVED_RECORDINGS) return;
   let recs;
@@ -473,13 +533,30 @@ function classify(err) {
       e.response.data.error.errors[0] &&
       e.response.data.error.errors[0].reason) ||
     "";
+  //
+  // ★2026-10-02: 上限は**2種類あり、別物**として扱う。
+  //   quota-channel … その配信者のYouTubeチャンネルが24時間に投稿できる本数の上限。
+  //                   他の配信者には無関係。
+  //   quota-project … LIVE SPOtCH 全体で1日100本の枠。全員が止まる。
+  //   区別しなかった頃は、チャンネル上限に当たった1名を5分ごとに再試行し続け、
+  //   **失敗した videos.insert も100本枠を消費する**ため10時間で全体の枠を使い切った
+  //   （10/1 20:08〜10/2 06:07・約100回）。待ち方は applyQuotaGate を参照。
+  if (
+    reason === "uploadLimitExceeded" ||
+    msg.includes("uploadLimitExceeded") ||
+    msg.includes("exceeded the number of videos")
+  ) {
+    return { type: "quota-channel", msg };
+  }
+  // 全体枠が尽きたときの文言は "Quota exceeded for quota metric 'Video Uploads' and
+  // limit 'Video Uploads per day'" で、reason は quotaExceeded にならない。
+  // 文言で拾わないと下の auth-refresh に落ち、retry を消費して25分で failed になる。
   if (
     reason === "quotaExceeded" ||
-    reason === "uploadLimitExceeded" ||
     msg.includes("quotaExceeded") ||
-    msg.includes("uploadLimitExceeded")
+    /Quota exceeded for quota metric .*per day/i.test(msg)
   ) {
-    return { type: "quota", msg };
+    return { type: "quota-project", msg };
   }
   if (status === 401 || status === 403) return { type: "auth-refresh", msg };
   if (status === 429 || (status >= 500 && status < 600))
@@ -2099,14 +2176,15 @@ async function main() {
   const { data: rows, error } = await admin
     .from("broadcasts")
     .select(
-      "id, share_code, broadcaster_id, home_team, away_team, sport, tournament, venue, started_at, ended_at, youtube_retry_count",
+      "id, share_code, broadcaster_id, home_team, away_team, sport, tournament, venue, started_at, ended_at, youtube_retry_count, youtube_upload_error, youtube_upload_started_at",
     )
     .eq("status", "ended")
     .not("stream_playback_url", "is", null)
     .or("youtube_upload_status.is.null,youtube_upload_status.eq.pending")
     .lt("youtube_retry_count", MAX_RETRY)
     .order("ended_at", { ascending: true })
-    .limit(QUEUE_LOOKAHEAD);
+    // 上限待ちの行が先頭を埋めても後ろの配信者を拾えるよう、広めに取ってから絞る
+    .limit(QUEUE_LOOKAHEAD * 5);
   if (error) {
     console.error("[archive] select failed:", error.message);
     process.exit(1);
@@ -2115,7 +2193,13 @@ async function main() {
     log("no pending");
     return;
   }
-  const b = pickNext(rows);
+  const gate = applyQuotaGate(rows, Date.now());
+  if (gate.why) log("quota gate:", gate.why);
+  if (gate.rows.length === 0) {
+    log("no pending (all waiting on youtube quota)");
+    return;
+  }
+  const b = pickNext(gate.rows.slice(0, QUEUE_LOOKAHEAD));
   const retry = b.youtube_retry_count || 0;
 
   // 2. 適格性（¥500チーム + 自動アーカイブON + YouTube連携済み）
@@ -2546,13 +2630,13 @@ async function main() {
     }
     const c = classify(err);
     log("upload failed", b.share_code, c.type, c.msg);
-    if (c.type === "quota") {
-      // YouTube 日次クォータ超過は「明日になれば必ず直る」ので retry を消費せず
-      // pending 維持（翌16時JSTのクォータ復活後に自動再開。永久failed化を防ぐ）。
+    if (c.type === "quota-project" || c.type === "quota-channel") {
+      // 上限は「待てば必ず明ける」ので retry を消費せず pending 維持（永久failed化を防ぐ）。
+      // ここで書く定型文が applyQuotaGate の目印になる（明けるまで選ばれない）。
       await setStatus(b.id, {
         youtube_upload_status: "pending",
         youtube_upload_error:
-          "YouTube APIの1日のアップロード上限に達しました。翌日16時以降に自動で再開します。",
+          c.type === "quota-channel" ? QUOTA_CHANNEL_MSG : QUOTA_PROJECT_MSG,
       });
       return;
     }
