@@ -130,6 +130,28 @@ const GHOST_MIN_AGE_MS = Number(process.env.GHOST_MIN_AGE_MS) || 10 * 60 * 1000;
 const MEDIAMTX_API_BASE = process.env.MEDIAMTX_API_BASE || "http://127.0.0.1:9997";
 const GHOST_SWEEP_STATE_PATH = "/var/tmp/archive-worker-ghost-sweep.json";
 
+// ===== ゾンビ切断（zombie sweep・2026-10-03）=====
+// ゴーストの逆向き: DB は ended なのに、端末が RTMP を送り続けている接続を切る。
+// アプリで終了してすぐ次の配信を始めると、前の配信の publish が生きたまま2本同時送信になり、
+// 前の配信の録画に「止まった映像＋次の配信の音声」が入ってアーカイブが伸びる
+// （8/15〜9/13 の 299本中40本＝13%。最新版アプリでも発生）。アプリ側の修正はストア審査が
+// 要るうえ古い版には届かないので、サーバー側で切る。
+//
+// ★実配信を切るのが最悪の事故なので、切る条件は「確定の型」だけに絞る:
+//   (1) その接続のパスの配信が DB で ended、かつ ended_at から ZOMBIE_GRACE_MS 以上経過
+//   (2) 同じ配信者が、その ended_at より後に始めた別の配信を live で publish 中
+//   (3) (2) の接続が同じ IP から来ている（＝同じ端末の二重送信）
+//   (1) だけで切らない理由: web の cron/cleanup は心拍が5分途絶えると ended にする。
+//   心拍だけ止まって映像は届いている実配信が、DB では ended に見えることがある。
+//   それを切ると、今は残っているアーカイブを失わせる。
+//   (1) だけ満たす接続は "lingering" としてログに出すだけ（件数を見てから扱いを決める）。
+// モード: "off"(既定) / "dry"(切らずにログだけ) / "on"(切る)。必ず dry で一覧を確認してから on。
+// MediaMTX API 到達不能・DB エラー・スキーマ変質のときは何もしない（フェイルオープン）。
+const ZOMBIE_SWEEP_MODE = ["dry", "on"].includes(process.env.ZOMBIE_SWEEP_MODE)
+  ? process.env.ZOMBIE_SWEEP_MODE
+  : "off";
+const ZOMBIE_GRACE_MS = Number(process.env.ZOMBIE_GRACE_MS) || 2 * 60 * 1000;
+
 // ===== サーバー稼働メトリクス（admin「サーバー」タブ用・2026-07-26）=====
 // tick(5分)毎に自分の健康状態を計測し Supabase の server_metrics へ push する
 // 「押し込み方式」。外部からの問い合わせ口を一切開けない（攻撃面ゼロ）。
@@ -1748,6 +1770,123 @@ async function sweepGhostBroadcasts() {
   }
 }
 
+// "ip:port" / "[v6]:port" から IP 部分だけを取る（最後の ":" より前）。
+function remoteIp(remoteAddr) {
+  const s = String(remoteAddr || "");
+  const i = s.lastIndexOf(":");
+  return i > 0 ? s.slice(0, i) : s;
+}
+
+// ゾンビ判定（純粋関数・I/O なし）。conns は MediaMTX の publish 中の接続、
+// rowsByCode は share_code → broadcasts 行。戻り値は kick（切る）と lingering（ログのみ）。
+// 条件の根拠は冒頭の ZOMBIE_* のコメントを参照。
+function classifyZombies(conns, rowsByCode, nowMs, graceMs) {
+  const kick = [];
+  const lingering = [];
+  const withRow = conns.map((c) => ({
+    c,
+    row: rowsByCode.get(String(c.path).slice("live/".length)),
+  }));
+  for (const { c, row } of withRow) {
+    if (!row || row.status !== "ended") continue; // DB に無い・live は触らない
+    const endedMs = Date.parse(row.ended_at);
+    if (!Number.isFinite(endedMs) || nowMs - endedMs < graceMs) continue;
+    const ip = remoteIp(c.remoteAddr);
+    const successor = withRow.find(
+      (o) =>
+        o.c.id !== c.id &&
+        o.row &&
+        o.row.status === "live" &&
+        o.row.id !== row.id &&
+        o.row.broadcaster_id === row.broadcaster_id &&
+        Date.parse(o.row.started_at) > endedMs &&
+        remoteIp(o.c.remoteAddr) === ip,
+    );
+    const lingerSec = Math.round((nowMs - endedMs) / 1000);
+    if (successor) {
+      kick.push({ id: c.id, code: row.share_code, lingerSec, next: successor.row.share_code });
+    } else {
+      lingering.push({ id: c.id, code: row.share_code, lingerSec });
+    }
+  }
+  return { kick, lingering };
+}
+
+// DB=ended なのに publish が続いている接続を切る（ゾンビ切断）。tick 毎に実行。
+async function sweepZombiePublishers() {
+  let conns;
+  try {
+    const res = await fetch(`${MEDIAMTX_API_BASE}/v3/rtmpconns/list?itemsPerPage=100`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`http ${res.status}`);
+    const body = await res.json();
+    if ((Number(body.pageCount) || 1) > 1) {
+      log("zombie sweep: conns > 1 page (unsupported, skip)");
+      return;
+    }
+    const items = Array.isArray(body.items) ? body.items : [];
+    // スキーマ変質の構造ガード: 必要な4項目が揃わない行が1つでもあれば判定不能として何もしない。
+    const wellFormed = items.every(
+      (c) =>
+        c &&
+        typeof c.id === "string" &&
+        typeof c.state === "string" &&
+        typeof c.path === "string" &&
+        typeof c.remoteAddr === "string",
+    );
+    if (!wellFormed) {
+      log("zombie sweep: api schema changed? (skip)");
+      return;
+    }
+    conns = items.filter((c) => c.state === "publish" && /^live\/[A-Za-z0-9]+$/.test(c.path));
+  } catch (e) {
+    log("zombie sweep: mediamtx api unreachable (skip, no action):", String(e).slice(0, 100));
+    return;
+  }
+  if (conns.length === 0) return;
+
+  const codes = [...new Set(conns.map((c) => c.path.slice("live/".length)))];
+  const { data, error } = await admin
+    .from("broadcasts")
+    .select("id, share_code, broadcaster_id, status, started_at, ended_at")
+    .in("share_code", codes);
+  if (error) {
+    log("zombie sweep: db read failed (skip):", error.message.slice(0, 100));
+    return;
+  }
+  // share_code が重複して返ったら（想定外）その code は判定不能として外す。
+  const rowsByCode = new Map();
+  const dup = new Set();
+  for (const r of data || []) {
+    if (rowsByCode.has(r.share_code)) dup.add(r.share_code);
+    rowsByCode.set(r.share_code, r);
+  }
+  for (const code of dup) rowsByCode.delete(code);
+
+  const { kick, lingering } = classifyZombies(conns, rowsByCode, Date.now(), ZOMBIE_GRACE_MS);
+  for (const z of lingering) {
+    log(`zombie sweep: lingering ${z.code} (ended ${z.lingerSec}s ago, no successor, not kicked)`);
+  }
+  for (const z of kick) {
+    if (ZOMBIE_SWEEP_MODE !== "on") {
+      log(`zombie sweep: [dry] would kick ${z.code} (ended ${z.lingerSec}s ago, next=${z.next})`);
+      continue;
+    }
+    try {
+      // 必ず接続 id で切る（path で切ると他の接続を巻き込む）。
+      const res = await fetch(
+        `${MEDIAMTX_API_BASE}/v3/rtmpconns/kick/${encodeURIComponent(z.id)}`,
+        { method: "POST", signal: AbortSignal.timeout(5000) },
+      );
+      if (!res.ok) throw new Error(`http ${res.status}`);
+      log(`zombie sweep: kicked ${z.code} (ended ${z.lingerSec}s ago, next=${z.next})`);
+    } catch (e) {
+      log(`zombie sweep: kick failed ${z.code}:`, String(e).slice(0, 100));
+    }
+  }
+}
+
 // サーバー稼働メトリクスを1行計測して server_metrics へ push（失敗は全て無視＝本処理へ影響ゼロ）
 async function collectServerMetrics() {
   // CPU: 1分ロードアベレージ/コア数・メモリ: os情報から
@@ -2134,6 +2273,13 @@ async function main() {
       await sweepGhostBroadcasts();
     } catch (e) {
       log("ghost sweep failed (ignored):", String(e).slice(0, 120));
+    }
+  }
+  if (ZOMBIE_SWEEP_MODE !== "off") {
+    try {
+      await sweepZombiePublishers();
+    } catch (e) {
+      log("zombie sweep failed (ignored):", String(e).slice(0, 120));
     }
   }
   if (METRICS_ENABLED) {
