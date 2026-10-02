@@ -22,6 +22,7 @@ const LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const KIND_LABELS: Record<string, string> = {
   live_error: "ライブ配信エラー (live_error)",
   archive_failed: "アーカイブ処理失敗 (youtube_upload_status=failed)",
+  archive_quota_wait: "YouTubeの上限で保存待ち（自動で再開します）",
 };
 
 type BroadcastRow = {
@@ -33,7 +34,7 @@ type BroadcastRow = {
 };
 
 type Alert = {
-  kind: "live_error" | "archive_failed";
+  kind: "live_error" | "archive_failed" | "archive_quota_wait";
   ref_id: string;
   detail: string | null;
   broadcast: BroadcastRow;
@@ -87,6 +88,24 @@ export async function GET(request: Request) {
     return Response.json({ error: "DB select failed" }, { status: 500 });
   }
 
+  // 3. YouTube の上限で保存待ちに入った配信（VPS ワーカーが定型文を書いて pending のまま残す）。
+  //    failed にならないので 2. では拾えず、2026-10-02 はお客さまの連絡で初めて気づいた。
+  //    時間が経てば自動で再開するが、「いま保存が止まっている」ことは知っておきたい。
+  //    定型文は infra/archive-worker/worker.js の QUOTA_PROJECT_MSG / QUOTA_CHANNEL_MSG。
+  const { data: quotaWaits, error: quotaErr } = await admin
+    .from("broadcasts")
+    .select(
+      "id, share_code, home_team, away_team, started_at, youtube_upload_error",
+    )
+    .eq("youtube_upload_status", "pending")
+    .like("youtube_upload_error", "YouTube%上限に達しました%")
+    .gte("started_at", since)
+    .limit(50);
+  if (quotaErr) {
+    console.error("[cron/alerts] quota wait select failed:", quotaErr);
+    return Response.json({ error: "DB select failed" }, { status: 500 });
+  }
+
   const candidates: Alert[] = [
     ...(liveErrors ?? []).map(
       (b): Alert => ({
@@ -104,12 +123,20 @@ export async function GET(request: Request) {
         broadcast: b,
       }),
     ),
+    ...(quotaWaits ?? []).map(
+      (b): Alert => ({
+        kind: "archive_quota_wait",
+        ref_id: b.id,
+        detail: b.youtube_upload_error,
+        broadcast: b,
+      }),
+    ),
   ];
   if (candidates.length === 0) {
     return Response.json({ checked: 0, notified: 0 });
   }
 
-  // 3. 未通知のものだけ抽出（挿入できた行 = 新規。既送信は UNIQUE 衝突でスキップされる）
+  // 4. 未通知のものだけ抽出（挿入できた行 = 新規。既送信は UNIQUE 衝突でスキップされる）
   const { data: inserted, error: logErr } = await admin
     .from("alert_log")
     .upsert(
@@ -130,7 +157,7 @@ export async function GET(request: Request) {
     return Response.json({ checked: candidates.length, notified: 0 });
   }
 
-  // 4. オーナー宛にまとめて1通送信
+  // 5. オーナー宛にまとめて1通送信
   const resendKey = process.env.RESEND_API_KEY;
   const to =
     process.env.ALERT_NOTIFICATION_EMAIL ??
@@ -148,13 +175,14 @@ export async function GET(request: Request) {
   }
 
   const liveCount = fresh.filter((f) => f.kind === "live_error").length;
-  const archiveCount = fresh.length - liveCount;
+  const quotaCount = fresh.filter((f) => f.kind === "archive_quota_wait").length;
+  const archiveCount = fresh.length - liveCount - quotaCount;
   const resend = new Resend(resendKey);
   try {
     const result = await resend.emails.send({
       from: FROM_ADDRESS,
       to: [to],
-      subject: `[LIVE SPOtCH] 障害アラート ${fresh.length}件（ライブ${liveCount} / アーカイブ${archiveCount}）`,
+      subject: `[LIVE SPOtCH] 障害アラート ${fresh.length}件（ライブ${liveCount} / アーカイブ${archiveCount} / 上限待ち${quotaCount}）`,
       html: buildAlertHtml(fresh),
     });
     if (result.error) {
