@@ -19,9 +19,18 @@ async function call(env, model, body) {
   return json;
 }
 
-const inline = (file) => ({
-  inlineData: { mimeType: "image/png", data: fs.readFileSync(file).toString("base64") },
-});
+// 画像の形式を先頭バイトで判定する（Gemini は拡張子が .png でも JPEG を返すことがある）
+export function sniffMime(buf) {
+  if (buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
+  if (buf[0] === 0x89 && buf[1] === 0x50) return "image/png";
+  if (buf.slice(8, 12).toString() === "WEBP") return "image/webp";
+  return "image/png";
+}
+
+const inline = (file) => {
+  const buf = fs.readFileSync(file);
+  return { inlineData: { mimeType: sniffMime(buf), data: buf.toString("base64") } };
+};
 
 /**
  * 画像を1枚作る。refs = 参考画像（ロゴ・選ばれたデザイン案）のファイルパス。
