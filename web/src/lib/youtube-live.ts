@@ -105,7 +105,8 @@ export async function createLiveBroadcast(
     metadata.tournament ? `大会: ${metadata.tournament}` : "",
     metadata.venue ? `会場: ${metadata.venue}` : "",
     "",
-    "LIVE SPOtCH (https://live-spotch.com) で配信中の試合のライブストリームです。",
+    "LIVE SPOtCH (https://live-spotch.com/?utm_source=youtube&utm_medium=live&utm_campaign=description) で配信中の試合のライブストリームです。",
+    "あなたのチームの試合も、スマホ1台でスコア付き配信ができます。",
   ].filter((s) => s.length > 0);
   const description = descriptionParts.join("\n").slice(0, 5000);
 

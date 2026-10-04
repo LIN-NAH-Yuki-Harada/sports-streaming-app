@@ -9,6 +9,7 @@ import { NameSetupModal } from "@/components/name-setup-modal";
 import { MainContainer } from "@/components/main-container";
 import { ToasterProvider } from "@/components/toaster";
 import { MetaPixel } from "@/components/meta-pixel";
+import { AttributionCapture } from "@/components/attribution-capture";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -151,6 +152,7 @@ export default function RootLayout({
         <Analytics />
         <SpeedInsights />
         <MetaPixel />
+        <AttributionCapture />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(ORGANIZATION_JSONLD) }}

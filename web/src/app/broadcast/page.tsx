@@ -1,5 +1,6 @@
 "use client";
 
+import { withUtm } from "@/lib/attribution";
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -1988,7 +1989,7 @@ function BroadcastPageInner() {
                     const youtubeBlock = youtubeWatchUrl
                       ? `\n\n📺 YouTube版\n${youtubeWatchUrl}`
                       : "";
-                    const text = `【試合配信中】\n${home} vs ${away}\n${tournamentLine}\n📱 より高画質・リアルタイム視聴（推奨）\n${shareUrl}${youtubeBlock}`;
+                    const text = `【試合配信中】\n${home} vs ${away}\n${tournamentLine}\n📱 より高画質・リアルタイム視聴（推奨）\n${withUtm(shareUrl, "broadcaster", "share", "live")}${youtubeBlock}`;
 
                     // 共有開始時点で canvas を「URL 共有中」オーバーレイに切替。
                     // LINE アプリ起動 → Safari バックグラウンド → JS 停止後も
