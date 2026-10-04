@@ -8,6 +8,13 @@ create table public.profiles (
   display_name text,
   avatar_url text,
   plan text default 'free' check (plan in ('free', 'broadcaster', 'team')),
+  -- 登録経路（/api/attribution が登録直後に1回だけ書く。クライアントには SELECT させない）
+  -- 詳細: supabase-migration-profiles-signup-source.sql
+  signup_source text,
+  signup_medium text,
+  signup_campaign text,
+  signup_landing text,
+  signup_referrer text,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

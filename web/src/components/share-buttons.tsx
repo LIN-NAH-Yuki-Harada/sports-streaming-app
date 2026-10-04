@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useToast } from "@/components/toaster";
 import { QRCodeModal } from "@/components/qr-code-modal";
+import { withUtm } from "@/lib/attribution";
 
 type ShareButtonsProps = {
   url: string;
@@ -21,17 +22,20 @@ export function ShareButtons({ url, title, description, youtubeUrl }: ShareButto
 
   const shareText = description ? `${title}\n${description}` : title;
 
+  // 共有先ごとに utm を付け、そこから来て登録した人を数えられるようにする（lib/attribution.ts）。
+  // コピー・QR は貼られる先が分からないので素の URL のまま。
+  const lineLink = withUtm(url, "line", "share", "watch");
   const lineMessage = youtubeUrl
-    ? `${shareText}\n\n📱 より高画質・リアルタイム視聴（推奨）\n${url}\n\n📺 YouTube版\n${youtubeUrl}`
-    : `${shareText}\n視聴はこちら → ${url}`;
+    ? `${shareText}\n\n📱 より高画質・リアルタイム視聴（推奨）\n${lineLink}\n\n📺 YouTube版\n${youtubeUrl}`
+    : `${shareText}\n視聴はこちら → ${lineLink}`;
   const lineUrl = `https://line.me/R/share?text=${encodeURIComponent(lineMessage)}`;
   const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
     `${shareText}`
-  )}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(
+  )}&url=${encodeURIComponent(withUtm(url, "x", "share", "watch"))}&hashtags=${encodeURIComponent(
     "LIVESPOtCH"
   )}`;
   const facebookUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(
-    url
+    withUtm(url, "facebook", "share", "watch")
   )}`;
 
   async function copyLink() {

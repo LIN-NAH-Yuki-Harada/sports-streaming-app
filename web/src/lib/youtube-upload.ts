@@ -157,7 +157,8 @@ export async function uploadToYouTube(
     metadata.tournament ? `大会: ${metadata.tournament}` : "",
     metadata.venue ? `会場: ${metadata.venue}` : "",
     "",
-    "LIVE SPOtCH (https://live-spotch.com) で配信された試合のアーカイブです。",
+    "LIVE SPOtCH (https://live-spotch.com/?utm_source=youtube&utm_medium=archive&utm_campaign=description) で配信された試合のアーカイブです。",
+    "あなたのチームの試合も、スマホ1台でスコア付き配信ができます。",
   ].filter((s) => s.length > 0);
   const description = descriptionParts.join("\n").slice(0, 5000);
 

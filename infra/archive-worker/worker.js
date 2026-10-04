@@ -507,7 +507,8 @@ async function uploadToYouTube(filePath, b, oauth) {
     b.tournament ? `大会: ${b.tournament}` : "",
     b.venue ? `会場: ${b.venue}` : "",
     "",
-    "LIVE SPOtCH (https://live-spotch.com) で配信された試合のアーカイブです。",
+    "LIVE SPOtCH (https://live-spotch.com/?utm_source=youtube&utm_medium=archive&utm_campaign=description) で配信された試合のアーカイブです。",
+    "あなたのチームの試合も、スマホ1台でスコア付き配信ができます。",
   ]
     .filter((s) => s && s.length > 0)
     .join("\n")

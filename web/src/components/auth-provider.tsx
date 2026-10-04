@@ -5,6 +5,27 @@ import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/database";
 import { trackCompleteRegistrationOnce } from "@/lib/meta-pixel";
+import { getFirstTouch } from "@/lib/attribution";
+
+// 新規登録の直後に1回だけ、初回訪問の情報（登録経路）をサーバーへ送る。
+// 失敗しても登録・ログインには影響させない（サーバー側も「空のときだけ書く」）。
+const ATTRIBUTION_SENT_KEY = "ls_attribution_sent";
+function sendSignupAttributionOnce(accessToken: string) {
+  try {
+    if (localStorage.getItem(ATTRIBUTION_SENT_KEY)) return;
+    localStorage.setItem(ATTRIBUTION_SENT_KEY, "1");
+  } catch {
+    // localStorage が使えなくても送る（サーバー側で二重書き込みは防いでいる）
+  }
+  // 記録が無い（別ブラウザで登録した等）ときは空で送る＝サーバー側で "direct" 扱い。
+  // 今いるページを着地ページとして送ると、ログイン後の画面が経路に見えて誤集計になる。
+  const touch = getFirstTouch() ?? {};
+  fetch("/api/attribution", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(touch),
+  }).catch(() => {});
+}
 
 type AuthContextType = {
   user: User | null;
@@ -61,6 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           : 0;
         if (createdAtMs && Date.now() - createdAtMs < 30 * 60 * 1000) {
           trackCompleteRegistrationOnce();
+          if (session?.access_token) sendSignupAttributionOnce(session.access_token);
         }
         getProfile(currentUser.id)
           .then((p) => setProfile(p))
