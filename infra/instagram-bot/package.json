@@ -1,0 +1,12 @@
+{
+  "name": "spotch-instagram-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LIVE SPOtCH Instagram auto-post: DB集計 → 顔なし画像 → 承認 → Graph API 公開（サブMac M2 で launchd 実行）",
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@supabase/supabase-js": "^2.45.0",
+    "satori": "^0.12.0"
+  }
+}
