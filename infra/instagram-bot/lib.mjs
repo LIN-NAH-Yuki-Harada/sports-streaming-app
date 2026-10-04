@@ -8,16 +8,21 @@ import { createClient } from "@supabase/supabase-js";
 
 // 設定ファイル: 既定は ~/.instagram-bot.env（権限600）。開発時は --env <path> で web/.env.local を流用できる。
 // ★秘密情報はリポジトリにもログにも書かない（値は表示しない）。
+// ~/.instagram-bot.env を土台に、--env の指定ファイルで上書きする（どちらか片方だけでもよい）。
 export function loadEnv(argv = process.argv) {
   const i = argv.indexOf("--env");
-  const file = i >= 0 ? argv[i + 1] : path.join(os.homedir(), ".instagram-bot.env");
-  if (!fs.existsSync(file)) throw new Error(`設定ファイルがありません: ${file}`);
+  const files = [path.join(os.homedir(), ".instagram-bot.env"), i >= 0 ? argv[i + 1] : null].filter(
+    (f) => f && fs.existsSync(f)
+  );
+  if (files.length === 0) throw new Error("設定ファイルがありません（~/.instagram-bot.env）");
   const env = {};
-  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-    if (!line.includes("=") || line.trimStart().startsWith("#")) continue;
-    const k = line.slice(0, line.indexOf("=")).trim();
-    const v = line.slice(line.indexOf("=") + 1).trim().replace(/^"|"$/g, "");
-    env[k] = v;
+  for (const file of files) {
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      if (!line.includes("=") || line.trimStart().startsWith("#")) continue;
+      const k = line.slice(0, line.indexOf("=")).trim();
+      const v = line.slice(line.indexOf("=") + 1).trim().replace(/^"|"$/g, "");
+      env[k] = v;
+    }
   }
   return env;
 }
